@@ -157,9 +157,16 @@ private:
     // Ctrl+Shift+F) so the user has visible feedback that the keystroke
     // landed. Same shape as the keep_unlocked badge: time-bounded visibility,
     // pure predicate, drawing lives in app.cpp.
-    std::string                        hwaccel_toast_text_;
-    double                             hwaccel_toast_elapsed_ = HWACCEL_TOAST_SECS;
-    static constexpr double            HWACCEL_TOAST_SECS = 2.5;
+    // Phase 104: bundled into HwAccelToastState (was 3 fields, now 1) so App
+    // stays at ≤ 20 instance fields (cpp:S1820). The visibility predicate in
+    // app/hwaccel_toast.h takes (text, elapsed, window) — same shape as
+    // keep_unlocked_badge.h's should_show_badge.
+    struct HwAccelToastState {
+        std::string text;
+        double      elapsed = WINDOW_SECS;
+        static constexpr double WINDOW_SECS = 2.5;
+    };
+    HwAccelToastState                  hwaccel_toast_;
 
     // The two global overlays App owns and intercepts a function key for.
     struct Overlays {

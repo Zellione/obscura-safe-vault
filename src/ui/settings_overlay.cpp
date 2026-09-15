@@ -351,51 +351,81 @@ void draw_rail(gfx::Renderer& r, gfx::FontAtlas& font, float rail_x, float rail_
     }
 }
 
-// Label + value strings for a pane row of the current section. Split out of
-// draw_pane_row (cognitive-complexity budget); TagColours' swatch dot stays
-// with the drawing in draw_pane_row.
+// Per-section row label+value lookup. Phase 104: extracted from
+// pane_row_text() so the top-level function stays under SonarQube's
+// 25-cognitive-complexity cap; each helper stays small and pure. Every
+// section has its own helper since the row layouts differ enough that
+// merging them costs more than it saves.
+
+static std::pair<std::string, std::string> appearance_row(int row_index, const SettingsState& state)
+{
+    if (row_index == 0) return {"Theme", std::string(gfx::theme_name(state.theme))};
+    if (row_index == 1) return {"Default Gallery View", std::string(gallery_view_label(state.gallery_view))};
+    return {};
+}
+
+static std::pair<std::string, std::string> playback_row(int row_index, const SettingsState& state)
+{
+    if (row_index == 0) return {"Auto-play videos", state.autoplay ? "On" : "Off"};
+    // Phase 102: hardware-decode gate + force-software override.
+    if (row_index == 1) return {"Hardware video decode", state.enable_hardware ? "On" : "Off"};
+    if (row_index == 2) return {"Force software decode", state.force_software ? "On" : "Off"};
+    return {};
+}
+
+static std::pair<std::string, std::string> browsing_row(int row_index, const SettingsState& state)
+{
+    if (row_index == 0)
+        return {"Default Sort",
+                sort_key_label(state.draft.default_sort, state.draft.default_sort)};
+    if (row_index == 1)
+        return {"Show Tags on Tiles", state.draft.tiles_show_tags ? "On" : "Off"};
+    return {};
+}
+
+static std::pair<std::string, std::string> tagcolours_row(int row_index, const SettingsState& state)
+{
+    if (row_index < static_cast<int>(state.draft.categories.size())) {
+        const auto& cat = state.draft.categories[row_index];
+        return {std::string(cat.name.view()),
+                std::string(gfx::tag_swatch_name(cat.swatch))};
+    }
+    return {};
+}
+
+static std::pair<std::string, std::string> vaultops_row(int row_index, const SettingsState&)
+{
+    // Phase 65: vault operations (only available when unlocked).
+    if (row_index == 0) return {"Re-check vault for upgrades", "[Enter]"};
+    return {};
+}
+
+static std::pair<std::string, std::string> security_row(int row_index, const SettingsState& state)
+{
+    // Phase 66: machine-scoped keep-open default.
+    if (row_index == 0)
+        return {"Keep 2nd vault after transfer",
+                std::string(second_vault_mode_label(state.second_vault_default))};
+    // Phase 92: machine-scoped clipboard gate.
+    if (row_index == 1)
+        return {"Clipboard", std::string(clipboard_mode_label(state.clipboard))};
+    return {};
+}
+
+// Label + value strings for a pane row of the current section. Per-section
+// lookup is delegated to per-section helpers (Phase 104) so this function
+// stays a flat switch-with-no-conditions — the only cognitive work here
+// is dispatching to the right helper.
 std::pair<std::string, std::string> pane_row_text(const SettingsState& state, int row_index)
 {
     using enum SettingsSection;
     switch (state.section) {
-        case Appearance:
-            if (row_index == 0) return {"Theme", std::string(gfx::theme_name(state.theme))};
-            if (row_index == 1)
-                return {"Default Gallery View", std::string(gallery_view_label(state.gallery_view))};
-            break;
-        case Playback:
-            if (row_index == 0) return {"Auto-play videos", state.autoplay ? "On" : "Off"};
-            // Phase 102: hardware-decode gate + force-software override.
-            if (row_index == 1) return {"Hardware video decode", state.enable_hardware ? "On" : "Off"};
-            if (row_index == 2) return {"Force software decode", state.force_software ? "On" : "Off"};
-            break;
-        case Browsing:
-            if (row_index == 0)
-                return {"Default Sort",
-                        sort_key_label(state.draft.default_sort, state.draft.default_sort)};
-            if (row_index == 1)
-                return {"Show Tags on Tiles", state.draft.tiles_show_tags ? "On" : "Off"};
-            break;
-        case TagColours:
-            if (row_index < static_cast<int>(state.draft.categories.size())) {
-                const auto& cat = state.draft.categories[row_index];
-                return {std::string(cat.name.view()),
-                        std::string(gfx::tag_swatch_name(cat.swatch))};
-            }
-            break;
-        case VaultOps:
-            // Phase 65: vault operations (only available when unlocked)
-            if (row_index == 0) return {"Re-check vault for upgrades", "[Enter]"};
-            break;
-        case Security:
-            // Phase 66: machine-scoped keep-open default
-            if (row_index == 0)
-                return {"Keep 2nd vault after transfer",
-                        std::string(second_vault_mode_label(state.second_vault_default))};
-            // Phase 92: machine-scoped clipboard gate
-            if (row_index == 1)
-                return {"Clipboard", std::string(clipboard_mode_label(state.clipboard))};
-            break;
+        case Appearance:  return appearance_row(row_index, state);
+        case Playback:    return playback_row(row_index, state);
+        case Browsing:    return browsing_row(row_index, state);
+        case TagColours:  return tagcolours_row(row_index, state);
+        case VaultOps:    return vaultops_row(row_index, state);
+        case Security:    return security_row(row_index, state);
     }
     return {};
 }

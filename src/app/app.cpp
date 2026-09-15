@@ -517,7 +517,7 @@ void draw_hwaccel_toast(gfx::Renderer& r, gfx::FontAtlas& font, int win_w,
     constexpr float PAD    = 12.0f;
     constexpr float MARGIN = 24.0f;
 
-    const float tw = static_cast<float>(font.measure(text));
+    const auto tw = static_cast<float>(font.measure(text));
     const float th = font.pixel_height();
     const float bw = tw + (PAD * 2);
     const float bh = th + (PAD * 2);
@@ -525,7 +525,7 @@ void draw_hwaccel_toast(gfx::Renderer& r, gfx::FontAtlas& font, int win_w,
                         MARGIN, bw, bh};
     r.draw_round_rect(box, RADIUS_SMALL, SURFACE);
     r.draw_round_rect(box, RADIUS_SMALL, WARN, /*filled*/ false);
-    r.draw_text(font, box.x + PAD, box.y + PAD, text.c_str(), WARN);
+    r.draw_text(font, box.x + PAD, box.y + PAD, text, WARN);
 }
 
 // Phase 66: corner badge shown while a SECOND vault's key is in memory. Never
@@ -713,122 +713,145 @@ struct App::OverlayDispatch {
         return true;
     }
 
-    static bool settings(App& app, const SDL_Event& e)
+    // F2 toggle handler — extracted from settings() to keep the outer
+    // function under SonarQube's 25-cognitive-complexity cap (Phase 104).
+    static bool try_f2_toggle(App& app, const SDL_Event& e)
     {
-        // F2 toggles settings
-        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F2) {
-            if (app.overlays_.settings.open) {
-                ui::close_settings(app.overlays_.settings, app.window_);
-            } else {
-                app.open_settings_overlay();
-            }
+        if (e.type != SDL_EVENT_KEY_DOWN || e.key.key != SDLK_F2) return false;
+        if (app.overlays_.settings.open) {
+            ui::close_settings(app.overlays_.settings, app.window_);
+        } else {
+            app.open_settings_overlay();
+        }
+        return true;
+    }
+
+    // Phase 102: Ctrl+Shift+H toggles hardware decode; Ctrl+Shift+F toggles
+    // force-software. Both are global (work whether or not a clip is
+    // currently playing) but only when neither the help popup nor the
+    // settings overlay nor any modal is open — see
+    // dispatch_overlay_event() ordering. The toggles take effect on the
+    // NEXT clip opened (VideoDecodeWorker re-reads both for_attach_hwaccel()
+    // on construction; the current playback is unaffected). Live-saved via
+    // HwAccelPref so a fresh launch picks up the user's choice, and a
+    // brief on-screen toast confirms the keystroke landed. Phase 104:
+    // extracted from settings() for the same cognitive-complexity reason.
+    static bool try_hwaccel_hotkey(App& app, const SDL_Event& e)
+    {
+        if (e.type != SDL_EVENT_KEY_DOWN) return false;
+        if ((e.key.mod & SDL_KMOD_CTRL) == 0 || (e.key.mod & SDL_KMOD_SHIFT) == 0) return false;
+        const SDL_Keycode k = e.key.key;
+        if (k == SDLK_H) {
+            media::set_enable_hardware_decode(!media::enable_hardware_decode());
+            app.hwaccel_toast_.text = std::format("Hardware decode: {}",
+                media::enable_hardware_decode() ? "ON" : "OFF");
+            app.hwaccel_toast_.elapsed = 0.0;
+            (void)platform::HwAccelPref::default_location().save({
+                media::enable_hardware_decode(),
+                media::force_software_decode(),
+            });
             return true;
         }
-        // Phase 102: Ctrl+Shift+H toggles hardware decode; Ctrl+Shift+F
-        // toggles force-software. Both are global (work whether or not a
-        // clip is currently playing) but only when neither the help popup
-        // nor the settings overlay nor any modal is open — see
-        // dispatch_overlay_event() ordering below. The toggles take effect
-        // on the NEXT clip opened (VideoDecodeWorker re-reads both
-        // for_attach_hwaccel() on construction; the current playback is
-        // unaffected). Live-saved via HwAccelPref so a fresh launch picks
-        // up the user's choice, and a brief on-screen toast confirms the
-        // keystroke landed.
-        if (e.type == SDL_EVENT_KEY_DOWN && (e.key.mod & SDL_KMOD_CTRL) != 0 &&
-            (e.key.mod & SDL_KMOD_SHIFT) != 0) {
-            const SDL_Keycode k = e.key.key;
-            if (k == SDLK_H) {
-                media::set_enable_hardware_decode(!media::enable_hardware_decode());
-                app.hwaccel_toast_text_ = std::format("Hardware decode: {}",
-                    media::enable_hardware_decode() ? "ON" : "OFF");
-                app.hwaccel_toast_elapsed_ = 0.0;
-                (void)platform::HwAccelPref::default_location().save({
-                    media::enable_hardware_decode(),
-                    media::force_software_decode(),
-                });
-                return true;
-            }
-            if (k == SDLK_F) {
-                media::set_force_software_decode(!media::force_software_decode());
-                app.hwaccel_toast_text_ = std::format("Force software decode: {}",
-                    media::force_software_decode() ? "ON" : "OFF");
-                app.hwaccel_toast_elapsed_ = 0.0;
-                (void)platform::HwAccelPref::default_location().save({
-                    media::enable_hardware_decode(),
-                    media::force_software_decode(),
-                });
-                return true;
-            }
+        if (k == SDLK_F) {
+            media::set_force_software_decode(!media::force_software_decode());
+            app.hwaccel_toast_.text = std::format("Force software decode: {}",
+                media::force_software_decode() ? "ON" : "OFF");
+            app.hwaccel_toast_.elapsed = 0.0;
+            (void)platform::HwAccelPref::default_location().save({
+                media::enable_hardware_decode(),
+                media::force_software_decode(),
+            });
+            return true;
         }
-        // Phase 65: manual migration trigger from the VaultOps section, handled
-        // before the settings panel swallows input. On a non-empty scan this
-        // deliberately does NOT report the event as handled: settings closes and the
-        // offer modal must see this same event, so it renders and takes input on
-        // this frame instead of the next one.
-        if (app.overlays_.settings.open && app.overlays_.settings.trigger_migration &&
-            app.vault_state_.active) {
-            app.overlays_.settings.trigger_migration = false;
+        return false;
+    }
 
-            // Scan for actual pending work regardless of watermark state
-            // Phase 75: include thumbnail regen in the scan
-            const vault::VaultSettings settings = vault::vault_settings(*app.vault_state_.active);
-            const bool thumbs_stale =
-                settings.migrated_thumb_side < static_cast<uint16_t>(image::THUMB_MAX_SIDE);
-            const bool context_stale = !vault::uses_context_chunks(*app.vault_state_.active);   // Phase 99
-            const vault::MigrationScan scan =
-                vault::scan_migration(*app.vault_state_.active, thumbs_stale, context_stale);
-            if (scan.empty() && !context_stale) {
-                // Nothing to do: inform the user and keep settings open
-                app.overlays_.settings.error = "Nothing to upgrade";
-                return true;
-            }
-            ui::close_settings(app.overlays_.settings, app.window_);
-            app.import_ui_.queue.set_exclusive(true);   // guard against an import race
-            app.migration_ui_.pending_migration = scan;
-            app.migration_ui_.offer_open        = true;
+    // Phase 65: manual migration trigger from the VaultOps section. On a
+    // non-empty scan this deliberately does NOT report the event as
+    // handled: settings closes and the offer modal must see this same
+    // event, so it renders and takes input on this frame instead of the
+    // next one. Phase 104: extracted from settings().
+    static bool try_trigger_migration(App& app)
+    {
+        if (!app.overlays_.settings.open || !app.overlays_.settings.trigger_migration ||
+            !app.vault_state_.active) {
+            return false;
         }
+        app.overlays_.settings.trigger_migration = false;
+
+        // Scan for actual pending work regardless of watermark state
+        // Phase 75: include thumbnail regen in the scan
+        const vault::VaultSettings settings = vault::vault_settings(*app.vault_state_.active);
+        const bool thumbs_stale =
+            settings.migrated_thumb_side < static_cast<uint16_t>(image::THUMB_MAX_SIDE);
+        const bool context_stale = !vault::uses_context_chunks(*app.vault_state_.active);   // Phase 99
+        const vault::MigrationScan scan =
+            vault::scan_migration(*app.vault_state_.active, thumbs_stale, context_stale);
+        if (scan.empty() && !context_stale) {
+            // Nothing to do: inform the user and keep settings open
+            app.overlays_.settings.error = "Nothing to upgrade";
+            return true;
+        }
+        ui::close_settings(app.overlays_.settings, app.window_);
+        app.import_ui_.queue.set_exclusive(true);   // guard against an import race
+        app.migration_ui_.pending_migration = scan;
+        app.migration_ui_.offer_open        = true;
+        return false;   // fall through to the panel handler
+    }
+
+    // Phase 104: extracted from settings() — the post-event sync block
+    // that fires whenever the settings panel accepted an event. Keeps the
+    // outer settings() under the 25-line cognitive-complexity cap and
+    // bundles every "settings.X -> runtime -> pref" sync into one place.
+    static void sync_runtime_after_settings_event(App& app, const SDL_Event& e, bool commit)
+    {
+        // Phase 66: sync the default mode whenever the event was handled
+        app.second_.session.set_default_mode(app.overlays_.settings.second_vault_default);
+        // Phase 93: sync gallery view to the shared setting and the active
+        // screen (container screens forward it to their live children).
+        ui::set_gallery_view_setting(app.overlays_.settings.gallery_view);
+        app.screen_->on_gallery_view_changed(app.overlays_.settings.gallery_view);
+        // Phase 85: sync autoplay whenever the event was handled
+        media::set_saved_autoplay_enabled(app.overlays_.settings.autoplay);
+        (void)platform::AutoplayPref::default_location().save(app.overlays_.settings.autoplay);
+        // Phase 102: sync the two hwaccel runtime overrides whenever the event
+        // was handled (the pref is already saved live in apply_value_delta;
+        // this keeps the runtime in sync even if that write failed).
+        const bool hw_before = media::enable_hardware_decode();
+        const bool sw_before = media::force_software_decode();
+        media::set_enable_hardware_decode(app.overlays_.settings.enable_hardware);
+        media::set_force_software_decode(app.overlays_.settings.force_software);
+        if (e.type == SDL_EVENT_KEY_DOWN && media::enable_hardware_decode() != hw_before) {
+            app.hwaccel_toast_.text = std::format("Hardware decode: {}",
+                media::enable_hardware_decode() ? "ON" : "OFF");
+            app.hwaccel_toast_.elapsed = 0.0;
+        }
+        if (e.type == SDL_EVENT_KEY_DOWN && media::force_software_decode() != sw_before) {
+            app.hwaccel_toast_.text = std::format("Force software decode: {}",
+                media::force_software_decode() ? "ON" : "OFF");
+            app.hwaccel_toast_.elapsed = 0.0;
+        }
+        // Phase 92: sync the clipboard gate (the pref is already saved
+        // live in apply_value_delta; this keeps the runtime in sync even if
+        // that write failed).
+        ui::set_clipboard_gate(app.overlays_.settings.clipboard);
+        // Commit vault settings if the commit flag was set
+        if (commit && app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
+            vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) !=
+                vault::VaultResult::Ok) {
+            app.overlays_.settings.error = "Could not save settings";
+        }
+    }
+
+    static bool settings(App& app, const SDL_Event& e)
+    {
+        if (try_f2_toggle(app, e))          return true;
+        if (try_hwaccel_hotkey(app, e))     return true;
+        if (try_trigger_migration(app))     return true;
         // Settings panel (second priority: swallows all events)
-        if (!app.overlays_.settings.open) return false;
+        if (!app.overlays_.settings.open)   return false;
         if (bool commit = false; ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit)) {
-            // Phase 66: sync the default mode whenever the event was handled
-            app.second_.session.set_default_mode(app.overlays_.settings.second_vault_default);
-            // Phase 93: sync gallery view to the shared setting and the active
-            // screen (container screens forward it to their live children).
-            ui::set_gallery_view_setting(app.overlays_.settings.gallery_view);
-            app.screen_->on_gallery_view_changed(app.overlays_.settings.gallery_view);
-            // Phase 85: sync autoplay whenever the event was handled
-            media::set_saved_autoplay_enabled(app.overlays_.settings.autoplay);
-            (void)platform::AutoplayPref::default_location().save(app.overlays_.settings.autoplay);
-            // Phase 102: sync the two hwaccel runtime overrides whenever the event
-            // was handled (the pref is already saved live in apply_value_delta; this
-            // keeps the runtime in sync even if that write failed). Detect which
-            // one (if any) the user just toggled and fire the corresponding toast —
-            // works for both the F2 Playback cycle AND the global Ctrl+Shift hotkeys
-            // (the latter have already set the toast themselves before this block).
-            const bool hw_before   = media::enable_hardware_decode();
-            const bool sw_before   = media::force_software_decode();
-            media::set_enable_hardware_decode(app.overlays_.settings.enable_hardware);
-            media::set_force_software_decode(app.overlays_.settings.force_software);
-            if (e.type == SDL_EVENT_KEY_DOWN && media::enable_hardware_decode() != hw_before) {
-                app.hwaccel_toast_text_ = std::format("Hardware decode: {}",
-                    media::enable_hardware_decode() ? "ON" : "OFF");
-                app.hwaccel_toast_elapsed_ = 0.0;
-            }
-            if (e.type == SDL_EVENT_KEY_DOWN && media::force_software_decode() != sw_before) {
-                app.hwaccel_toast_text_ = std::format("Force software decode: {}",
-                    media::force_software_decode() ? "ON" : "OFF");
-                app.hwaccel_toast_elapsed_ = 0.0;
-            }
-            // Phase 92: sync the clipboard gate (the pref is already saved live in
-            // apply_value_delta; this keeps the runtime in sync even if that write
-            // failed).
-            ui::set_clipboard_gate(app.overlays_.settings.clipboard);
-            // Commit vault settings if the commit flag was set
-            if (commit && app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
-                vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) !=
-                    vault::VaultResult::Ok) {
-                app.overlays_.settings.error = "Could not save settings";
-            }
+            sync_runtime_after_settings_event(app, e, commit);
         }
         return true;
     }
@@ -1162,7 +1185,7 @@ void App::update(double dt)
         screen_ && !migration_active)
         screen_->update(dt);
     badge_elapsed_ += dt;   // Phase 45 Part 6
-    hwaccel_toast_elapsed_ += dt;   // Phase 102: tick the toggle-toast window
+    hwaccel_toast_.elapsed += dt;   // Phase 102: tick the toggle-toast window
 
     // Phase 66: tick the warm slot. Expiry is deferred while a background job
     // owns a vault handle (same signals that suppress the idle auto-lock).
@@ -1237,8 +1260,9 @@ void App::render_frame()
         // Phase 102: hwaccel toggle toast (visible for HWACCEL_TOAST_SECS
         // after the most recent toggle). Draws LAST so it sits above every
         // other overlay's chrome.
-        if (should_show_hwaccel_toast(hwaccel_toast_text_.c_str(), hwaccel_toast_elapsed_, HWACCEL_TOAST_SECS)) {
-            draw_hwaccel_toast(r, font_, window_.width(), hwaccel_toast_text_);
+        if (should_show_hwaccel_toast(hwaccel_toast_.text.c_str(), hwaccel_toast_.elapsed,
+                                     hwaccel_toast_.WINDOW_SECS)) {
+            draw_hwaccel_toast(r, font_, window_.width(), hwaccel_toast_.text);
         }
         if (overlays_.settings.open) {
             ui::draw_settings_overlay(r, font_, static_cast<float>(window_.width()),
