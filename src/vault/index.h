@@ -302,6 +302,17 @@ struct VaultSettings {
     // regenerated) — compared against image::THUMB_MAX_SIDE by the caller.
     uint16_t migrated_thumb_side = 0;
 
+    // Phase NN — incremental-compact: migration tunables (live-saved, so a
+    // user-facing settings overlay can dial them per vault without recompiling).
+    // 0 means "use the build default" — readers clamp to that via
+    // effective_migration_batch_size / effective_migration_worker_count, so
+    // a freshly-upgraded vault stays on build defaults until the user changes
+    // them. The migration driver validates a non-zero persisted value once at
+    // startup (no per-pass recheck).
+    uint16_t migration_batch_size   = 0;   // items per compact-batch inside the migration loop
+    uint16_t migration_worker_count = 0;   // parallel re-encrypt worker threads (0 = compute)
+
+
     // The starting category set for a vault that has never stored one: a freshly
     // created vault and every pre-v8 vault. An empty SAVED list is a legitimate
     // state and is never re-seeded.
@@ -332,7 +343,49 @@ struct VaultSettings {
 // chunk ids + an `animated`-style context_bound flag; VideoChunk gains a u32
 // `sequence` and a per-record id (Phase 99 OSV-AUD-004). Pre-v13 blobs read
 // zero ids and context_bound == false (all chunks legacy, encrypted with no AD).
-inline constexpr uint8_t INDEX_VERSION = 13;
+// v14: migration_batch_size u16 + migration_worker_count u16 appended after
+// the thumb-side block (Phase NN incremental-compact). Pre-v14 blobs read
+// 0/0 (= use build defaults) — the migration driver clamps via
+// effective_migration_batch_size / effective_migration_worker_count.
+inline constexpr uint8_t INDEX_VERSION = 14;
+
+// Phase NN — incremental-compact migration tunables. The migration driver
+// (ui/migration_job.cpp) clamps a stored 0 to these via
+// effective_migration_batch_size / effective_migration_worker_count. Persisted
+// non-zero values are taken at face value, with a sanity check at startup:
+// migration_batch_size >= 1 (drives a divide-by-zero-safe batch loop) and
+// migration_worker_count <= MIGRATION_MAX_WORKER_COUNT (sets the soft cap on
+// CPU contention with the rest of the app).
+inline constexpr uint16_t MIGRATION_DEFAULT_BATCH_SIZE = 1024;
+inline constexpr uint16_t MIGRATION_MAX_WORKER_COUNT   = 16;
+
+// Phase NN — incremental-compact: clamp the persisted migration tunables.
+// Persisted 0 means "use build default"; readers may keep that contract
+// without doing a separate code path. The two helpers are free functions (not
+// static members) so the migration driver can pick them up without dragging
+// in this header's full type machinery at the call site.
+//
+// effective_migration_batch_size:
+//   0            -> MIGRATION_DEFAULT_BATCH_SIZE
+//   n (>= 1)     -> n   (driver bounds-checks the upper end at startup)
+//
+// effective_migration_worker_count:
+//   0                                 -> 0   (sentinel: "compute from
+//                                              hardware_concurrency() in the driver")
+//   n in [1, MAX]                     -> n
+//   n > MIGRATION_MAX_WORKER_COUNT    -> MIGRATION_MAX_WORKER_COUNT (cap)
+[[nodiscard]] inline uint16_t effective_migration_batch_size(const VaultSettings& s) noexcept
+{
+    return s.migration_batch_size == 0 ? MIGRATION_DEFAULT_BATCH_SIZE
+                                       : s.migration_batch_size;
+}
+[[nodiscard]] inline uint16_t effective_migration_worker_count(const VaultSettings& s) noexcept
+{
+    if (s.migration_worker_count == 0) return 0;
+    return s.migration_worker_count < MIGRATION_MAX_WORKER_COUNT
+               ? s.migration_worker_count
+               : MIGRATION_MAX_WORKER_COUNT;
+}
 
 // Phase 65: the index version whose content backfills the migration performs.
 // Bump ONLY when a NEW index version adds a field needing a content backfill —

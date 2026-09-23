@@ -35,6 +35,7 @@
 #include "index.h"
 #include "op_progress.h"
 #include "chunk_ref.h"
+#include "compact_plan.h"
 
 namespace media { class VideoSource; }
 
@@ -387,7 +388,7 @@ public:
     // pre-Phase-50 behavior. Main-thread only.
     void set_commit_router(CommitLane* lane) noexcept { commit_router_ = lane; }
 
-    // Compact the vault IN PLACE (Phase 60): pack live chunks down into dead
+// Compact the vault IN PLACE (Phase 60): pack live chunks down into dead
     // space (deleted chunks + superseded index blobs), commit the index in
     // batches via the crash-safe slot swap, write the final index blob just
     // after the packed data, then truncate the dead tail (+ hole-punch any
@@ -399,6 +400,40 @@ public:
     // keeps completed work and returns Ok; progress counts MiB moved.
     // Invalidates all IndexNode pointers previously returned by list().
     [[nodiscard]] VaultResult compact(OpProgress* progress = nullptr);
+
+    // Phase NN — incremental-compact primitive. Pack the named nodes'
+    // on-disk chunk spans down into the free space the migration just
+    // orphaned (typically the dirty nodes' pre-rewrite spans at the original
+    // offsets). Mirrors Vault::compact but operates on a SUBSET of the tree:
+    // spans owned by nodes NOT in `dirty_nodes` are pinned (never moved),
+    // and the active index blob continues to pin its own region per pass.
+    //
+    // Used by the migration driver (ui/migration_job.cpp) to keep the file
+    // size bounded to roughly `live + one batch + index blobs` at every
+    // checkpoint, instead of letting the v1→v2 (or any future batched)
+    // migration balloon to ~2x the original size until the very end. O(K²)
+    // in dirty-unit count K = sum of dirty nodes' chunk spans, vs. compact's
+    // O(N²) over every span.
+    //
+    // Crash-safe by construction: the planner's destinations are the dead
+    // space pinned by the last-committed index, identical to compact's
+    // contract. Cancel via progress leaves a valid, tighter-but-not-quite-
+    // tight vault; resuming re-runs reclaim on the same dirty set.
+    //
+    // Free friend (S1448 method cap on Vault).
+    friend VaultResult reclaim_dirty_nodes(
+        Vault& v, std::span<const IndexNode* const> dirty_nodes,
+        OpProgress* progress);
+
+    // Phase NN — incremental-compact: shared inner loop reached by
+    // Vault::compact() and reclaim_dirty_nodes() to avoid duplicating the
+    // planner / commit / truncate / hole-punch / publish machinery. TU-private.
+    friend VaultResult run_compaction_loop(
+        Vault& v, IndexNode& new_root,
+        std::vector<::vault::compact_plan::Unit>& units,
+        std::vector<uint64_t*>& offset_fields,
+        std::span<const ::vault::compact_plan::Unit> extra_pinned,
+        OpProgress* progress);
 
     // Reclaim orphaned chunk space IN PLACE by punching holes in the dead spans
     // (deleted chunks + the superseded index slot), instead of compact()'s copy-
@@ -572,8 +607,15 @@ using vault::ChunkRef;
 [[nodiscard]] uint64_t vault_wasted_bytes(const Vault& v);
 
 // Reclaim orphaned chunk space IN PLACE by punching holes in the dead spans.
-// Free friend to keep Vault under the cpp:S1448 method cap.
-[[nodiscard]] VaultResult vault_reclaim(Vault& v);
+    // Free friend to keep Vault under the cpp:S1448 method cap.
+    [[nodiscard]] VaultResult vault_reclaim(Vault& v);
+
+// Phase NN — incremental-compact: pack the named nodes' on-disk chunk spans
+// down into the dead space the migration just created. See the friend
+// declaration on Vault above for the full contract.
+[[nodiscard]] VaultResult reclaim_dirty_nodes(Vault& v,
+                                              std::span<const IndexNode* const> dirty_nodes,
+                                              OpProgress* progress = nullptr);
 
 // The gallery's own stored sort_key (Manual if gallery_path doesn't resolve to a
 // gallery). Phase 37.

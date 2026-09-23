@@ -2182,62 +2182,61 @@ VaultResult execute_pass_moves(const std::vector<compact_plan::Move>& moves, Mov
 
 // --- compaction --------- --------------------------------------------------
 
-uint64_t vault_wasted_bytes(const Vault& v)
+// End of the last byte covered by `units ∪ extra_pinned`, falling back to
+// HEADER_SIZE when both are empty. `compact_plan::live_end` only considers
+// `units`; reclaim_dirty_nodes passes pinned spans separately and needs the
+// combined "real" end so a post-move truncate doesn't lop off the pinned
+// region. Vault::compact() passes empty extra_pinned, in which case this
+// collapses to compact_plan::live_end.
+//
+// Free helper in the implementation TU, peer to run_compaction_loop; declared
+// up here so the planner state in compact_plan.h does not need to know about
+// pinned extras (pinned is a Vault-internal concept — the planner is generic
+// over what's live vs. pinned).
+uint64_t live_end_with_pinned(const std::vector<compact_plan::Unit>& units,
+                              std::span<const compact_plan::Unit> extra_pinned,
+                              uint64_t floor)
 {
-    if (!v.unlocked_ || !v.fp_) return 0;
-
-    uint64_t size = 0;
-    if (!fileutil::file_size(v.fp_, size)) return 0;
-
-    // Phase 50: guard access to header_.slot and header_.active_slot, which can
-    // race with the commit lane thread's index commits.
-    uint64_t live = 0;
-    {
-        std::lock_guard lk(*v.header_mutex_);
-        live = HEADER_SIZE + v.header_.slot[v.header_.active_slot].length;
-    }
-    for_each_media(v.root_, [&live](const IndexNode& node) {
-        if (node.is_image()) {
-            live += node.meta.data_length + node.meta.thumb_length;
-        } else if (node.is_video()) {
-            // Sum all video chunks plus optional poster.
-            for (const auto& chunk : node.vmeta.chunks) {
-                live += chunk.length;
-            }
-            live += node.vmeta.poster_length;
-        }
-    });
-    return size > live ? size - live : 0;
+    uint64_t end = compact_plan::live_end(units, floor);
+    for (const compact_plan::Unit& p : extra_pinned)
+        end = std::max(end, p.offset + p.length);
+    return end;
 }
 
-VaultResult Vault::compact(OpProgress* progress)
+// Phase NN — incremental-compact: shared inner loop for Vault::compact() and
+// reclaim_dirty_nodes(). Both callers pre-build the per-call `units` +
+// `offset_fields` (what to move; where to write the new offsets) and the
+// `extra_pinned` list (non-dirty units that must NOT be moved). The active
+// index blob is pinned automatically per pass, since its location advances
+// after every commit.
+//
+// State machine:
+//   * loop while plan_pass returns non-empty moves (converge); commit every
+//     256 MiB of cumulative moves to legalise the freed space for the next
+//     pass (the planner's destinations stay in the dead space pinned by the
+//     LAST COMMITTED index, never in the just-vacated space).
+//   * on convergence: idempotent short-circuit (no moves AND the file is
+//     already tight); OR final placed commit + truncate + hole-punch
+//     residuals + root_ publish.
+//   * the IndexNode copy (`new_root`) is mutated in-place via offset_fields
+//     and only published to v.root_ at the very end — same hand-off contract
+//     as the old compact: in-flight reads keep their pre-move span pointers
+//     until they observe the swap.
+//
+// Friend of Vault (free function in the implementation TU) so it can reach
+// the private state without threading ~10 parameters.
+VaultResult run_compaction_loop(Vault& v,
+                                IndexNode& new_root,
+                                std::vector<compact_plan::Unit>& units,
+                                std::vector<uint64_t*>& offset_fields,
+                                std::span<const compact_plan::Unit> extra_pinned,
+                                OpProgress* progress)
 {
     using enum VaultResult;
-    if (!unlocked_ || !fp_) return Locked;
-    // Early cancel is a true no-op: not even an index commit (a UI cancel that
-    // races the job start must leave the file byte-identical).
-    if (progress && progress->cancel.load()) return Ok;
 
-    // Quiesce the commit lane (it appends blobs + flips slots from another
-    // thread), then own the write path for the whole operation — mirrors
-    // reclaim()'s contract.
-    if (commit_router_ && commit_router_->running() && !commit_router_->flush()) {
-        return IoError;
-    }
-    std::lock_guard wlk(*write_mutex_);
-
-    // Work on a COPY of the tree (same pattern the old compact used): the live
-    // root_ keeps pre-move offsets for any in-flight background thumb read;
-    // moves only write into dead space, so those reads stay valid all the way
-    // until the final publish below.
-    IndexNode new_root = root_;
-    std::vector<compact_plan::Unit> units;
-    std::vector<uint64_t*> offset_fields;
-    collect_units(new_root, units, offset_fields);
-
-    ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+    ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
     IndexIoContext ctx{
-        fp_, header_, master_key_, new_root, saved_searches_, settings_, header_mutex_.get()};
+        v.fp_, v.header_, v.master_key_, new_root, v.saved_searches_, v.settings_, v.header_mutex_.get()};
 
     constexpr uint64_t BATCH_BYTES = 256ULL << 20;  // commit cadence: ~256 MiB
     uint64_t moved_since_commit = 0;
@@ -2246,18 +2245,23 @@ VaultResult Vault::compact(OpProgress* progress)
     bool cancelled = false;
 
     // Pack until a pass plans nothing. Each pass's plan is computed against
-    // the layout the last-committed index describes (units + the active blob),
-    // so every destination is crash-safe dead space; the commit between
-    // passes is what legalises space vacated by the previous one.
+    // the layout the last-committed index describes (units + the active
+    // blob + the caller's extra-pinned set), so every destination is
+    // crash-safe dead space; the commit between passes is what legalises
+    // space vacated by the previous one.
     while (!cancelled) {
-        compact_plan::Unit pinned_blob{};
+        // Per-pass pinned set: the active index blob (which advances after
+        // every commit) + the caller's extra_pinned set (which is stable).
+        std::vector<compact_plan::Unit> all_pinned;
+        all_pinned.reserve(1 + extra_pinned.size());
         {
-            std::lock_guard hlk(*header_mutex_);
-            const IndexSlot& s = header_.slot[header_.active_slot];
-            pinned_blob = {s.offset, s.length, 0};
+            std::lock_guard hlk(*v.header_mutex_);
+            const IndexSlot& s = v.header_.slot[v.header_.active_slot];
+            if (s.length > 0) all_pinned.push_back({s.offset, s.length, 0});
         }
-        const std::span<const compact_plan::Unit> pinned(&pinned_blob, pinned_blob.length ? 1 : 0);
-        const auto moves = compact_plan::plan_pass(units, HEADER_SIZE, pinned);
+        all_pinned.insert(all_pinned.end(), extra_pinned.begin(), extra_pinned.end());
+
+        const auto moves = compact_plan::plan_pass(units, HEADER_SIZE, all_pinned);
         if (moves.empty()) break;
 
         for (const auto& m : moves)
@@ -2285,11 +2289,11 @@ VaultResult Vault::compact(OpProgress* progress)
     // active one and leave one blob of slack forever.
     if (moved_bytes == 0) {
         uint64_t fsize = 0;
-        std::lock_guard hlk(*header_mutex_);
-        const IndexSlot& active = header_.slot[header_.active_slot];
-        const IndexSlot& inactive = header_.slot[1 - header_.active_slot];
-        if (fileutil::file_size(fp_, fsize) && active.length > 0 &&
-            active.offset >= compact_plan::live_end(units, HEADER_SIZE) &&
+        std::lock_guard hlk(*v.header_mutex_);
+        const IndexSlot& active = v.header_.slot[v.header_.active_slot];
+        const IndexSlot& inactive = v.header_.slot[1 - v.header_.active_slot];
+        if (fileutil::file_size(v.fp_, fsize) && active.length > 0 &&
+            active.offset >= live_end_with_pinned(units, extra_pinned, HEADER_SIZE) &&
             fsize == active.offset + active.length &&
             (inactive.length == 0 || inactive.offset >= active.offset + active.length)) {
             if (progress) {
@@ -2307,16 +2311,16 @@ VaultResult Vault::compact(OpProgress* progress)
     crypto::WipingBytes plain;
     if (!index_io::serialize_plain_index(ctx, plain)) return CryptoError;
     const uint64_t sealed_len = plain.size() + crypto::TAG_SIZE;
-    uint64_t dest = compact_plan::live_end(units, HEADER_SIZE);
+    uint64_t dest = live_end_with_pinned(units, extra_pinned, HEADER_SIZE);
     {
-        std::lock_guard hlk(*header_mutex_);
-        const IndexSlot& s = header_.slot[header_.active_slot];
+        std::lock_guard hlk(*v.header_mutex_);
+        const IndexSlot& s = v.header_.slot[v.header_.active_slot];
         if (s.length > 0 && dest < s.offset + s.length && s.offset < dest + sealed_len) {
             dest = s.offset + s.length;
         }
     }
     if (index_io::commit_plain_blob_at(ctx, plain, dest) != Ok) return IoError;
-    if (!fileutil::truncate_file(fp_, dest + sealed_len)) return IoError;
+    if (!fileutil::truncate_file(v.fp_, dest + sealed_len)) return IoError;
 
     // Residual holes cost no physical disk where hole-punch exists (Linux;
     // a silent no-op elsewhere). Punch the gaps between live spans, exactly
@@ -2325,11 +2329,13 @@ VaultResult Vault::compact(OpProgress* progress)
         std::vector<std::pair<uint64_t, uint64_t>> live;
         for (const auto& u : units)
             live.emplace_back(u.offset, u.length);
+        for (const compact_plan::Unit& p : extra_pinned)
+            live.emplace_back(p.offset, p.length);
         live.emplace_back(dest, sealed_len);
         std::ranges::sort(live);
         uint64_t cursor = HEADER_SIZE;
         for (const auto& [off, len] : live) {
-            if (off > cursor) (void)fileutil::punch_hole(fp_, cursor, off - cursor);
+            if (off > cursor) (void)fileutil::punch_hole(v.fp_, cursor, off - cursor);
             cursor = std::max(cursor, off + len);
         }
     }
@@ -2338,9 +2344,37 @@ VaultResult Vault::compact(OpProgress* progress)
         progress->total.store(static_cast<int>(planned_mib));
         progress->done.store(static_cast<int>(planned_mib));
     }
-    root_ = std::move(new_root);  // publish moved offsets (job-worker hand-off,
-                                  // modal blocks tree readers — same as before)
+    v.root_ = std::move(new_root);  // publish moved offsets (job-worker hand-off,
+                                    // modal blocks tree readers — same as before)
     return Ok;
+}
+
+uint64_t vault_wasted_bytes(const Vault& v)
+{
+    if (!v.unlocked_ || !v.fp_) return 0;
+
+    uint64_t size = 0;
+    if (!fileutil::file_size(v.fp_, size)) return 0;
+
+    // Phase 50: guard access to header_.slot and header_.active_slot, which can
+    // race with the commit lane thread's index commits.
+    uint64_t live = 0;
+    {
+        std::lock_guard lk(*v.header_mutex_);
+        live = HEADER_SIZE + v.header_.slot[v.header_.active_slot].length;
+    }
+    for_each_media(v.root_, [&live](const IndexNode& node) {
+        if (node.is_image()) {
+            live += node.meta.data_length + node.meta.thumb_length;
+        } else if (node.is_video()) {
+            // Sum all video chunks plus optional poster.
+            for (const auto& chunk : node.vmeta.chunks) {
+                live += chunk.length;
+            }
+            live += node.vmeta.poster_length;
+        }
+    });
+    return size > live ? size - live : 0;
 }
 
 VaultResult vault_reclaim(Vault& v)
@@ -2389,6 +2423,145 @@ VaultResult vault_reclaim(Vault& v)
         (void)fileutil::punch_hole(v.fp_, cursor, fsize - cursor);
     }
     return Ok;
+}
+
+VaultResult Vault::compact(OpProgress* progress)
+{
+    using enum VaultResult;
+    if (!unlocked_ || !fp_) return Locked;
+    // Early cancel is a true no-op: not even an index commit (a UI cancel that
+    // races the job start must leave the file byte-identical).
+    if (progress && progress->cancel.load()) return Ok;
+
+    // Quiesce the commit lane (it appends blobs + flips slots from another
+    // thread), then own the write path for the whole operation — mirrors
+    // reclaim()'s contract.
+    if (commit_router_ && commit_router_->running() && !commit_router_->flush()) {
+        return IoError;
+    }
+    std::lock_guard wlk(*write_mutex_);
+
+    // Work on a COPY of the tree (same pattern the old compact used): the live
+    // root_ keeps pre-move offsets for any in-flight background thumb read;
+    // moves only write into dead space, so those reads stay valid all the way
+    // until the final publish below.
+    IndexNode new_root = root_;
+    std::vector<compact_plan::Unit> units;
+    std::vector<uint64_t*> offset_fields;
+    collect_units(new_root, units, offset_fields);
+
+    return run_compaction_loop(*this, new_root, units, offset_fields,
+                               /*extra_pinned=*/{}, progress);
+}
+
+// Phase NN — incremental-compact: the migration driver calls this after every
+// batch of rewrites to keep the file size bounded to roughly
+// `live + one batch + index blobs` at every checkpoint, instead of letting the
+// migration balloon to ~2x of original until its single end-of-run compact.
+//
+// The dirty_set identifies nodes whose on-disk spans the migration has just
+// rewritten (typically appended at EOF). The free space into which those spans
+// are packed is the rest of the file minus the spans owned by non-dirty
+// nodes — exactly the dead regions we want to leave free for the next batch's
+// append. We pin every non-dirty unit (and, per pass, the active blob) so
+// compact()'s existing planner and crash-safety contract apply verbatim.
+VaultResult reclaim_dirty_nodes(Vault& v,
+                                std::span<const IndexNode* const> dirty_nodes,
+                                OpProgress* progress)
+{
+    using enum VaultResult;
+    if (!v.unlocked_ || !v.fp_) return Locked;
+    // Early cancel is a true no-op (same contract as compact()).
+    if (progress && progress->cancel.load()) return Ok;
+
+    if (v.commit_router_ && v.commit_router_->running() && !v.commit_router_->flush()) {
+        return IoError;
+    }
+    std::lock_guard wlk(*v.write_mutex_);
+
+    // Copy of the tree, mutated in-place via offset_fields (every loop iteration
+    // writes the new span straight into the same IndexNode fields the caller
+    // holds pointers to). Publish moved offsets only at the end. Important:
+    // `dirty_nodes` are pointers into v.root_, NOT new_root — IndexNode is
+    // deep-copied so address identity would never match. Compare by node_id
+    // (preserved across the copy), never by pointer.
+    IndexNode new_root = v.root_;
+
+    // 1) Capture dirty node ids. A null pointer is ignored (defensive against
+    //    a stale vector the caller partially cleared between batches).
+    std::vector<std::array<uint8_t, crypto::NODE_ID_SIZE>> dirty_ids;
+    dirty_ids.reserve(dirty_nodes.size());
+    for (const IndexNode* d : dirty_nodes) {
+        if (d != nullptr) dirty_ids.push_back(d->node_id);
+    }
+    auto is_dirty_id = [&](const IndexNode& n) -> bool {
+        return std::ranges::any_of(dirty_ids,
+                                   [&n](const auto& id) {
+                                       return id == n.node_id;
+                                   });
+    };
+
+    // 2) Empty dirty set: nothing to move, no per-batch cleanup needed (the
+    //    file's other sources of waste — superseded index blobs, prior-batch
+    //    orphans — are outside this function's contract). Returning Ok early
+    //    also avoids run_compaction_loop's empty-units trap below
+    //    (`compact_plan::live_end([]) == HEADER_SIZE` would point an unwary
+    //    final commit straight at offset 0).
+    if (dirty_ids.empty()) return Ok;
+
+    // 3) Build the units (the dirty spans) + parallel back-refs.
+    std::vector<compact_plan::Unit> units;
+    std::vector<uint64_t*> offset_fields;
+    units.reserve(dirty_nodes.size() * 4);  // rough upper bound; images=2, videos=N+1
+    {
+        uint32_t next_id = 0;
+        for_each_media(new_root, [&](IndexNode& n) {
+            if (!is_dirty_id(n)) return;
+            auto add = [&](uint64_t& offset, uint64_t length) {
+                if (length == 0) return;
+                units.emplace_back(offset, length, next_id++);
+                offset_fields.push_back(&offset);
+            };
+            if (n.is_image()) {
+                add(n.meta.data_offset, n.meta.data_length);
+                add(n.meta.thumb_offset, n.meta.thumb_length);
+            } else if (n.is_video()) {
+                for (VideoChunk& c : n.vmeta.chunks)
+                    add(c.offset, c.length);
+                add(n.vmeta.poster_offset, n.vmeta.poster_length);
+            }
+        });
+    }
+
+    // Empty dirty set (raced by is_dirty_id returning false everywhere: every
+    // caller-supplied pointer was non-null but the corresponding node has
+    // since been deleted). Treat as no-op, same logic as above.
+    if (units.empty()) return Ok;
+
+    // 4) Build the extra-pinned list: every NON-dirty media unit. These spans
+    //    MUST NOT be moved or overwritten — the planner will pack dirty spans
+    //    into dead regions around them. The pinned-extra list does not include
+    //    the active index blob; run_compaction_loop pins that separately each
+    //    pass (its location moves after every commit).
+    std::vector<compact_plan::Unit> extra_pinned;
+    for_each_media(new_root, [&](const IndexNode& n) {
+        if (is_dirty_id(n)) return;
+        auto add = [&](uint64_t offset, uint64_t length) {
+            if (length == 0) return;
+            extra_pinned.emplace_back(offset, length, 0);
+        };
+        if (n.is_image()) {
+            add(n.meta.data_offset, n.meta.data_length);
+            add(n.meta.thumb_offset, n.meta.thumb_length);
+        } else if (n.is_video()) {
+            for (const VideoChunk& c : n.vmeta.chunks)
+                add(c.offset, c.length);
+            add(n.vmeta.poster_offset, n.vmeta.poster_length);
+        }
+    });
+
+    return run_compaction_loop(v, new_root, units, offset_fields,
+                               extra_pinned, progress);
 }
 
 void Vault::auto_reclaim_space()

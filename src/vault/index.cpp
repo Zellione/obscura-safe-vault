@@ -480,6 +480,11 @@ void write_settings(ByteWriter& w, const VaultSettings& s)
     // Phase 75 thumb watermark — LAST in the block (version-gated reads rely
     // on stable prefix order).
     w.u16(s.migrated_thumb_side);
+
+    // Phase NN — incremental-compact tunables. Append-only; a pre-v14 blob
+    // ends after the thumb-side u16.
+    w.u16(s.migration_batch_size);
+    w.u16(s.migration_worker_count);
 }
 
 // Helper: read the field sub-block for a category (v11+ only).
@@ -642,6 +647,16 @@ bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
     // The thumb-side sub-block exists only from v12 on.
     if (version < 12) return true;
     s.migrated_thumb_side = r.u16();
+    if (!r.ok()) return false;
+
+    // Phase NN — incremental-compact: the migration-tunables sub-block
+    // exists only from v14 on. Pre-v14 blobs read 0/0 (= use build
+    // defaults), kept by the migration driver via the effective_*
+    // helpers.
+    if (version < 14) return true;
+    s.migration_batch_size = r.u16();
+    if (!r.ok()) return false;
+    s.migration_worker_count = r.u16();
     if (!r.ok()) return false;
     return true;
 }
