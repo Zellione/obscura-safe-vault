@@ -48,3 +48,15 @@ runs:
           -DSDL_CAMERA=OFF           \
           -G "Ninja"
         cmake --build vendor/SDL3/build --parallel "$(nproc)"
+
+    - name: Cache Phase 105 SQLCipher validation build
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      id: cache-sqlcipher
+      with:
+        path: vendor/.sqlcipher-build
+        key: sqlcipher-linux-${{ hashFiles('.gitmodules', 'scripts/build_sqlcipher.sh') }}-${{ runner.arch }}
+
+    - name: Build Phase 105 SQLCipher validation library
+      if: steps.cache-sqlcipher.outputs.cache-hit != 'true'
+      shell: bash
+      run: scripts/build_sqlcipher.sh

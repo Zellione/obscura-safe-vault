@@ -73,6 +73,10 @@ fi
 # ---------------------------------------------------------------------------
 "$REPO_ROOT/scripts/build_codecs.sh"
 
+# Phase 105 directory-vault database validation dependency. This remains
+# test-only until the Phase 107 database integration.
+"$REPO_ROOT/scripts/build_sqlcipher.sh"
+
 echo ""
 echo "Setup complete. Next steps:"
 echo "  scripts/gen.sh    # generate Ninja build files"

@@ -215,6 +215,25 @@ local function cmake_static_lib(prefix, name)
            path.join(prefix, "lib/lib" .. name .. ".a") or nil
 end
 
+-- Phase 105 SQLCipher validation spike. The library is intentionally linked
+-- only into osv_tests; the production database wrapper arrives in Phase 107.
+local function link_sqlcipher_spike()
+    local suffix = _OPTIONS["asan"] and "-asan" or ""
+    local build = path.join(os.getcwd(), "vendor/.sqlcipher-build" .. suffix)
+    if _OPTIONS["asan"] and not os.isfile(path.join(build, "libsqlite3.a")) then
+        premake.warn("ASAN SQLCipher probe not found; using the plain static validation build")
+        build = path.join(os.getcwd(), "vendor/.sqlcipher-build")
+    end
+    if not os.isfile(path.join(build, "libsqlite3.a")) then
+        error("SQLCipher test library missing; run scripts/build_sqlcipher.sh" ..
+              (_OPTIONS["asan"] and " --asan" or ""))
+    end
+    includedirs { build }
+    libdirs { build }
+    defines { "OSV_SQLCIPHER_SPIKE", "SQLITE_HAS_CODEC" }
+    links { "sqlite3", "crypto" }
+end
+
 -- ---------------------------------------------------------------------------
 -- libarchive (read-only 7z/RAR/TAR; Phase 34), + its vendored zlib/liblzma
 -- filters. Same staging prefix as the image codecs / FFmpeg. Linked only when
@@ -565,6 +584,7 @@ project "osv_tests"
     link_image_codecs()
     link_av()
     link_archive()
+    link_sqlcipher_spike()
 
     -- Strict warnings for project code (not vendored)
     fatalwarnings { "All" }

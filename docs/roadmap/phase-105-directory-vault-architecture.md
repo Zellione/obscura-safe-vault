@@ -1,6 +1,32 @@
 # Directory-vault architecture and format contract (Phase 105)
 
-**Status:** not started
+**Status:** in progress
+
+## Implementation progress (2026-09-26)
+
+Completed on the Phase 105 branch:
+
+- `docs/V3_VAULT_FORMAT.md` freezes the root/header/object layout, key domains,
+  associated-data encoding, publication ordering, compatibility boundary, and
+  initial database model.
+- ADR 0001 selects pinned SQLCipher 4.19.0 and rejects plaintext SQLite, a
+  custom encrypted VFS, and the incompatible SQLCipher 5 beta.
+- SQLCipher is a vendored submodule and builds as an out-of-tree static test
+  dependency, including a separately instrumented ASAN build.
+- The test probe proves raw 32-byte key use, encrypted database and rollback
+  journal canaries, wrong-key rejection, and correct-key reopen.
+- `v3_crypto_spec.*` implements the frozen database/object key derivations and
+  66-byte object-frame AD with exact-byte known-answer tests. Derived keys use
+  `SecureBuffer` and transient KDF input is wiped.
+
+Still required before marking the phase complete:
+
+- Commit the format detector and its hostile path/header matrix.
+- Freeze executable schema DDL and test constraints/query plans.
+- Commit the pure publication crash-state model and exhaustive transition tests.
+- Resolve the production crypto-provider pin: the host OpenSSL provider is
+  acceptable only for this validation spike; Phase 107 cannot ship with it.
+- Run every required configuration and record final counts/results below.
 
 ## Goal
 

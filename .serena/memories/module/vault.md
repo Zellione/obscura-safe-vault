@@ -13,6 +13,13 @@ sub-galleries — no leaf-only restriction (the old insertion guards were remove
 ## vault/ — `.osv` container
 Core files: `vault.*`, `header.*`, `index.*`, `chunk_store.*`, `byte_io.h`, `file_util.h`.
 
+Phase 105 adds the non-writing v3 format primitives in `v3_crypto_spec.*`:
+domain-separated keyed-BLAKE2b derivation of the SQLCipher database key and
+per-object keys into `SecureBuffer`, plus the canonical 66-byte independently
+encrypted object-frame AD. This is architecture/test scaffolding only; the
+production vault backend remains the legacy single-file container until later
+v3 phases.
+
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
 `seek_end`. WHY: `write_header` does `seek_to(fp_,0)` then `fwrite` as two separately-locked

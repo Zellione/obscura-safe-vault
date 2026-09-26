@@ -56,6 +56,7 @@ runs:
           wayland-protocols \
           libasound2-dev \
           libpulse-dev \
+          libssl-dev \
           ${{ inputs.extra-packages }}
         # apt re-creates partial/ and lock owned by the _apt user (mode 700/640)
         # during install; make the cache dir readable so the (non-root) runner
