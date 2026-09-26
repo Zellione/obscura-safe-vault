@@ -30,7 +30,8 @@
 | zlib | 1.3.2 | gzip filter dep for libarchive (Phase 34). cmake → `vendor/codecs-prefix`; `-DZLIB_BUILD_SHARED=OFF -DZLIB_BUILD_TESTING=OFF`. Windows static-lib output name is `zs.lib` (`zlib_static_suffix="s"` under `if(WIN32)` in its own CMakeLists.txt) — `link_archive()` in premake5.lua branches on `system:windows` for this |
 | xz / liblzma | 5.8.3 | LZMA2 filter dep for libarchive, covers `.7z`/`.txz` (Phase 34). cmake → `vendor/codecs-prefix`; `-DXZ_SANDBOX=no` is required for `--asan` builds — xz's own Landlock-sandboxing configure check hard-errors on seeing `-fsanitize=` in CFLAGS otherwise. Static lib output name is `lzma` on every platform (no suffix quirk, unlike zlib) |
 | libarchive | 3.8.8 (BSD-2-Clause) | 7z/RAR/TAR read-only import (Phase 34). cmake → `vendor/codecs-prefix`, out-of-tree build dir `vendor/.libarchive-build` (NOT `vendor/libarchive/build`, which the submodule's own source tree already tracks — cmake helper modules that an out-of-tree build there would clobber). Finds zlib/liblzma via `CMAKE_PREFIX_PATH` (same pattern libheif uses for libde265/libaom); every optional codec/crypto backend disabled except zlib+lzma (no bzip2/lz4/lzo/zstd — bzip2 has no CMake build upstream, so `.tbz2` is out of scope; no OpenSSL/mbedTLS/Nettle/CNG; no libxml2/expat; no ACL/xattr/iconv; no bsdtar/bsdcpio/bsdcat/test binaries). Linked by `link_archive()` under `OSV_VENDORED_ARCHIVE`; static lib output name is `archive` on every platform |
-| SQLCipher | 4.19.0 (`c4b275a4`) | Phase 105 v3 encrypted-database validation. `scripts/build_sqlcipher.sh` builds an out-of-tree static `libsqlite3.a` in `vendor/.sqlcipher-build[-asan]`; Phase 105 links it only into `osv_tests` through `link_sqlcipher_spike()`. Raw 32-byte keys use `sqlite3_key`; rollback-journal artifacts are covered by plaintext-canary tests. The host OpenSSL provider is validation-only: Phase 107 must pin/vendor/static-link the provider before production integration. |
+| SQLCipher | 4.19.0 (`c4b275a4`) | Phase 105 v3 encrypted-database validation. `scripts/build_sqlcipher.sh` builds an out-of-tree static `libsqlite3.a` in `vendor/.sqlcipher-build[-asan]`; Phase 105 links it only into `osv_tests` through `link_sqlcipher_spike()`. Raw 32-byte keys use `sqlite3_key`; database/journal canaries, wrong key, corrupt page, and reopen are tested. |
+| OpenSSL | 3.5.8 LTS (`f4dc4d58`) | SQLCipher's pinned static crypto provider. `scripts/build_openssl.sh` produces `openssl-prefix[-asan]/lib/libcrypto.a` with no shared libs, TLS, apps, modules, engines, legacy provider, docs, or upstream tests. The final test link names this archive explicitly and `scripts/test.sh` rejects dynamic sqlite/sqlcipher/crypto/ssl dependencies. |
 
 Image codecs are built by `scripts/build_codecs.{sh,bat}` (shared by `setup.{sh,bat}` and CI)
 and installed into `vendor/codecs-prefix/`; premake's `link_image_codecs()` links them in
@@ -139,10 +140,10 @@ App tries `assets/…` relative to cwd first, then `SDL_GetBasePath()` (packaged
 ## CI
 `.github/workflows/` — ci.yml matrix covers Linux and Windows (macOS support dropped).
 
-Phase 105 adds `libssl-dev` to the shared Linux dependency action and caches the
-out-of-tree static SQLCipher validation build in the shared premake/SDL setup action.
-ASAN builds prefer `vendor/.sqlcipher-build-asan` locally and safely fall back to
-the cached plain static probe in CI; SQLCipher is test-only until Phase 107.
+Phase 105 caches the out-of-tree static OpenSSL + SQLCipher validation builds in
+the shared premake/SDL setup action. ASAN builds prefer their separately
+instrumented prefixes locally and safely fall back to the cached plain static
+probe in CI; SQLCipher is test-only until Phase 107.
 
 Release executables opt into exploit mitigations explicitly in `premake5.lua`:
 Linux uses PIE plus full RELRO/immediate binding (`-fPIE -pie

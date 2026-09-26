@@ -49,12 +49,15 @@ runs:
           -G "Ninja"
         cmake --build vendor/SDL3/build --parallel "$(nproc)"
 
-    - name: Cache Phase 105 SQLCipher validation build
+    - name: Cache Phase 105 encrypted database dependencies
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       id: cache-sqlcipher
       with:
-        path: vendor/.sqlcipher-build
-        key: sqlcipher-linux-${{ hashFiles('.gitmodules', 'scripts/build_sqlcipher.sh') }}-${{ runner.arch }}
+        path: |
+          vendor/.openssl-build
+          vendor/openssl-prefix
+          vendor/.sqlcipher-build
+        key: sqlcipher-linux-${{ hashFiles('.gitmodules', 'scripts/build_openssl.sh', 'scripts/build_sqlcipher.sh') }}-${{ runner.arch }}
 
     - name: Build Phase 105 SQLCipher validation library
       if: steps.cache-sqlcipher.outputs.cache-hit != 'true'

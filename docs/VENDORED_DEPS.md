@@ -21,6 +21,7 @@ This document tracks the pinned versions of all vendored third-party libraries a
 | **libarchive** | 3.8.8 | 7z/RAR/TAR archive read (decode-only; Phase 34) | **Yes** |
 | **libva** | 2.22.0 (217da1c) | VA-API public headers only (Linux hardware video decode, Phase 43 Part 2) — never built; `vendor/vaapi-shim` dlopens the real `libva.so.2`/`libva-drm.so.2` at runtime instead of linking them | No |
 | **SQLCipher** | 4.19.0 (c4b275a4) | Phase 105 encrypted SQLite validation; v3 metadata database in Phase 107 | **Yes** |
+| **OpenSSL** | 3.5.8 LTS (f4dc4d58) | Static provider; only `libcrypto` is linked by SQLCipher; apps/modules/legacy provider disabled | **Yes** |
 
 ### Decode-Only Rationale
 
@@ -37,7 +38,7 @@ This minimizes attack surface: **untrusted input enters only through image/video
 
 The libraries marked "**Yes**" in the "Parses Untrusted Input" column are reviewed quarterly for known CVEs:
 
-**Affected libraries:** stb, miniz, libwebp, libde265, libaom, libheif, FFmpeg, nlohmann/json, zlib, xz/liblzma, libarchive, SQLCipher
+**Affected libraries:** stb, miniz, libwebp, libde265, libaom, libheif, FFmpeg, nlohmann/json, zlib, xz/liblzma, libarchive, SQLCipher, OpenSSL
 
 **Review schedule:** Every 3 months (or upon public disclosure of a critical issue)
 
@@ -165,9 +166,10 @@ linked statically into `libheif.a` (verified by undefined-symbol scan).
   shim, so the app never links or requires real libva at build time. See
   `docs/superpowers/specs/2026-07-17-hardware-video-decode-design.md`.
 - **SQLCipher 4.19.0** is pinned for the v3 database. Phase 105 links its static
-  library only into the test probe. Its OpenSSL provider is temporarily the host
-  library for validation; Phase 107 cannot ship until that provider is pinned,
-  vendored, built statically/offline, and recorded here. See ADR 0001.
+  library only into the test probe. Its provider is vendored **OpenSSL 3.5.8
+  LTS**; only its static `libcrypto` is linked, while apps/modules/engines and
+  the legacy provider are disabled. Normal and ASAN builds live in separate
+  ignored prefixes. See ADR 0001.
 
 ## Related
 

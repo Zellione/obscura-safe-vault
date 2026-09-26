@@ -112,6 +112,14 @@ if [[ ! -x "$BIN" ]]; then
     exit 1
 fi
 
+# SQLCipher and its OpenSSL provider are hermetic static dependencies. Catch an
+# accidental fallback to host sqlite/libcrypto before executing any DB tests.
+if ldd "$BIN" | grep -Eq 'lib(sqlcipher|sqlite|crypto|ssl)'; then
+    echo "Unexpected dynamic encrypted-database dependency:" >&2
+    ldd "$BIN" | grep -E 'lib(sqlcipher|sqlite|crypto|ssl)' >&2
+    exit 1
+fi
+
 echo ""
 echo "==> Running $BIN"
 # Surface leaks on exit (no-op when not built with ASAN).

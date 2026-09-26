@@ -1,6 +1,6 @@
 name: Checkout submodules (retried)
 description: >
-  Recursively initialises and updates the vendored git submodules AFTER
+  Initialises and updates the required top-level vendored git submodules AFTER
   actions/checkout has run with `submodules: false`. Retries the update with
   linear backoff so a transient submodule-host outage self-heals instead of
   failing the job. On 2026-08-31 CI #741 the TSan and MSVC-Debug jobs died at
@@ -25,7 +25,10 @@ runs:
         attempt=0
         while :; do
           attempt=$((attempt + 1))
-          if git submodule update --init --recursive; then
+          # OpenSSL carries many optional nested test/provider/language
+          # submodules. Our no-tests/no-module static libcrypto build consumes
+          # none of them, and all required OSV dependencies are top-level.
+          if git submodule update --init; then
             echo "submodules: ok on attempt $attempt"
             exit 0
           fi

@@ -19,7 +19,7 @@ cd "$REPO_ROOT"
 NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
 echo "==> Initialising git submodules..."
-git submodule update --init --recursive
+git submodule update --init
 
 # ---------------------------------------------------------------------------
 # premake5 binary — download if missing

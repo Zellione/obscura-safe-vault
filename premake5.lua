@@ -220,9 +220,11 @@ end
 local function link_sqlcipher_spike()
     local suffix = _OPTIONS["asan"] and "-asan" or ""
     local build = path.join(os.getcwd(), "vendor/.sqlcipher-build" .. suffix)
+    local openssl = path.join(os.getcwd(), "vendor/openssl-prefix" .. suffix)
     if _OPTIONS["asan"] and not os.isfile(path.join(build, "libsqlite3.a")) then
         premake.warn("ASAN SQLCipher probe not found; using the plain static validation build")
         build = path.join(os.getcwd(), "vendor/.sqlcipher-build")
+        openssl = path.join(os.getcwd(), "vendor/openssl-prefix")
     end
     if not os.isfile(path.join(build, "libsqlite3.a")) then
         error("SQLCipher test library missing; run scripts/build_sqlcipher.sh" ..
@@ -231,7 +233,8 @@ local function link_sqlcipher_spike()
     includedirs { build }
     libdirs { build }
     defines { "OSV_SQLCIPHER_SPIKE", "SQLITE_HAS_CODEC" }
-    links { "sqlite3", "crypto" }
+    links { "sqlite3" }
+    linkoptions { path.join(openssl, "lib/libcrypto.a") }
 end
 
 -- ---------------------------------------------------------------------------

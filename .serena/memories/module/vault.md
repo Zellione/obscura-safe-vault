@@ -13,12 +13,17 @@ sub-galleries — no leaf-only restriction (the old insertion guards were remove
 ## vault/ — `.osv` container
 Core files: `vault.*`, `header.*`, `index.*`, `chunk_store.*`, `byte_io.h`, `file_util.h`.
 
-Phase 105 adds the non-writing v3 format primitives in `v3_crypto_spec.*`:
-domain-separated keyed-BLAKE2b derivation of the SQLCipher database key and
-per-object keys into `SecureBuffer`, plus the canonical 66-byte independently
-encrypted object-frame AD. This is architecture/test scaffolding only; the
-production vault backend remains the legacy single-file container until later
-v3 phases.
+Phase 105 adds non-writing v3 architecture primitives: `v3_crypto_spec.*`
+provides domain-separated keyed-BLAKE2b database/per-object key derivation into
+`SecureBuffer` plus canonical 66-byte object-frame AD; `v3_detect.*` classifies
+legacy files versus v3 directories while rejecting symlink/odd shapes (advisory
+only—the Phase 106 descriptor-relative open is authoritative); `v3_schema.h`
+freezes schema v1 DDL; and `v3_transaction_model.h` models publish-before-
+reference crash states. `v3_sqlcipher_key.*` converts a derived 32-byte key to
+SQLCipher's required 67-byte raw keyspec inside a wipe-on-release
+`SecureBuffer`, avoiding SQL interpolation and SQLCipher's password KDF. The
+production backend remains the legacy single-file container until later v3
+phases.
 
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER

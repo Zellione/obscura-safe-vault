@@ -1,4 +1,5 @@
 #include "test_framework.h"
+#include "vault/v3_sqlcipher_key.h"
 
 #ifdef OSV_SQLCIPHER_SPIKE
 #include <sqlite3.h>
@@ -48,7 +49,8 @@ DbPtr open_keyed(const fs::path& path, std::span<const uint8_t, 32> key)
         return {};
     }
     DbPtr db{raw};
-    if (sqlite3_key(db.get(), key.data(), static_cast<int>(key.size())) != SQLITE_OK)
+    auto keyspec = vault::v3::sqlcipher_raw_keyspec(key);
+    if (sqlite3_key(db.get(), keyspec.data(), static_cast<int>(keyspec.size())) != SQLITE_OK)
         return {};
     return db;
 }
@@ -59,6 +61,15 @@ bool file_contains(const fs::path& path, std::string_view needle)
     if (!in) return false;
     const std::string bytes{std::istreambuf_iterator<char>{in}, {}};
     return bytes.find(needle) != std::string::npos;
+}
+
+bool query_has_text(sqlite3* db, const char* sql)
+{
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    const bool has_text = sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_text(stmt, 0) != nullptr;
+    sqlite3_finalize(stmt);
+    return has_text;
 }
 
 } // namespace
@@ -79,6 +90,7 @@ TEST(sqlcipher_raw_key_encrypts_database_and_rollback_journal)
 
     auto db = open_keyed(db_path, KEY);
     REQUIRE(db != nullptr);
+    CHECK_TRUE(query_has_text(db.get(), "PRAGMA cipher_version;"));
     CHECK(exec(db.get(), "PRAGMA cipher_memory_security = ON;"));
     CHECK(exec(db.get(), "PRAGMA journal_mode = DELETE;"));
     CHECK(exec(db.get(), "PRAGMA synchronous = FULL;"));
@@ -107,6 +119,23 @@ TEST(sqlcipher_raw_key_encrypts_database_and_rollback_journal)
     REQUIRE(reopened != nullptr);
     CHECK(exec(reopened.get(), "SELECT count(*) FROM sqlite_master;"));
     reopened.reset();
+
+    const auto corrupt_path = dir / "corrupt.db";
+    fs::copy_file(db_path, corrupt_path);
+    {
+        std::fstream corrupt(corrupt_path, std::ios::binary | std::ios::in | std::ios::out);
+        REQUIRE(corrupt.good());
+        corrupt.seekg(100);
+        char byte = 0;
+        corrupt.read(&byte, 1);
+        byte ^= 0x40;
+        corrupt.seekp(100);
+        corrupt.write(&byte, 1);
+    }
+    auto corrupted = open_keyed(corrupt_path, KEY);
+    REQUIRE(corrupted != nullptr);
+    CHECK_FALSE(exec(corrupted.get(), "SELECT count(*) FROM sqlite_master;"));
+    corrupted.reset();
     fs::remove_all(dir);
 }
 

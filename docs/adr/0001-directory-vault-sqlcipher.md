@@ -10,9 +10,16 @@ The legacy vault stores encrypted media records and a serialized metadata tree i
 
 ## Decision
 
-Use SQLCipher 4.19.0, pinned as `vendor/sqlcipher`, as the SQLite implementation for `vault.db`. Version 5.0.0 is a beta with incompatible defaults and is not suitable for a durable production format. SQLCipher is built statically, with loadable extensions disabled for the production build, temporary SQLite storage forced into memory, and a supported pinned crypto provider.
+Use SQLCipher 4.19.0, pinned as `vendor/sqlcipher`, as the SQLite implementation for `vault.db`. Version 5.0.0 is a beta with incompatible defaults and is not suitable for a durable production format. SQLCipher is built statically, with loadable extensions disabled, temporary SQLite storage forced into memory, and pinned OpenSSL 3.5.8 LTS as a static `libcrypto` provider. OpenSSL is built without shared libraries, TLS (`libssl`), applications, dynamic modules, engines, the legacy provider, documentation, or its upstream test programs; this keeps the provider surface to the primitives SQLCipher consumes.
 
-The application supplies a random, domain-derived 256-bit database key through `sqlite3_key`; SQLCipher's password KDF is not part of the vault password flow. The user's password/keyfile derives only the KEK used to unwrap the vault master key. SQLCipher retains its random 16-byte database salt and per-page authentication.
+The application supplies a random, domain-derived 256-bit database key through
+`sqlite3_key`. SQLCipher requires direct keys in its 67-byte `x'<64 hex>'`
+keyspec form, so the application constructs that transient representation only
+in locked, wipe-on-release memory. It is passed through the C API, never
+interpolated into SQL. SQLCipher's password KDF is therefore not part of the
+vault password flow. The user's password/keyfile derives only the KEK used to
+unwrap the vault master key. SQLCipher retains its random 16-byte database salt
+and per-page authentication.
 
 The database uses an encrypted header (`cipher_plaintext_header_size = 0`). Rollback-journal mode is the initial durability baseline because it has the smallest set of persistent sidecars and the Phase 105 probe proves that rollback journal page images are encrypted. WAL may be adopted only through a later format-neutral performance decision after equivalent crash, encrypted-artifact, backup, and checkpoint tests.
 
@@ -38,7 +45,7 @@ Rejected. It would make relational queries and atomic tree/tag mutations difficu
 
 ## Crypto-provider boundary
 
-The Phase 105 validation build uses the host OpenSSL provider solely to establish SQLCipher API and artifact behavior. That is not sufficient for production because the project requires hermetic vendored dependencies. Before Phase 107 can ship, the provider must be pinned and built offline as a static dependency, its license/CVE process documented, and the final binary checked for an unintended dynamic SQLCipher/provider dependency. Failure to satisfy this gate requires a new owner-approved ADR; plaintext SQLite and a custom codec are not fallbacks.
+OpenSSL 3.5.8 LTS is pinned as `vendor/openssl` and supported upstream through April 2030. `scripts/build_openssl.sh` produces only a static `libcrypto.a`; SQLCipher's static archive is compiled against those vendored headers and the final link names the vendored archive explicitly. CI checks and the Phase 105 verification use `ldd` to reject an unintended dynamic SQLCipher, SQLite, OpenSSL, or libcrypto dependency. Both normal and sanitizer builds have separate output prefixes.
 
 ## Consequences
 
@@ -47,4 +54,3 @@ The Phase 105 validation build uses the host OpenSSL provider solely to establis
 - The database file's size and modification timing remain observable.
 - SQLCipher becomes an untrusted-input parser and enters the quarterly CVE review cadence.
 - Backups must use the SQLCipher-aware online backup path; generic live directory copies are not promised to be consistent.
-
