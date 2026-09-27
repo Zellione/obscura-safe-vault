@@ -9,6 +9,7 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <format>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -33,9 +34,9 @@ FaultState& faults()
 bool fail(FsFault p) noexcept
 {
     auto& f = faults();
-    if (f.point.load() != static_cast<int>(p)) return false;
-    unsigned n = f.countdown.load();
-    if (n && f.countdown.compare_exchange_strong(n, n - 1)) return false;
+    if (f.point.load() != static_cast<int>(std::to_underlying(p))) return false;
+    if (unsigned n = f.countdown.load(); n && f.countdown.compare_exchange_strong(n, n - 1))
+        return false;
     f.point.store(-1);
     errno = EIO;
     return true;
@@ -56,8 +57,8 @@ int open_root(const std::filesystem::path& path) noexcept
     struct open_how how{};
     how.flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW;
     how.resolve = RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
-    const long rc = ::syscall(SYS_openat2, AT_FDCWD, path.c_str(), &how, sizeof(how));
-    if (rc >= 0) return static_cast<int>(rc);
+    if (const long rc = ::syscall(SYS_openat2, AT_FDCWD, path.c_str(), &how, sizeof(how)); rc >= 0)
+        return static_cast<int>(rc);
     if (errno != ENOSYS && errno != EINVAL && errno != EPERM) return -1;
 #endif
     // Conservative fallback: walk every component with O_NOFOLLOW while
@@ -89,8 +90,8 @@ int open_child(int dirfd, const char* name, int flags, mode_t mode = 0) noexcept
     how.flags = static_cast<uint64_t>(flags | O_CLOEXEC | O_NOFOLLOW);
     how.mode = mode;
     how.resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
-    const long rc = ::syscall(SYS_openat2, dirfd, name, &how, sizeof(how));
-    if (rc >= 0) return static_cast<int>(rc);
+    if (const long rc = ::syscall(SYS_openat2, dirfd, name, &how, sizeof(how)); rc >= 0)
+        return static_cast<int>(rc);
     if (errno != ENOSYS && errno != EINVAL && errno != EPERM) return -1;
 #endif
     return ::openat(dirfd, name, flags | O_CLOEXEC | O_NOFOLLOW, mode);
@@ -106,7 +107,8 @@ bool owned_mode(int fd, mode_t type, mode_t permissions, bool one_link) noexcept
 
 bool same_device(int lhs, int rhs) noexcept
 {
-    struct stat a{}, b{};
+    struct stat a{};
+    struct stat b{};
     return ::fstat(lhs, &a) == 0 && ::fstat(rhs, &b) == 0 && a.st_dev == b.st_dev;
 }
 
@@ -126,14 +128,13 @@ bool create_file(int dirfd, const char* name) noexcept
 
 bool plain_staging_name(std::string_view n) noexcept
 {
-    return !n.empty() && n.size() <= 64 && n != "." && n != ".." &&
-           n.find('/') == std::string_view::npos && n.find('\\') == std::string_view::npos &&
-           !n.contains('\0');
+    return !n.empty() && n.size() <= 64 && n != "." && n != ".." && !n.contains('/') &&
+           !n.contains('\\') && !n.contains('\0');
 }
 
-char hex_digit(uint8_t n) noexcept
+char hex_digit(std::byte n) noexcept
 {
-    return "0123456789abcdef"[n & 15U];
+    return "0123456789abcdef"[std::to_integer<unsigned>(n) & 15U];
 }
 int hex_value(char c) noexcept
 {
@@ -154,7 +155,38 @@ bool ensure_shard(int objects_fd, std::string_view shard, int& shard_fd) noexcep
     return shard_fd >= 0 && owned_mode(shard_fd, S_IFDIR, 0700, false);
 }
 
-bool validate_entries(int parent, bool shards, std::string_view expected_shard = {}) noexcept
+bool validate_entries(int parent, bool shards, std::string_view expected_shard = {}) noexcept;
+
+std::optional<bool> entry_is_directory(std::string_view name, bool shards,
+                                       std::string_view expected_shard) noexcept
+{
+    if (shards) {
+        const bool valid = name.size() == 2 && hex_value(name[0]) >= 0 && hex_value(name[1]) >= 0;
+        if (!valid) return std::nullopt;
+        return true;
+    }
+    if (expected_shard.empty())
+        return plain_staging_name(name) ? std::optional{false} : std::nullopt;
+    const std::string relative = "objects/" + std::string(expected_shard) + "/" + std::string(name);
+    return parse_object_relative_path(relative) ? std::optional{false} : std::nullopt;
+}
+
+bool validate_entry(int parent, const dirent& entry, bool shards,
+                    std::string_view expected_shard) noexcept
+{
+    const std::string_view name{entry.d_name};
+    const auto directory = entry_is_directory(name, shards, expected_shard);
+    if (!directory) return false;
+    const int child =
+        open_child(parent, entry.d_name, *directory ? O_RDONLY | O_DIRECTORY : O_RDONLY);
+    const bool metadata_ok = child >= 0 && owned_mode(child, *directory ? S_IFDIR : S_IFREG,
+                                                      *directory ? 0700 : 0600, !*directory);
+    const bool contents_ok = metadata_ok && (!*directory || validate_entries(child, false, name));
+    if (child >= 0) ::close(child);
+    return contents_ok;
+}
+
+bool validate_entries(int parent, bool shards, std::string_view expected_shard) noexcept
 {
     const int scan = open_child(parent, ".", O_RDONLY | O_DIRECTORY);
     if (scan < 0) return false;
@@ -167,41 +199,10 @@ bool validate_entries(int parent, bool shards, std::string_view expected_shard =
     while (const dirent* e = ::readdir(dir)) {
         const std::string_view name{e->d_name};
         if (name == "." || name == "..") continue;
-        bool directory = false;
-        if (shards) {
-            directory = name.size() == 2 && hex_value(name[0]) >= 0 && hex_value(name[1]) >= 0;
-            if (!directory) {
-                ::closedir(dir);
-                return false;
-            }
-        } else if (expected_shard.empty()) {
-            if (!plain_staging_name(name)) {
-                ::closedir(dir);
-                return false;
-            }
-        } else {
-            const std::string relative =
-                "objects/" + std::string(expected_shard) + "/" + std::string(name);
-            if (!parse_object_relative_path(relative)) {
-                ::closedir(dir);
-                return false;
-            }
-        }
-        const int child =
-            open_child(parent, e->d_name, directory ? O_RDONLY | O_DIRECTORY : O_RDONLY);
-        const bool good = child >= 0 && owned_mode(child, directory ? S_IFDIR : S_IFREG,
-                                                   directory ? 0700 : 0600, !directory);
-        if (!good) {
-            if (child >= 0) ::close(child);
+        if (!validate_entry(parent, *e, shards, expected_shard)) {
             ::closedir(dir);
             return false;
         }
-        if (directory && !validate_entries(child, false, name)) {
-            ::close(child);
-            ::closedir(dir);
-            return false;
-        }
-        ::close(child);
     }
     const bool ok = errno == 0;
     ::closedir(dir);
@@ -226,7 +227,7 @@ bool rename_noreplace(int oldfd, const char* oldname, int newfd, const char* new
 void inject_fs_fault(FsFault point, unsigned fail_after) noexcept
 {
     faults().countdown.store(fail_after);
-    faults().point.store(static_cast<int>(point));
+    faults().point.store(static_cast<int>(std::to_underlying(point)));
 }
 void clear_fs_faults() noexcept
 {
@@ -238,8 +239,9 @@ std::string object_relative_path(const ObjectId& id)
 {
     std::string hex(32, '0');
     for (size_t i = 0; i < id.size(); ++i) {
-        hex[i * 2] = hex_digit(id[i] >> 4U);
-        hex[i * 2 + 1] = hex_digit(id[i]);
+        const std::byte byte{id[i]};
+        hex[i * 2] = hex_digit(byte >> 4U);
+        hex[i * 2 + 1] = hex_digit(byte);
     }
     return "objects/" + hex.substr(0, 2) + "/" + hex + ".osvo";
 }
@@ -251,7 +253,7 @@ std::optional<ObjectId> parse_object_relative_path(std::string_view p) noexcept
         return std::nullopt;
     const auto shard = p.substr(8, 2);
     const auto hex = p.substr(11, 32);
-    if (shard != hex.substr(0, 2)) return std::nullopt;
+    if (!hex.starts_with(shard)) return std::nullopt;
     ObjectId id{};
     for (size_t i = 0; i < id.size(); ++i) {
         const int hi = hex_value(hex[i * 2]);
@@ -420,6 +422,39 @@ std::optional<VaultRoot> VaultRoot::open(const std::filesystem::path& path)
     return root;
 }
 
+namespace {
+
+std::optional<std::pair<unsigned, bool>> root_entry_kind(std::string_view name) noexcept
+{
+    if (name == "vault.header") return std::pair{1U, false};
+    if (name == "vault.db") return std::pair{2U, false};
+    if (name == "objects") return std::pair{4U, true};
+    if (name == "staging") return std::pair{8U, true};
+    if (name == "lock") return std::pair{16U, false};
+    return std::nullopt;
+}
+
+bool validate_root_entry(int root_fd, const dirent& entry, unsigned& seen) noexcept
+{
+    const std::string_view name{entry.d_name};
+    const auto kind = root_entry_kind(name);
+    if (!kind || (seen & kind->first) != 0) return false;
+    const bool directory = kind->second;
+    const int child =
+        open_child(root_fd, entry.d_name, directory ? O_RDONLY | O_DIRECTORY : O_RDONLY);
+    const bool metadata_ok = child >= 0 && owned_mode(child, directory ? S_IFDIR : S_IFREG,
+                                                      directory ? 0700 : 0600, !directory);
+    const bool device_ok = metadata_ok && (!directory || same_device(root_fd, child));
+    const bool contents_ok =
+        device_ok && (!directory || validate_entries(child, name == "objects"));
+    if (child >= 0) ::close(child);
+    if (!contents_ok) return false;
+    seen |= kind->first;
+    return true;
+}
+
+}  // namespace
+
 bool VaultRoot::validate_layout() const noexcept
 {
     if (!owned_mode(fd_, S_IFDIR, 0700, false)) return false;
@@ -438,47 +473,10 @@ bool VaultRoot::validate_layout() const noexcept
     while (const dirent* e = ::readdir(dir)) {
         const std::string_view n{e->d_name};
         if (n == "." || n == "..") continue;
-        int bit = 0;
-        bool directory = false;
-        if (n == "vault.header")
-            bit = 1;
-        else if (n == "vault.db")
-            bit = 2;
-        else if (n == "objects") {
-            bit = 4;
-            directory = true;
-        } else if (n == "staging") {
-            bit = 8;
-            directory = true;
-        } else if (n == "lock")
-            bit = 16;
-        else {
+        if (!validate_root_entry(fd_, *e, seen)) {
             ::closedir(dir);
             return false;
         }
-        if (seen & static_cast<unsigned>(bit)) {
-            ::closedir(dir);
-            return false;
-        }
-        const int child = open_child(fd_, e->d_name, directory ? O_RDONLY | O_DIRECTORY : O_RDONLY);
-        if (child < 0 || !owned_mode(child, directory ? S_IFDIR : S_IFREG, directory ? 0700 : 0600,
-                                     !directory)) {
-            if (child >= 0) ::close(child);
-            ::closedir(dir);
-            return false;
-        }
-        if (directory && !same_device(fd_, child)) {
-            ::close(child);
-            ::closedir(dir);
-            return false;
-        }
-        if (directory && !validate_entries(child, n == "objects")) {
-            ::close(child);
-            ::closedir(dir);
-            return false;
-        }
-        ::close(child);
-        seen |= static_cast<unsigned>(bit);
     }
     const bool ok = errno == 0 && seen == 31;
     ::closedir(dir);
@@ -493,11 +491,12 @@ std::optional<WriterLock> VaultRoot::try_writer_lock() const noexcept
         if (fd >= 0) ::close(fd);
         return std::nullopt;
     }
-    const std::string pid = std::to_string(::getpid()) + "\n";
+    const std::string pid = std::format("{}\n", ::getpid());
     const int truncate_result = ::ftruncate(fd, 0);
-    const ssize_t write_result =
-        truncate_result == 0 ? ::pwrite(fd, pid.data(), pid.size(), 0) : -1;
-    if (write_result == static_cast<ssize_t>(pid.size())) (void)::fdatasync(fd);
+    if (const ssize_t write_result =
+            truncate_result == 0 ? ::pwrite(fd, pid.data(), pid.size(), 0) : -1;
+        write_result == static_cast<ssize_t>(pid.size()))
+        (void)::fdatasync(fd);
     return WriterLock(fd);
 }
 
@@ -510,18 +509,24 @@ std::optional<DurableFile> VaultRoot::create_staging_file() const noexcept
     }
     for (int attempt = 0; attempt < 64; ++attempt) {
         std::array<uint8_t, 16> random{};
-        if (!crypto::fill_random(random)) break;
-        std::string name = "tmp-";
-        for (uint8_t b : random) {
-            name.push_back(hex_digit(b >> 4U));
-            name.push_back(hex_digit(b));
+        if (!crypto::fill_random(random)) {
+            ::close(staging);
+            return std::nullopt;
         }
-        const int fd = open_child(staging, name.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
-        if (fd >= 0) {
+        std::string name = "tmp-";
+        for (std::byte byte : std::as_bytes(std::span{random})) {
+            name.push_back(hex_digit(byte >> 4U));
+            name.push_back(hex_digit(byte));
+        }
+        if (const int fd = open_child(staging, name.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+            fd >= 0) {
             (void)::fchmod(fd, 0600);
             return DurableFile(fd, staging, std::move(name));
         }
-        if (errno != EEXIST) break;
+        if (errno != EEXIST) {
+            ::close(staging);
+            return std::nullopt;
+        }
     }
     ::close(staging);
     return std::nullopt;
@@ -531,7 +536,8 @@ bool VaultRoot::publish(DurableFile& file, const ObjectId& id) const noexcept
 {
     if (!file.valid() || file.published_ || !file.synced_) return false;
     const std::string rel = object_relative_path(id);
-    const std::string shard = rel.substr(8, 2), name = rel.substr(11);
+    const std::string shard = rel.substr(8, 2);
+    const std::string name = rel.substr(11);
     const int objects = open_child(fd_, "objects", O_RDONLY | O_DIRECTORY);
     if (objects < 0) return false;
     int shard_fd = -1;
@@ -548,8 +554,9 @@ bool VaultRoot::publish(DurableFile& file, const ObjectId& id) const noexcept
 
 bool VaultRoot::unlink_object(const ObjectId& id) const noexcept
 {
-    const std::string rel = object_relative_path(id), shard = rel.substr(8, 2),
-                      name = rel.substr(11);
+    const std::string rel = object_relative_path(id);
+    const std::string shard = rel.substr(8, 2);
+    const std::string name = rel.substr(11);
     const int objects = open_child(fd_, "objects", O_RDONLY | O_DIRECTORY);
     if (objects < 0) return false;
     const int shardfd = open_child(objects, shard.c_str(), O_RDONLY | O_DIRECTORY);
