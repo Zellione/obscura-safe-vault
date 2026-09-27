@@ -53,7 +53,7 @@ PREMAKE_OPTS=()
 $ASAN && PREMAKE_OPTS+=("--asan")
 $TSAN && PREMAKE_OPTS+=("--tsan")
 
-# Phase 105's encrypted-database probe is part of the test runner. Keep its
+# The encrypted-database backend is part of the app and test runner. Keep its
 # sanitizer instrumentation aligned with the runner; TSan uses the plain
 # dependency build because the spike has no shared application connections.
 if [[ "$ASAN" == true ]]; then

@@ -215,9 +215,9 @@ local function cmake_static_lib(prefix, name)
            path.join(prefix, "lib/lib" .. name .. ".a") or nil
 end
 
--- Phase 105 SQLCipher validation spike. The library is intentionally linked
--- only into osv_tests; the production database wrapper arrives in Phase 107.
-local function link_sqlcipher_spike()
+-- Vendored SQLCipher database backend (Phase 107; initially validated by the
+-- Phase 105 test spike). Always static, with the pinned static OpenSSL provider.
+local function link_sqlcipher()
     local suffix = _OPTIONS["asan"] and "-asan" or ""
     local build = path.join(os.getcwd(), "vendor/.sqlcipher-build" .. suffix)
     local openssl = path.join(os.getcwd(), "vendor/openssl-prefix" .. suffix)
@@ -232,7 +232,7 @@ local function link_sqlcipher_spike()
     end
     includedirs { build }
     libdirs { build }
-    defines { "OSV_SQLCIPHER_SPIKE", "SQLITE_HAS_CODEC" }
+    defines { "OSV_SQLCIPHER_SPIKE", "OSV_VENDORED_SQLCIPHER", "SQLITE_HAS_CODEC" }
     links { "sqlite3" }
     linkoptions { path.join(openssl, "lib/libcrypto.a") }
 end
@@ -402,6 +402,7 @@ project "osv"
     link_image_codecs()
     link_av()
     link_archive()
+    link_sqlcipher()
 
     -- Strict warnings for project code (not vendored)
     fatalwarnings { "All" }
@@ -587,7 +588,7 @@ project "osv_tests"
     link_image_codecs()
     link_av()
     link_archive()
-    link_sqlcipher_spike()
+    link_sqlcipher()
 
     -- Strict warnings for project code (not vendored)
     fatalwarnings { "All" }

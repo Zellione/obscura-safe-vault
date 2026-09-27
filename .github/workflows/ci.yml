@@ -575,7 +575,7 @@ jobs:
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
             --slave /usr/bin/g++ g++ /usr/bin/g++-14
 
-      - name: Cache Phase 105 encrypted database dependencies
+      - name: Cache encrypted database dependencies
         if: env.SONAR_TOKEN != ''
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-sqlcipher
@@ -586,7 +586,7 @@ jobs:
             vendor/.sqlcipher-build
           key: sqlcipher-linux-${{ hashFiles('.gitmodules', 'scripts/build_openssl.sh', 'scripts/build_sqlcipher.sh') }}-${{ runner.arch }}
 
-      - name: Build Phase 105 SQLCipher validation library
+      - name: Build SQLCipher database library
         if: env.SONAR_TOKEN != '' && steps.cache-sqlcipher.outputs.cache-hit != 'true'
         run: scripts/build_sqlcipher.sh
 

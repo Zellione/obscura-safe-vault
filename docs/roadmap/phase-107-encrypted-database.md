@@ -1,6 +1,34 @@
 # Encrypted database foundation and schema (Phase 107)
 
-**Status:** not started
+**Status:** complete
+
+## Delivered
+
+- Production targets now link the pinned static SQLCipher/OpenSSL build rather
+  than limiting it to the Phase 105 validation spike.
+- `vault::v3::Database` provides the move-only, no-exception boundary:
+  raw-key setup, encrypted rollback journal + FULL synchronous mode, defensive
+  and untrusted-schema configuration, bounded SQLite limits, schema-v1
+  creation, immediate key/schema verification, integrity checking, and typed
+  wrong-key/corruption, busy, disk-full, constraint, and future-version status.
+- Prepared-statement repository operations cover typed node insert/list/lookup/
+  search, object-reference snapshots, tags and assignments, category templates,
+  tag field values/descriptions, saved searches, and settings. Decrypted text
+  and query blobs return in `SecureString`/`SecureBlob` owners.
+- The schema boundary rejects future and pre-v1 versions. Schema v1 is the
+  initial supported minimum, so there is no historical encrypted schema to
+  transform; later upgrades must add a transactional step before raising
+  `SCHEMA_VERSION`. Creation is one transaction and cleans up on failure.
+- Online backup uses SQLCipher's backup API into an exclusively created,
+  encrypted same-directory staging database, verifies integrity, fsyncs the
+  file, publishes without replacement, and fsyncs the directory.
+- TDD coverage proves Unicode mixed metadata round-trip, search, every v1
+  settings/tag/template field, object snapshots, encrypted primary/backup
+  canaries, backup reopen, wrong-key fail-closed, future-version rejection,
+  constraints, and close-before-removal. Phase 105's retained tests cover
+  encrypted rollback-journal canaries, page corruption, and frozen query plans.
+- Gates: 2,307 Debug tests, 2,307 Release tests, 2,307 ASAN/UBSan tests, and
+  2,113 no-FFmpeg tests pass with zero failures. No `.osv` or v3 format change.
 
 ## Goal
 
