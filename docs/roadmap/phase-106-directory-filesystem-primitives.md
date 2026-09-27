@@ -1,6 +1,6 @@
 # Secure directory and object-store filesystem primitives (Phase 106)
 
-**Status:** not started
+**Status:** complete
 
 ## Goal
 
@@ -31,3 +31,42 @@ Build the Linux filesystem boundary required by a directory vault without yet st
 ## Acceptance criterion
 
 Filesystem primitives pass unit, race, and fault-injection tests; no operation follows a link or escapes the opened root; creation is durable or cleanly retryable; and `scripts/test.sh`, Release, no-AV, and ASAN gates are green.
+
+## Delivered
+
+- `src/vault/v3_fs.*` adds move-only vault-root, writer-lock, and durable staging-file
+  handles. Root opening prefers `openat2` with `RESOLVE_NO_SYMLINKS |
+  RESOLVE_NO_MAGICLINKS`; its fallback walks every component through retained
+  directory descriptors with `O_NOFOLLOW`.
+- New layouts are exclusively claimed and fixed to `0700`/`0600` independently
+  of umask. Failed creation removes only artifacts from that new attempt; an
+  existing caller directory is never recursively removed.
+- Layout validation rejects wrong ownership/modes, links, hard-linked control or
+  object files, special files, unknown root entries, malformed shards/object
+  names, and `objects`/`staging` mounts on a different device.
+- Staging uses CSPRNG names and exclusive creation. Publication requires a
+  successful `fdatasync`, uses `renameat2(RENAME_NOREPLACE)`, then syncs the
+  affected directories. Object paths are derived only from 128-bit IDs using
+  the fixed lowercase shard grammar.
+- The `flock`-backed writer lease is authoritative and move-only; the PID written
+  to `lock` is diagnostic only. Read-only root handles never acquire it.
+- Deterministic one-shot hooks cover open, write, file sync, rename, directory
+  sync, lock, and unlink failure boundaries. Tests exercise cold validation,
+  rollback, permissions under a zero umask, symlink/hard-link rejection,
+  canonical path parsing, lock contention across processes, publication, and
+  cleanup.
+
+### Filesystem contract
+
+Directory vaults require a local Linux filesystem that provides durable regular
+file and directory `fsync`, advisory `flock`, and atomic same-filesystem
+`renameat2(RENAME_NOREPLACE)` semantics (the intended deployment set is ext4,
+XFS, and btrfs). Network filesystems and filesystems that do not honor those
+durability/locking semantics are unsupported. `objects/` and `staging/` must be
+on the vault root's device; cross-device publication fails closed (`EXDEV`) and
+layout validation rejects a redirected mount before use.
+
+Verification: 2,301 Debug and Release tests pass, 2,107 no-AV tests pass,
+and the final filesystem suite is clean under ASAN/UBSAN. The managed runner's
+ptrace wrapper prevents LeakSanitizer startup; the full ASAN/UBSAN suite passes
+with leak detection disabled and reports no address or undefined-behavior issue.

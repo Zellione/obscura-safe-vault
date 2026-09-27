@@ -25,6 +25,16 @@ SQLCipher's required 67-byte raw keyspec inside a wipe-on-release
 production backend remains the legacy single-file container until later v3
 phases.
 
+Phase 106 adds the Linux filesystem boundary in `v3_fs.*`: move-only
+`VaultRoot`, `WriterLock`, and `DurableFile` handles; `openat2` no-link root
+resolution with a component-walk fallback; strict owner/mode/type/link/device
+layout validation; CSPRNG exclusive staging; sync-before-reference,
+`renameat2(RENAME_NOREPLACE)` object publication; canonical
+`objects/<two-hex>/<32-hex>.osvo` construction/parsing; safe unlink; and
+one-shot fault injection for every durable boundary. `objects/` and `staging/`
+must share the root device. The writer `flock` is authoritative (PID text is
+diagnostic only); a plain `VaultRoot` is read-only until that lease is acquired.
+
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
 `seek_end`. WHY: `write_header` does `seek_to(fp_,0)` then `fwrite` as two separately-locked
