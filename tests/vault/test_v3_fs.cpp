@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 
 namespace fs = std::filesystem;
 using namespace vault::v3;
@@ -229,4 +230,45 @@ TEST(v3_fs_failed_create_never_removes_caller_directory)
     }
     CHECK_FALSE(VaultRoot::create(d.path / "existing.osv").has_value());
     CHECK_TRUE(fs::exists(d.path / "existing.osv/keep"));
+}
+
+TEST(v3_fs_move_assignment_transfers_every_handle_without_leaking_ownership)
+{
+    TempDir d("moves");
+    auto root = VaultRoot::create(d.path / "a.osv");
+    REQUIRE(root.has_value());
+
+    auto first_file = root->create_staging_file();
+    auto second_file = root->create_staging_file();
+    REQUIRE(first_file.has_value() && second_file.has_value());
+    *second_file = std::move(*first_file);
+    CHECK_TRUE(second_file->valid());
+    CHECK_FALSE(first_file->valid());
+
+    auto first_lock = root->try_writer_lock();
+    REQUIRE(first_lock.has_value());
+    WriterLock moved_lock;
+    moved_lock = std::move(*first_lock);
+    CHECK_FALSE(root->try_writer_lock().has_value());
+
+    VaultRoot moved_root;
+    moved_root = std::move(*root);
+    CHECK_TRUE(moved_root.native_handle() >= 0);
+    CHECK_EQ(root->native_handle(), -1);
+    CHECK_TRUE(moved_root.validate_layout());
+}
+
+TEST(v3_fs_unlink_staging_removes_only_a_plain_child)
+{
+    TempDir d("unlink_staging");
+    auto root = VaultRoot::create(d.path / "a.osv");
+    REQUIRE(root.has_value());
+    const fs::path debris = d.path / "a.osv/staging/debris.tmp";
+    {
+        std::ofstream(debris) << "encrypted debris";
+    }
+    REQUIRE(::chmod(debris.c_str(), 0600) == 0);
+    CHECK_TRUE(root->unlink_staging("debris.tmp"));
+    CHECK_FALSE(fs::exists(debris));
+    CHECK_FALSE(root->unlink_staging("../vault.db"));
 }

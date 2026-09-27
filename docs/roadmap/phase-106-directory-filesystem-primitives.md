@@ -66,7 +66,8 @@ durability/locking semantics are unsupported. `objects/` and `staging/` must be
 on the vault root's device; cross-device publication fails closed (`EXDEV`) and
 layout validation rejects a redirected mount before use.
 
-Verification: 2,301 Debug and Release tests pass, 2,107 no-AV tests pass,
+Verification: 2,303 Debug tests pass; the pre-coverage-fix Release and no-AV
+suites passed 2,301 and 2,107 tests respectively,
 and the final filesystem suite is clean under ASAN/UBSAN. The managed runner's
 ptrace wrapper prevents LeakSanitizer startup; the full ASAN/UBSAN suite passes
 with leak detection disabled and reports no address or undefined-behavior issue.
