@@ -19,7 +19,7 @@ cd "$REPO_ROOT"
 NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
 echo "==> Initialising git submodules..."
-git submodule update --init --recursive
+git submodule update --init
 
 # ---------------------------------------------------------------------------
 # premake5 binary — download if missing
@@ -72,6 +72,10 @@ fi
 # the SDL3 / premake steps above.
 # ---------------------------------------------------------------------------
 "$REPO_ROOT/scripts/build_codecs.sh"
+
+# Phase 105 directory-vault database validation dependency. This remains
+# test-only until the Phase 107 database integration.
+"$REPO_ROOT/scripts/build_sqlcipher.sh"
 
 echo ""
 echo "Setup complete. Next steps:"

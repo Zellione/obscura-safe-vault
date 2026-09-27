@@ -43,6 +43,7 @@ runs:
           cmake \
           ninja-build \
           nasm \
+          perl \
           g++-14 \
           libgl1-mesa-dev \
           libx11-dev \

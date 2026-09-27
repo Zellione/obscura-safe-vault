@@ -1,0 +1,79 @@
+#include "test_framework.h"
+
+#include "vault/v3_crypto_spec.h"
+
+#include <array>
+#include <cstdint>
+
+namespace {
+
+template <size_t N>
+std::array<uint8_t, N> sequence(uint8_t first)
+{
+    std::array<uint8_t, N> out{};
+    for (size_t i = 0; i < N; ++i)
+        out[i] = static_cast<uint8_t>(first + static_cast<uint8_t>(i));
+    return out;
+}
+
+} // namespace
+
+TEST(v3_database_key_derivation_known_answer)
+{
+    const auto master = sequence<32>(0x00);
+    const auto vault_id = sequence<16>(0xa0);
+    constexpr std::array<uint8_t, 32> EXPECTED{
+        0x3d, 0x9f, 0x22, 0xf8, 0xed, 0x82, 0x75, 0xf5,
+        0x20, 0xb3, 0x7c, 0x38, 0xb2, 0x52, 0xac, 0xb9,
+        0x9f, 0xf8, 0xe3, 0x4d, 0x69, 0xdc, 0x63, 0x2d,
+        0xca, 0x8a, 0xa0, 0xce, 0xda, 0xb6, 0x78, 0x89,
+    };
+    auto derived = vault::v3::derive_database_key(master, vault_id);
+    CHECK_BYTES_EQ(derived.as_span(), EXPECTED);
+}
+
+TEST(v3_object_key_derivation_known_answer_and_identity_binding)
+{
+    const auto master = sequence<32>(0x00);
+    const auto vault_id = sequence<16>(0xa0);
+    auto object_id = sequence<16>(0xc0);
+    constexpr std::array<uint8_t, 32> EXPECTED{
+        0xa3, 0x7b, 0xdd, 0x8d, 0x29, 0xe1, 0x1f, 0xe3,
+        0xf2, 0x8a, 0xe6, 0xd6, 0x2d, 0x76, 0x36, 0x43,
+        0x19, 0xf3, 0xfd, 0xd6, 0xf8, 0x63, 0x93, 0xdd,
+        0xab, 0x7d, 0x86, 0x18, 0x26, 0xe8, 0x0e, 0x06,
+    };
+    auto derived = vault::v3::derive_object_key(master, vault_id, object_id);
+    CHECK_BYTES_EQ(derived.as_span(), EXPECTED);
+
+    object_id.back() ^= 1;
+    auto changed = vault::v3::derive_object_key(master, vault_id, object_id);
+    CHECK_FALSE(testing::bytes_equal(derived.as_span(), changed.as_span()));
+}
+
+TEST(v3_object_frame_ad_exact_bytes)
+{
+    const vault::v3::ObjectFrameTag tag{
+        .role = vault::v3::ObjectRole::OriginalVideo,
+        .vault_id = sequence<16>(0xa0),
+        .object_id = sequence<16>(0xc0),
+        .owner_node_id = sequence<16>(0xe0),
+        .frame_index = 7,
+        .frame_count = 19,
+        .total_plaintext_length = 0x0102030405060708ULL,
+    };
+    constexpr std::array<uint8_t, vault::v3::OBJECT_FRAME_AD_SIZE> EXPECTED{
+        0x04, 0x01,
+        0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7,
+        0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf,
+        0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7,
+        0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce, 0xcf,
+        0xe0, 0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7,
+        0xe8, 0xe9, 0xea, 0xeb, 0xec, 0xed, 0xee, 0xef,
+        0x07, 0x00, 0x00, 0x00, 0x13, 0x00, 0x00, 0x00,
+        0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
+    };
+    const auto ad = vault::v3::build_object_frame_ad(tag);
+    CHECK_BYTES_EQ(ad, EXPECTED);
+}
+

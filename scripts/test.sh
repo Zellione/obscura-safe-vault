@@ -53,6 +53,15 @@ PREMAKE_OPTS=()
 $ASAN && PREMAKE_OPTS+=("--asan")
 $TSAN && PREMAKE_OPTS+=("--tsan")
 
+# Phase 105's encrypted-database probe is part of the test runner. Keep its
+# sanitizer instrumentation aligned with the runner; TSan uses the plain
+# dependency build because the spike has no shared application connections.
+if [[ "$ASAN" == true ]]; then
+    "$REPO_ROOT/scripts/build_sqlcipher.sh" --asan
+else
+    "$REPO_ROOT/scripts/build_sqlcipher.sh"
+fi
+
 # Sanitizer binaries build into their own directories (build/bin/Debug-asan, …)
 # so they never overwrite the plain app binary (see premake5.lua).
 SAN_SUFFIX=""
@@ -100,6 +109,14 @@ fi
 BIN="build/bin/${CONFIG}${SAN_SUFFIX}/osv_tests"
 if [[ ! -x "$BIN" ]]; then
     echo "Test binary not found at $BIN"
+    exit 1
+fi
+
+# SQLCipher and its OpenSSL provider are hermetic static dependencies. Catch an
+# accidental fallback to host sqlite/libcrypto before executing any DB tests.
+if ldd "$BIN" | grep -Eq 'lib(sqlcipher|sqlite|crypto|ssl)'; then
+    echo "Unexpected dynamic encrypted-database dependency:" >&2
+    ldd "$BIN" | grep -E 'lib(sqlcipher|sqlite|crypto|ssl)' >&2
     exit 1
 fi
 

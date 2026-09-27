@@ -9,7 +9,11 @@ if ! command -v git >/dev/null 2>&1 || [[ ! -f .gitmodules ]]; then
     exit 0
 fi
 
-missing="$(git submodule status --recursive 2>/dev/null | awk '$1 ~ /^-/ { print $2 }')"
+# Every required build dependency is a top-level vendor submodule. In
+# particular, OpenSSL's own test/integration submodules (TLS fuzzers, alternate
+# providers, language bindings) are intentionally absent because our minimal
+# no-tests/no-module static libcrypto build does not consume them.
+missing="$(git submodule status 2>/dev/null | awk '$1 ~ /^-/ { print $2 }')"
 if [[ -n "$missing" ]]; then
     echo "Required git submodules are not initialized:" >&2
     while IFS= read -r path; do

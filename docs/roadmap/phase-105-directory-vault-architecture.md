@@ -1,6 +1,60 @@
 # Directory-vault architecture and format contract (Phase 105)
 
-**Status:** not started
+**Status:** complete — awaiting owner review/merge
+
+## Implementation progress (2026-09-26)
+
+Completed on the Phase 105 branch:
+
+- `docs/V3_VAULT_FORMAT.md` freezes the root/header/object layout, key domains,
+  associated-data encoding, publication ordering, compatibility boundary, and
+  initial database model.
+- ADR 0001 selects pinned SQLCipher 4.19.0 and rejects plaintext SQLite, a
+  custom encrypted VFS, and the incompatible SQLCipher 5 beta.
+- SQLCipher is a vendored submodule and builds as an out-of-tree static test
+  dependency, including a separately instrumented ASAN build.
+- A wipe-on-release adapter encodes the derived 32-byte database key in
+  SQLCipher's required 67-byte raw keyspec form. The test probe proves this
+  exact encoding, encrypted database and rollback-journal canaries, wrong-key
+  rejection, corrupt-page rejection, and correct-key reopen.
+- `v3_crypto_spec.*` implements the frozen database/object key derivations and
+  66-byte object-frame AD with exact-byte known-answer tests. Derived keys use
+  `SecureBuffer` and transient KDF input is wiped.
+
+Subsequent work on the same branch completed the remaining design gates:
+
+- `v3_detect.*` classifies legacy files and v3 directories and fails closed on
+  truncated/future headers, symlink roots/headers, missing paths, and unexpected
+  file types. It is explicitly advisory; Phase 106 owns race-safe root opening.
+- `v3_schema.h` freezes executable schema v1 DDL. Tests cover foreign keys,
+  one-root/ID/object-role/tag constraints, schema version, and indexed gallery
+  and tag query plans.
+- `v3_transaction_model.h` exhaustively checks create/replace/delete states at
+  every publication boundary: no state has a committed missing reference, and
+  interrupted work leaves only conservatively reclaimable extras.
+- OpenSSL 3.5.8 LTS is pinned as a hermetic static provider; SQLCipher links
+  only `libcrypto`, with apps/modules/legacy surfaces disabled. Both have
+  normal and sanitizer builds; the test gate rejects dynamic fallback.
+
+Final verification: Debug, Release, and ASAN/UBSAN each pass 2,291 tests with
+zero failures; the no-audio/video build passes 2,097 tests with zero failures.
+LeakSanitizer also completes cleanly when run outside the workspace seccomp
+sandbox, which blocks its required thread-inspection operation.
+
+## Crash-point matrix
+
+| Operation | Before durable publish | After publish, before DB commit | After DB commit, before cleanup | Recovery rule |
+|---|---|---|---|---|
+| Create/import | Staging only; no row | Unreferenced new object | Referenced complete object | Remove stale staging; grace-period GC may reclaim only the middle state |
+| Replace derived/original | Old row/object authoritative | Old authoritative; new object is garbage | New authoritative; old object is garbage | Never delete either object until the DB state is re-read under writer lock |
+| Delete | Old row/object authoritative | Not applicable | No row; old object is garbage | Unreference first, then unlink; retry cleanup idempotently |
+| Header/password change | Old header authoritative | Durable temporary header only | Renamed new header authoritative | Phase 106 freezes two-copy/no-replace mechanics; never rewrite DB/objects |
+| DB transaction/checkpoint | Prior committed SQL state | SQLite rollback restores prior state | New committed SQL state | SQLCipher rollback journal is encrypted; SQLite owns page recovery |
+| Garbage collection | No change | Candidate list is advisory | Unlink only after locked reference recheck | Missing referenced objects are corruption, never GC candidates |
+
+Every row is also tested by the pure publication model where applicable. The
+subprocess/fsync fault-injection implementation belongs to Phases 106 and 109;
+this phase freezes the required observable outcomes.
 
 ## Goal
 

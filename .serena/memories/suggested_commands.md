@@ -4,6 +4,10 @@
 ```bash
 scripts/setup.sh          # premake5 + SDL3 + image codecs (calls build_codecs.sh)
 scripts/build_codecs.sh   # (re)build just the vendored image codecs into vendor/codecs-prefix
+scripts/build_sqlcipher.sh          # Phase 105 static encrypted-DB test dependency
+scripts/build_sqlcipher.sh --asan   # separately instrumented SQLCipher test build
+scripts/build_openssl.sh            # pinned static libcrypto provider (normally called above)
+scripts/build_openssl.sh --asan     # separately instrumented provider build
 ```
 Prerequisites: `cmake`, `ninja`, a C++23 compiler, and **nasm** (for libaom / AVIF).
 
