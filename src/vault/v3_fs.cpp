@@ -161,8 +161,10 @@ std::optional<bool> entry_is_directory(std::string_view name, bool shards,
                                        std::string_view expected_shard) noexcept
 {
     if (shards) {
-        const bool valid = name.size() == 2 && hex_value(name[0]) >= 0 && hex_value(name[1]) >= 0;
-        if (!valid) return std::nullopt;
+        if (const bool valid =
+                name.size() == 2 && hex_value(name[0]) >= 0 && hex_value(name[1]) >= 0;
+            !valid)
+            return std::nullopt;
         return true;
     }
     if (expected_shard.empty())
@@ -176,7 +178,7 @@ bool validate_entry(int parent, const dirent& entry, bool shards,
 {
     const std::string_view name{entry.d_name};
     const auto directory = entry_is_directory(name, shards, expected_shard);
-    if (!directory) return false;
+    if (!directory.has_value()) return false;
     const int child =
         open_child(parent, entry.d_name, *directory ? O_RDONLY | O_DIRECTORY : O_RDONLY);
     const bool metadata_ok = child >= 0 && owned_mode(child, *directory ? S_IFDIR : S_IFREG,
@@ -197,9 +199,8 @@ bool validate_entries(int parent, bool shards, std::string_view expected_shard) 
     }
     errno = 0;
     while (const dirent* e = ::readdir(dir)) {
-        const std::string_view name{e->d_name};
-        if (name == "." || name == "..") continue;
-        if (!validate_entry(parent, *e, shards, expected_shard)) {
+        if (const std::string_view name{e->d_name};
+            name != "." && name != ".." && !validate_entry(parent, *e, shards, expected_shard)) {
             ::closedir(dir);
             return false;
         }
@@ -471,9 +472,8 @@ bool VaultRoot::validate_layout() const noexcept
     unsigned seen = 0;
     errno = 0;
     while (const dirent* e = ::readdir(dir)) {
-        const std::string_view n{e->d_name};
-        if (n == "." || n == "..") continue;
-        if (!validate_root_entry(fd_, *e, seen)) {
+        if (const std::string_view name{e->d_name};
+            name != "." && name != ".." && !validate_root_entry(fd_, *e, seen)) {
             ::closedir(dir);
             return false;
         }
