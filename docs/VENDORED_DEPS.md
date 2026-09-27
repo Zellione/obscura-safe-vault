@@ -165,8 +165,9 @@ linked statically into `libheif.a` (verified by undefined-symbol scan).
   (Phase 43 Part 2) uses its headers to compile a `dlopen`-based forwarding
   shim, so the app never links or requires real libva at build time. See
   `docs/superpowers/specs/2026-07-17-hardware-video-decode-design.md`.
-- **SQLCipher 4.19.0** is pinned for the v3 database. Phase 105 links its static
-  library only into the test probe. Its provider is vendored **OpenSSL 3.5.8
+- **SQLCipher 4.19.0** is pinned for the v3 database. Phase 105 validated its
+  static build; Phase 107 links it into both the application and tests. Its
+  provider is vendored **OpenSSL 3.5.8
   LTS**; only its static `libcrypto` is linked, while apps/modules/engines and
   the legacy provider are disabled. Normal and ASAN builds live in separate
   ignored prefixes. See ADR 0001.

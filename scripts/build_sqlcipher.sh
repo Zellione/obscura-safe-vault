@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the pinned SQLCipher submodule as a static validation dependency.
-# Phase 105 links it only into osv_tests; production integration is Phase 107.
+# Phase 105 introduced the validation probe; Phase 107 links this build into
+# both the production application and tests.
 
 set -euo pipefail
 

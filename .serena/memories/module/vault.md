@@ -35,6 +35,21 @@ one-shot fault injection for every durable boundary. `objects/` and `staging/`
 must share the root device. The writer `flock` is authoritative (PID text is
 diagnostic only); a plain `VaultRoot` is read-only until that lease is acquired.
 
+Phase 107 adds `v3_db.*`, the production-linked, move-only
+SQLCipher boundary: it applies the raw derived key without SQL interpolation,
+enables cipher memory security, rollback journal + FULL synchronous durability,
+foreign keys, defensive/untrusted-schema modes and bounded SQLite limits before
+accepting the connection. Create installs frozen schema v1 plus the root/meta
+rows transactionally; open verifies the key immediately, rejects unsupported
+versions, and runs an integrity check. SQLite handles and rows stay private and
+failures map to `DbStatus`. Prepared repositories cover nodes/search, immutable
+object-reference snapshots, tags/categories/templates/values/descriptions,
+saved searches and settings; decrypted results use secure string/blob owners.
+`backup_to` uses SQLCipher online backup into exclusive encrypted staging,
+verifies it, fsyncs, publishes no-replace, and directory-syncs. Schema v1 is
+both the supported minimum and maximum; future versions fail closed, and the
+first later migration must be transactional before raising `SCHEMA_VERSION`.
+
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
 `seek_end`. WHY: `write_header` does `seek_to(fp_,0)` then `fwrite` as two separately-locked

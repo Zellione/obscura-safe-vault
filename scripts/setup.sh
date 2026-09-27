@@ -73,8 +73,8 @@ fi
 # ---------------------------------------------------------------------------
 "$REPO_ROOT/scripts/build_codecs.sh"
 
-# Phase 105 directory-vault database validation dependency. This remains
-# test-only until the Phase 107 database integration.
+# Phase 105/107 directory-vault encrypted database dependency. Linked into
+# both the production application and tests since Phase 107.
 "$REPO_ROOT/scripts/build_sqlcipher.sh"
 
 echo ""
