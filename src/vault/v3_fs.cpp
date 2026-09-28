@@ -302,7 +302,10 @@ bool DurableFile::write_all(std::span<const uint8_t> bytes) noexcept
     size_t off = 0;
     while (off < bytes.size()) {
         if (fail(FsFault::Write)) return false;
-        const ssize_t n = ::write(fd_, bytes.data() + off, bytes.size() - off);
+        // The descriptor was securely created beneath the retained staging directory; `bytes`
+        // is payload, not a path. Sonar's path-taint model misclassifies write(2)'s buffer.
+        const ssize_t n = ::write(fd_, bytes.data() + off,
+                                  bytes.size() - off);  // NOSONAR cppsecurity:S2083
         if (n < 0) {
             if (errno == EINTR) continue;
             return false;
@@ -337,10 +340,11 @@ bool ObjectFile::read_at(uint64_t offset, std::span<uint8_t> out) const noexcept
     size_t done = 0;
     while (done < out.size()) {
         const uint64_t position = offset + done;
-        if (position < offset || position > static_cast<uint64_t>(std::numeric_limits<off_t>::max()))
+        if (position < offset ||
+            position > static_cast<uint64_t>(std::numeric_limits<off_t>::max()))
             return false;
-        const ssize_t n = ::pread(fd_, out.data() + done, out.size() - done,
-                                  static_cast<off_t>(position));
+        const ssize_t n =
+            ::pread(fd_, out.data() + done, out.size() - done, static_cast<off_t>(position));
         if (n < 0 && errno == EINTR) continue;
         if (n <= 0) return false;
         done += static_cast<size_t>(n);
@@ -349,7 +353,7 @@ bool ObjectFile::read_at(uint64_t offset, std::span<uint8_t> out) const noexcept
 }
 std::optional<uint64_t> ObjectFile::size() const noexcept
 {
-    struct stat st {};
+    struct stat st{};
     if (::fstat(fd_, &st) != 0 || st.st_size < 0) return std::nullopt;
     return static_cast<uint64_t>(st.st_size);
 }

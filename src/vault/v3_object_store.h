@@ -4,8 +4,8 @@
 #include "vault/v3_crypto_spec.h"
 #include "vault/v3_fs.h"
 
-#include <cstdint>
 #include <array>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -64,38 +64,48 @@ struct ObjectInspection {
 build_object_preamble(const Id& vault_id, const ObjectId& object_id,
                       uint32_t frame_plain_limit) noexcept;
 
-[[nodiscard]] ObjectWriteResult
-write_object(VaultRoot& root, std::span<const uint8_t, crypto::KEY_SIZE> master_key,
-             const ObjectWriteRequest& request, std::span<const uint8_t> plaintext) noexcept;
+[[nodiscard]] ObjectWriteResult write_object(const VaultRoot& root,
+                                             std::span<const uint8_t, crypto::KEY_SIZE> master_key,
+                                             const ObjectWriteRequest& request,
+                                             std::span<const uint8_t> plaintext) noexcept;
 
 using ObjectReadFn = std::function<bool(uint64_t offset, std::span<uint8_t> destination)>;
 
 // Pulls exactly `plaintext_length` bytes from `read`. Each callback destination is bounded by
 // frame_plain_limit and is locked/wiped storage; false cancels without publishing a partial file.
 [[nodiscard]] ObjectWriteResult
-write_object_stream(VaultRoot& root, std::span<const uint8_t, crypto::KEY_SIZE> master_key,
+write_object_stream(const VaultRoot& root, std::span<const uint8_t, crypto::KEY_SIZE> master_key,
                     const ObjectWriteRequest& request, uint64_t plaintext_length,
                     const ObjectReadFn& read) noexcept;
 
 class ObjectReader {
 public:
-    struct Entry { uint64_t offset; uint64_t length; uint32_t plain_length; uint8_t compression; };
+    struct Entry {
+        uint64_t offset;
+        uint64_t length;
+        uint32_t plain_length;
+        uint8_t compression;
+    };
     struct OpenResult {
         ObjectStatus status = ObjectStatus::IoError;
         std::unique_ptr<ObjectReader> reader;
     };
 
-    [[nodiscard]] static OpenResult
-    open(const VaultRoot& root, std::span<const uint8_t, crypto::KEY_SIZE> master_key,
-         const ObjectInfo& expected) noexcept;
+    [[nodiscard]] static OpenResult open(const VaultRoot& root,
+                                         std::span<const uint8_t, crypto::KEY_SIZE> master_key,
+                                         const ObjectInfo& expected) noexcept;
     [[nodiscard]] ObjectStatus read_all(crypto::SecureBytes& out) const noexcept;
     [[nodiscard]] ObjectStatus read_range(uint64_t offset, size_t length,
                                           crypto::SecureBytes& out) const noexcept;
-    [[nodiscard]] const ObjectInfo& info() const noexcept { return info_; }
+    [[nodiscard]] const ObjectInfo& info() const noexcept
+    {
+        return info_;
+    }
+
+    ObjectReader(ObjectFile file, crypto::SecureBuffer<crypto::KEY_SIZE> key,
+                 const ObjectInfo& info, std::vector<Entry> entries) noexcept;
 
 private:
-    ObjectReader(ObjectFile file, crypto::SecureBuffer<crypto::KEY_SIZE> key, ObjectInfo info,
-                 std::vector<Entry> entries) noexcept;
     [[nodiscard]] ObjectStatus read_frame(uint32_t index, crypto::SecureBytes& out) const noexcept;
     ObjectFile file_;
     crypto::SecureBuffer<crypto::KEY_SIZE> key_;
@@ -103,9 +113,8 @@ private:
     std::vector<Entry> entries_;
 };
 
-[[nodiscard]] ObjectInspection
-inspect_object(const VaultRoot& root,
-               std::span<const uint8_t, crypto::KEY_SIZE> master_key,
-               const ObjectInfo& expected) noexcept;
+[[nodiscard]] ObjectInspection inspect_object(const VaultRoot& root,
+                                              std::span<const uint8_t, crypto::KEY_SIZE> master_key,
+                                              const ObjectInfo& expected) noexcept;
 
 }  // namespace vault::v3
