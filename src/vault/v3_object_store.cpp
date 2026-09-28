@@ -378,10 +378,11 @@ ObjectStatus ObjectReader::read_frame(uint32_t index, crypto::SecureBytes& out) 
     if (index >= entries_.size()) return InvalidArgument;
     const auto& entry = entries_[index];
     crypto::SecureBytes framed;
-    const auto status = decrypt_record(
-        file_, std::span<const uint8_t, crypto::KEY_SIZE>{key_.data(), crypto::KEY_SIZE}, info_,
-        index, entry.offset, entry.length, framed);
-    if (status != Ok) return status;
+    if (const auto status = decrypt_record(
+            file_, std::span<const uint8_t, crypto::KEY_SIZE>{key_.data(), crypto::KEY_SIZE}, info_,
+            index, entry.offset, entry.length, framed);
+        status != Ok)
+        return status;
     if (framed.empty() || framed[0] != entry.compression ||
         !chunk_codec::decode_frame(framed.as_span(), out) || out.size() != entry.plain_length) {
         (void)out.resize(0);

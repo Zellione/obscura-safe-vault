@@ -304,8 +304,8 @@ bool DurableFile::write_all(std::span<const uint8_t> bytes) noexcept
         if (fail(FsFault::Write)) return false;
         // The descriptor was securely created beneath the retained staging directory; `bytes`
         // is payload, not a path. Sonar's path-taint model misclassifies write(2)'s buffer.
-        const ssize_t n = ::write(fd_, bytes.data() + off,
-                                  bytes.size() - off);  // NOSONAR cppsecurity:S2083
+        const ssize_t n = ::write(  // NOSONAR cppsecurity:S2083
+            fd_, bytes.data() + off, bytes.size() - off);
         if (n < 0) {
             if (errno == EINTR) continue;
             return false;
