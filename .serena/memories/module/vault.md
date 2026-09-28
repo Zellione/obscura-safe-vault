@@ -50,6 +50,19 @@ verifies it, fsyncs, publishes no-replace, and directory-syncs. Schema v1 is
 both the supported minimum and maximum; future versions fail closed, and the
 first later migration must be transactional before raising `SCHEMA_VERSION`.
 
+Phase 108 adds `v3_object_store.*`, which writes immutable,
+independently-keyed `.osvo` files through `v3_fs` staging and durable no-replace
+publication. The preamble, encrypted header, adaptively compressed bounded frames,
+authenticated seek table, and footer are implemented; reads authenticate metadata before
+exposing whole or range plaintext through `SecureBytes`. A bounded pull-based producer
+supports streaming writes without holding the whole original, and cancellation removes its
+unpublished staging file. Open takes the database's expected identity,
+role, owner, length, and framing tuple because those values form the header AEAD AD,
+then requires every authenticated structure to agree. Structural inspection is metadata-only.
+Tests cover all image/thumbnail/poster roles, compression, ranges, streaming/cancel, plaintext
+absence, substitution, bit flips, frame swaps, length/filename mismatch, bounds, and durable
+publication faults.
+
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
 `seek_end`. WHY: `write_header` does `seek_to(fp_,0)` then `fwrite` as two separately-locked

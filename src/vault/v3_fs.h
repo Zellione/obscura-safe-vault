@@ -47,6 +47,24 @@ private:
     bool synced_ = false;
 };
 
+class ObjectFile {
+public:
+    ObjectFile() = default;
+    ~ObjectFile();
+    ObjectFile(ObjectFile&& other) noexcept;
+    ObjectFile& operator=(ObjectFile&& other) noexcept;
+    ObjectFile(const ObjectFile&) = delete;
+    ObjectFile& operator=(const ObjectFile&) = delete;
+
+    [[nodiscard]] bool read_at(uint64_t offset, std::span<uint8_t> out) const noexcept;
+    [[nodiscard]] std::optional<uint64_t> size() const noexcept;
+
+private:
+    friend class VaultRoot;
+    explicit ObjectFile(int fd) noexcept : fd_(fd) {}
+    int fd_ = -1;
+};
+
 class WriterLock {
 public:
     WriterLock() = default;
@@ -76,6 +94,7 @@ public:
     [[nodiscard]] bool validate_layout() const noexcept;
     [[nodiscard]] std::optional<WriterLock> try_writer_lock() const noexcept;
     [[nodiscard]] std::optional<DurableFile> create_staging_file() const noexcept;
+    [[nodiscard]] std::optional<ObjectFile> open_object(const ObjectId& id) const noexcept;
     [[nodiscard]] bool publish(DurableFile& file, const ObjectId& id) const noexcept;
     [[nodiscard]] bool unlink_object(const ObjectId& id) const noexcept;
     [[nodiscard]] bool unlink_staging(std::string_view name) const noexcept;
