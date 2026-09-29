@@ -10,6 +10,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <format>
+#include <limits>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -301,7 +302,10 @@ bool DurableFile::write_all(std::span<const uint8_t> bytes) noexcept
     size_t off = 0;
     while (off < bytes.size()) {
         if (fail(FsFault::Write)) return false;
-        const ssize_t n = ::write(fd_, bytes.data() + off, bytes.size() - off);
+        // The descriptor was securely created beneath the retained staging directory; `bytes`
+        // is payload, not a path. Sonar's path-taint model misclassifies write(2)'s buffer.
+        const ssize_t n = ::write(  // NOSONAR cppsecurity:S2083
+            fd_, bytes.data() + off, bytes.size() - off);
         if (n < 0) {
             if (errno == EINTR) continue;
             return false;
@@ -315,6 +319,43 @@ bool DurableFile::sync() noexcept
 {
     synced_ = !fail(FsFault::FileSync) && ::fdatasync(fd_) == 0;
     return synced_;
+}
+
+ObjectFile::~ObjectFile()
+{
+    close_fd(fd_);
+}
+ObjectFile::ObjectFile(ObjectFile&& other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
+ObjectFile& ObjectFile::operator=(ObjectFile&& other) noexcept
+{
+    if (this != &other) {
+        close_fd(fd_);
+        fd_ = std::exchange(other.fd_, -1);
+    }
+    return *this;
+}
+bool ObjectFile::read_at(uint64_t offset, std::span<uint8_t> out) const noexcept
+{
+    if (offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) return false;
+    size_t done = 0;
+    while (done < out.size()) {
+        const uint64_t position = offset + done;
+        if (position < offset ||
+            position > static_cast<uint64_t>(std::numeric_limits<off_t>::max()))
+            return false;
+        const ssize_t n =
+            ::pread(fd_, out.data() + done, out.size() - done, static_cast<off_t>(position));
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return false;
+        done += static_cast<size_t>(n);
+    }
+    return true;
+}
+std::optional<uint64_t> ObjectFile::size() const noexcept
+{
+    struct stat st{};
+    if (::fstat(fd_, &st) != 0 || st.st_size < 0) return std::nullopt;
+    return static_cast<uint64_t>(st.st_size);
 }
 
 WriterLock::~WriterLock()
@@ -530,6 +571,26 @@ std::optional<DurableFile> VaultRoot::create_staging_file() const noexcept
     }
     ::close(staging);
     return std::nullopt;
+}
+
+std::optional<ObjectFile> VaultRoot::open_object(const ObjectId& id) const noexcept
+{
+    if (std::ranges::all_of(id, [](uint8_t byte) { return byte == 0; })) return std::nullopt;
+    const std::string rel = object_relative_path(id);
+    const std::string shard = rel.substr(8, 2);
+    const std::string name = rel.substr(11);
+    const int objects = open_child(fd_, "objects", O_RDONLY | O_DIRECTORY);
+    if (objects < 0) return std::nullopt;
+    const int shard_fd = open_child(objects, shard.c_str(), O_RDONLY | O_DIRECTORY);
+    ::close(objects);
+    if (shard_fd < 0) return std::nullopt;
+    const int object_fd = open_child(shard_fd, name.c_str(), O_RDONLY);
+    ::close(shard_fd);
+    if (object_fd < 0 || !owned_mode(object_fd, S_IFREG, 0600, true)) {
+        if (object_fd >= 0) ::close(object_fd);
+        return std::nullopt;
+    }
+    return ObjectFile(object_fd);
 }
 
 bool VaultRoot::publish(DurableFile& file, const ObjectId& id) const noexcept

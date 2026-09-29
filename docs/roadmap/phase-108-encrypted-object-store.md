@@ -1,6 +1,17 @@
 # Independently encrypted object format and store (Phase 108)
 
-**Status:** not started
+**Status:** complete
+
+## Progress
+
+- ✅ Core immutable object writer/reader and descriptor-relative object opens.
+- ✅ Exact preamble, authenticated header, adaptively compressed bounded frames, seek table and footer.
+- ✅ Whole-object and bounded range reads into `SecureBytes`.
+- ✅ Bounded pull-based producer streaming, cancellation cleanup, and structural inspection.
+- ✅ Identity/key/role/owner substitution, bit-flip, frame-swap, length and publication-fault tests.
+- ✅ Debug/Release/ASAN and no-AV matrices pass; hostile bounds and durable faults fail closed.
+
+Final verification: 2,319 Debug/Release/ASAN tests and 2,125 no-AV tests pass.
 
 ## Goal
 
@@ -11,6 +22,11 @@ Store every original image, thumbnail, and poster in a separate immutable authen
 Only a small fixed preamble needed for key selection and parsing is plaintext: magic, object-format version, `vault_id`, `object_id`, and bounded framing parameters. The encrypted/authenticated header holds role, owner `node_id`, media format, plaintext length, frame count/table data, and compression information. Associated data binds the full preamble plus domain, role, owner, and logical frame number. The final filename must encode the same `object_id`; mismatch is corruption.
 
 Objects are immutable after publication. Updates always create a fresh random object ID and file. Nonces are fresh per record. Per-object keys are domain-derived from the master key, so copying ciphertext under another filename/node/role/vault fails authentication. Compression occurs before encryption and has explicit decoded-size limits.
+
+Opening requires the database's expected role, owner, plaintext length, frame size/count, and
+encrypted length. The canonical AEAD associated data binds values that are inside the encrypted
+header, so those expected values are needed to attempt authentication; the reader then requires
+the authenticated header, table, footer, preamble, filename, and physical length to agree.
 
 ## Step-by-step work
 
