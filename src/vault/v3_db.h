@@ -118,6 +118,14 @@ public:
     [[nodiscard]] DbResult<std::vector<NodeRecord>> search_nodes(std::string_view term) const noexcept;
     [[nodiscard]] DbStatus insert_object(const ObjectRecord& object) noexcept;
     [[nodiscard]] DbResult<std::vector<ObjectRecord>> object_references() const noexcept;
+    // Phase 109 mutation primitives. The object reference and generation change are
+    // committed in one SQL transaction; callers must publish the immutable file first.
+    [[nodiscard]] DbStatus commit_object_create(ObjectRecord object) noexcept;
+    [[nodiscard]] DbResult<std::optional<Id>>
+    commit_object_replace(ObjectRecord object) noexcept;
+    [[nodiscard]] DbResult<std::optional<Id>>
+    commit_object_delete(const Id& node_id, ObjectRole role) noexcept;
+    [[nodiscard]] DbResult<bool> object_is_referenced(const Id& object_id) const noexcept;
     [[nodiscard]] DbStatus add_tag(int64_t tag_id, std::string_view display_name,
                                    std::string_view canonical_name) noexcept;
     [[nodiscard]] DbStatus assign_tag(const Id& node_id, int64_t tag_id) noexcept;

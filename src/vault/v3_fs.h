@@ -8,10 +8,23 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace vault::v3 {
 
 using ObjectId = Id;
+
+struct ObjectEntry {
+    ObjectId id{};
+    uint64_t size = 0;
+    int64_t modified_seconds = 0;
+};
+
+struct StagingCleanup {
+    size_t removed = 0;
+    size_t preserved_recent = 0;
+    size_t quarantined_or_foreign = 0;
+};
 
 enum class FsFault : uint8_t { Open, Write, FileSync, Rename, DirectorySync, Lock, Unlink };
 void inject_fs_fault(FsFault point, unsigned fail_after = 0) noexcept;
@@ -97,7 +110,10 @@ public:
     [[nodiscard]] std::optional<ObjectFile> open_object(const ObjectId& id) const noexcept;
     [[nodiscard]] bool publish(DurableFile& file, const ObjectId& id) const noexcept;
     [[nodiscard]] bool unlink_object(const ObjectId& id) const noexcept;
+    [[nodiscard]] std::optional<std::vector<ObjectEntry>> list_objects() const noexcept;
     [[nodiscard]] bool unlink_staging(std::string_view name) const noexcept;
+    [[nodiscard]] std::optional<StagingCleanup>
+    cleanup_staging(const WriterLock& writer_lock, int64_t older_than_seconds) const noexcept;
     [[nodiscard]] int native_handle() const noexcept
     {
         return fd_;

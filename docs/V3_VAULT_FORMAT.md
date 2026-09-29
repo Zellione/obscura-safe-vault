@@ -172,6 +172,25 @@ Images may use one or more frames. A video is one object file with independently
 
 Replacement publishes new → switches the database reference → removes old. Deletion removes the database reference → commits → removes the old file. A crash can leave garbage but cannot legitimately commit a reference to a partial/unpublished object. Missing or unauthentic referenced objects are corruption, never silently garbage-collected.
 
+The object-row mutation and `vault_meta.app_generation` increment are one
+`BEGIN IMMEDIATE` transaction. Reconciliation reads all object references in a
+single consistent statement, then enumerates the object tree through retained
+directory descriptors. Its outcomes are deliberately asymmetric:
+
+- referenced ID absent, or present at the wrong committed length: corruption;
+- canonical, owner-only, single-link object with no reference: garbage candidate;
+- malformed/foreign entry: preserved for quarantine/reporting, never interpreted
+  by loosely splitting its path.
+
+Garbage collection is separate from scanning. It requires the writer lease,
+applies an age grace period, rechecks the current database reference immediately
+before unlink, reopens and verifies the candidate length, then unlinks and syncs
+the shard directory. Staging cleanup follows the same lease/grace rule and owns
+only names matching `tmp-[0-9a-f]{32}`; recent or foreign entries are preserved.
+For v3, maintenance reports database free pages, old staging bytes, and garbage
+object bytes. The legacy file's `wasted_bytes`, hole-punch, and in-place compact
+semantics do not apply to a directory vault.
+
 ## Limits
 
 - Header size: exactly 256 for format 3.

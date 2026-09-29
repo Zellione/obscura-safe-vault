@@ -63,6 +63,21 @@ Tests cover all image/thumbnail/poster roles, compression, ranges, streaming/can
 absence, substitution, bit flips, frame swaps, length/filename mismatch, bounds, and durable
 publication faults.
 
+Phase 109 adds `v3_mutation.*` and `v3_recovery.*`. `MutationCoordinator` owns the
+kernel writer lease and is the only boundary allowed to combine object publication
+with SQL reference mutations: create is publish-before-reference, replacement is
+new-first, and deletion is unreference-before-unlink. `Database::commit_object_*`
+changes the reference and increments `vault_meta.app_generation` in one
+`BEGIN IMMEDIATE` transaction; a post-commit unlink failure is recoverable garbage.
+Reconciliation snapshots all object rows, descriptor-enumerates canonical object
+files, reports missing/length-mismatched references as corruption, and returns
+unreferenced files as grace-aged GC candidates. GC requires the writer lease and
+rechecks the live DB plus current file length immediately before durable unlink,
+so a scan-to-reference race cannot delete newly live data. `cleanup_staging` owns
+only old `tmp-[0-9a-f]{32}` owner-only/single-link files; recent and malformed or
+foreign entries are preserved. v3 uses object GC/database maintenance rather than
+legacy `wasted_bytes`/hole-punch/compact semantics.
+
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
 `seek_end`. WHY: `write_header` does `seek_to(fp_,0)` then `fwrite` as two separately-locked
