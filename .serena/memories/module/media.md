@@ -92,7 +92,8 @@ with actual mlock failures, and F1 says some codec/decoded data *may* be swappab
 claim that opaque library memory is locked. See `docs/roadmap/phase-97-secure-video-buffers.md`.
 
 ## media/ (gated OSV_VENDORED_AV except anim_decoder.h + webp_anim_decoder.*)
-Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio_decoder.*`,
+Files: `video_byte_source.h`, `video_source.*`, `video_object_source.*`, `chunk_avio.*`,
+`mem_avio.*`, `video_decoder.*`, `audio_decoder.*`,
 `av_sync.*`, `audio_frame.h`, `volume_setting.*`, `loop_setting.*`, `video_probe.*`,
 `decoded_frame.h`, plus `frame_convert.*`, `video_decode_worker.*`, `hw_accel.*`.
 
@@ -102,8 +103,13 @@ Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio
   AVI (RIFF+AVI ), MPEG-PS (0x000001BA), MPEG-TS (0x47 sync at offsets 0, 188, 376),
   ASF (GUID), FLV (FLV magic), Ogg (OggS), RealMedia (.RMF). TS checked last (single
   0x47 is weak signature; require all three sync offsets).
-- `VideoSource` = decrypt-on-demand byte stream over a video's ChunkStore (mlock'd 1-chunk
-  cache). `ChunkAvio`/`MemAvio` = `AVIOContext` (read+seek, never a temp file).
+- `VideoByteSource` is the format-neutral plaintext read/size interface. Legacy `VideoSource`
+  decrypts a ChunkStore through a locked one-chunk cache; v3 `VideoObjectSource` authenticates
+  1 MiB object frames and retains at most two in a mutex-protected locked/wiped LRU. Its atomic
+  cancellation is safe against an in-flight read, clears cached plaintext, and corruption logs
+  only object identity/frame/status. `ChunkAvio` owns either backend through this interface;
+  `MemAvio` remains the callback source used by duplicate scanning. All are read+seek and never
+  create a plaintext temporary file.
 - `VideoDecoder` = FFmpeg shared demuxer feeding both video + audio via per-stream packet
   queues (`vq_`/`aq_`); H.264/HEVC + ~34 legacy codecs (Phase 52: MPEG-1/2, MPEG-4 ASP,
   MS-MPEG4 v1–v3, WMV1/2/3, VC-1, H.263, FLV1, VP6/a/f, SVQ1/3, DV, MSVideo1, RPZA,

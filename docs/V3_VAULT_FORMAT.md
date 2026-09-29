@@ -160,7 +160,19 @@ seek-table plaintext[variable]
 
 Because the footer plaintext is fixed at 64 bytes, its complete encrypted record is the final 104 bytes of the file and can be found from EOF. The digest is defense-in-depth over table/header agreement; AEAD authentication remains authoritative.
 
-Images may use one or more frames. A video is one object file with independently authenticated frames, allowing bounded random access through the authenticated seek table. Compression occurs before encryption per frame and carries an authenticated decoded-size limit.
+Images may use one or more frames. A video is one object file with independently authenticated
+frames, allowing bounded random access through the authenticated seek table. The video framing
+parameter is frozen at exactly **1,048,576 plaintext bytes (1 MiB)** for object-format version 1;
+only the final frame may be shorter. The authenticated header, table, and per-frame associated data
+bind the total length and frame count, so reordering, replay, omission, truncation, and cross-object
+copying fail before bytes reach the decoder. Compression occurs before encryption per frame and
+carries an authenticated decoded-size limit.
+
+Video playback reads through a two-frame, best-effort-locked cache. Eviction, cancellation, and
+destruction wipe plaintext. Reads use checked 64-bit logical offsets and `pread`-style object I/O;
+FFmpeg receives the same format-neutral read/seek interface for legacy chunk streams and v3 video
+objects. Corruption diagnostics contain only the canonical object ID, zero-based frame number, and
+numeric status—never node names or decrypted bytes.
 
 ## Publication and crash consistency
 

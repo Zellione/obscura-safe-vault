@@ -18,8 +18,13 @@ extern "C" {
 
 namespace media {
 
-ChunkAvio::ChunkAvio(VideoSource source) : source_(std::move(source))
+ChunkAvio::ChunkAvio(VideoSource source)
+    : ChunkAvio(std::make_unique<VideoSource>(std::move(source)))
+{}
+
+ChunkAvio::ChunkAvio(std::unique_ptr<VideoByteSource> source) : source_(std::move(source))
 {
+    if (!source_) return;
     auto* buffer = secure_avio_buffer_alloc(buffer_state_);
     if (!buffer) return;
     ctx_ =
@@ -36,7 +41,7 @@ int ChunkAvio::read_cb(void* opaque, uint8_t* buf, int buf_size)
 {
     auto* self = static_cast<ChunkAvio*>(opaque);
     if (buf_size <= 0) return 0;
-    const int64_t n = self->source_.read(self->pos_,
+    const int64_t n = self->source_->read(self->pos_,
                                          std::span<uint8_t>(buf, static_cast<size_t>(buf_size)));
     if (n < 0)  return AVERROR(EIO);                // auth/decrypt failure
     if (n == 0) return AVERROR_EOF;
@@ -47,7 +52,7 @@ int ChunkAvio::read_cb(void* opaque, uint8_t* buf, int buf_size)
 int64_t ChunkAvio::seek_cb(void* opaque, int64_t offset, int whence)
 {
     auto* self = static_cast<ChunkAvio*>(opaque);
-    const auto size = static_cast<int64_t>(self->source_.size());
+    const auto size = static_cast<int64_t>(self->source_->size());
 
     // Handle AVSEEK_SIZE first (special query, not a real seek).
     if ((whence & AVSEEK_SIZE) == AVSEEK_SIZE) {

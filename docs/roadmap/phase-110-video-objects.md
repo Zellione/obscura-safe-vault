@@ -1,6 +1,17 @@
 # Random-access encrypted video objects (Phase 110)
 
-**Status:** not started
+**Status:** complete
+
+## Progress
+
+- ✅ Froze v1 video framing at 1 MiB and added the role-safe streaming writer.
+- ✅ Added checked frame planning, including synthetic 5 GiB+ and maximum-count coverage.
+- ✅ Added `VideoObjectSource`: authenticated random access, two-frame locked/wiped LRU,
+  backward/cross-frame/short-final-frame reads, cancellation, and safe diagnostics.
+- ✅ Generalized `ChunkAvio` over `VideoByteSource`; the legacy `VideoSource` remains supported.
+- ✅ Real H.264 fixture decoding and seeking produces the expected codec and dimensions through
+  the v3 object backend; existing legacy codec/audio/hardware-fallback suites remain unchanged.
+- ✅ Debug, ASAN, and TSan: 2,332 tests / 0 failed. No-FFmpeg: 2,137 / 0 failed.
 
 ## Goal
 
