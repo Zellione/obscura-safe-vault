@@ -24,7 +24,7 @@ ReconciliationReport reconcile_objects(const VaultRoot& root,
 
     std::map<ObjectId, ObjectEntry> physical;
     for (const auto& entry : *entries) {
-        if (!physical.emplace(entry.id, entry).second) {
+        if (!physical.try_emplace(entry.id, entry).second) {
             report.status = RecoveryStatus::Corrupt;
             return report;
         }
@@ -42,7 +42,7 @@ ReconciliationReport reconcile_objects(const VaultRoot& root,
         physical.erase(found);
     }
     for (const auto& [id, entry] : physical) {
-        report.garbage.push_back({id, entry.size, entry.modified_seconds});
+        report.garbage.emplace_back(id, entry.size, entry.modified_seconds);
         report.garbage_bytes += entry.size;
     }
     return report;
@@ -69,8 +69,7 @@ GarbageCollectionResult collect_garbage(const VaultRoot& root, const WriterLock&
         if (referenced.value) continue;
         const auto file = root.open_object(candidate.id);
         if (!file) continue;
-        const auto size = file->size();
-        if (!size || *size != candidate.encrypted_length) continue;
+        if (const auto size = file->size(); !size || *size != candidate.encrypted_length) continue;
         if (!root.unlink_object(candidate.id)) {
             result.status = RecoveryStatus::FilesystemError;
             return result;

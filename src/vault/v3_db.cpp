@@ -349,23 +349,23 @@ Database::OpenResult Database::open(const std::filesystem::path& path,
     if (version < 0) return {WrongKeyOrCorrupt, std::nullopt};
     if (version > SCHEMA_VERSION) return {UnsupportedVersion, std::nullopt};
     if (version < SCHEMA_VERSION) return {UnsupportedVersion, std::nullopt};
-    if (!result.database->healthy()) return {WrongKeyOrCorrupt, std::nullopt};
+    if (!database_healthy(*result.database)) return {WrongKeyOrCorrupt, std::nullopt};
     return result;
 }
 
-bool Database::healthy() const noexcept
+bool database_healthy(const Database& database) noexcept
 {
-    if (!handle_) return false;
-    Statement statement{handle_, "PRAGMA quick_check"};
+    if (!database.handle_) return false;
+    Statement statement{database.handle_, "PRAGMA quick_check"};
     if (!statement.get() || sqlite3_step(statement.get()) != SQLITE_ROW) return false;
     const auto* text = sqlite3_column_text(statement.get(), 0);
     return text != nullptr && std::string_view{reinterpret_cast<const char*>(text)} == "ok";
 }
 
-Id Database::root_node_id() const noexcept
+Id database_root_node_id(const Database& database) noexcept
 {
     Id result{};
-    Statement statement{handle_, "SELECT root_node_id FROM vault_meta WHERE singleton=1"};
+    Statement statement{database.handle_, "SELECT root_node_id FROM vault_meta WHERE singleton=1"};
     if (!statement.get() || sqlite3_step(statement.get()) != SQLITE_ROW ||
         sqlite3_column_bytes(statement.get(), 0) != static_cast<int>(result.size()))
         return {};
@@ -962,7 +962,7 @@ DbStatus Database::backup_to(const std::filesystem::path& destination,
         return target.status;
     }
     if (const auto status = copy_database(handle_, target.database->handle_);
-        status != Ok || !target.database->healthy()) {
+        status != Ok || !database_healthy(*target.database)) {
         target.database.reset();
         remove_temporary();
         return status;
@@ -975,10 +975,10 @@ DbStatus Database::backup_to(const std::filesystem::path& destination,
     return Ok;
 }
 
-DbStatus Database::set_user_version_for_test(int version) noexcept
+DbStatus set_database_user_version_for_test(Database& database, int version) noexcept
 {
-    if (!handle_ || version < 0) return InvalidArgument;
-    return exec(handle_, std::format("PRAGMA user_version={}", version));
+    if (!database.handle_ || version < 0) return InvalidArgument;
+    return exec(database.handle_, std::format("PRAGMA user_version={}", version));
 }
 
 }  // namespace vault::v3

@@ -17,7 +17,7 @@ MutationCoordinator::open(VaultRoot& root, Database& database,
                           std::span<const uint8_t, crypto::KEY_SIZE> master_key) noexcept
 {
     auto lock = root.try_writer_lock();
-    if (!lock || !database.healthy()) return std::nullopt;
+    if (!lock || !database_healthy(database)) return std::nullopt;
     return MutationCoordinator{root, database, std::move(*lock), master_key};
 }
 

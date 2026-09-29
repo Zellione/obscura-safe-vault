@@ -44,7 +44,9 @@ rows transactionally; open verifies the key immediately, rejects unsupported
 versions, and runs an integrity check. SQLite handles and rows stay private and
 failures map to `DbStatus`. Prepared repositories cover nodes/search, immutable
 object-reference snapshots, tags/categories/templates/values/descriptions,
-saved searches and settings; decrypted results use secure string/blob owners.
+saved searches and settings; decrypted results use secure string/blob owners. Lightweight
+connection queries live as free helpers (`database_healthy`, `database_root_node_id`, and the
+test-only `set_database_user_version_for_test`) so `Database` stays below Sonar's 35-method cap.
 `backup_to` uses SQLCipher online backup into exclusive encrypted staging,
 verifies it, fsyncs, publishes no-replace, and directory-syncs. Schema v1 is
 both the supported minimum and maximum; future versions fail closed, and the

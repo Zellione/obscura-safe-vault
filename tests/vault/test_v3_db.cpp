@@ -49,14 +49,14 @@ TEST(v3_db_create_reopen_and_read_root)
     auto created = vault::v3::Database::create(path, DB_KEY, ROOT_ID);
     REQUIRE(created.status == vault::v3::DbStatus::Ok);
     REQUIRE(created.database.has_value());
-    CHECK_EQ(created.database->root_node_id(), ROOT_ID);
-    CHECK(created.database->healthy());
+    CHECK_EQ(vault::v3::database_root_node_id(*created.database), ROOT_ID);
+    CHECK(vault::v3::database_healthy(*created.database));
     created.database.reset();
 
     auto reopened = vault::v3::Database::open(path, DB_KEY, false);
     REQUIRE(reopened.status == vault::v3::DbStatus::Ok);
     REQUIRE(reopened.database.has_value());
-    CHECK_EQ(reopened.database->root_node_id(), ROOT_ID);
+    CHECK_EQ(vault::v3::database_root_node_id(*reopened.database), ROOT_ID);
     reopened.database.reset();
     fs::remove_all(dir);
 }
@@ -77,7 +77,8 @@ TEST(v3_db_wrong_key_and_future_version_fail_closed)
 
     auto writable = vault::v3::Database::open(path, DB_KEY, true);
     REQUIRE(writable.database.has_value());
-    REQUIRE(writable.database->set_user_version_for_test(999) == vault::v3::DbStatus::Ok);
+    REQUIRE(vault::v3::set_database_user_version_for_test(*writable.database, 999) ==
+            vault::v3::DbStatus::Ok);
     writable.database.reset();
     auto future = vault::v3::Database::open(path, DB_KEY, false);
     CHECK(future.status == vault::v3::DbStatus::UnsupportedVersion);

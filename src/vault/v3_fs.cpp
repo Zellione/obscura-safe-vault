@@ -162,6 +162,107 @@ bool ensure_shard(int objects_fd, std::string_view shard, int& shard_fd) noexcep
     return shard_fd >= 0 && owned_mode(shard_fd, S_IFDIR, 0700, false);
 }
 
+const dirent* read_next(DIR* directory, bool& read_error) noexcept
+{
+    errno = 0;
+    const dirent* entry = ::readdir(directory);
+    read_error = !entry && errno != 0;
+    return entry;
+}
+
+bool scan_object_shard(int objects_fd, const dirent& shard_entry,
+                       std::vector<ObjectEntry>& result) noexcept
+{
+    const std::string_view shard{shard_entry.d_name};
+    if (shard.size() != 2 || hex_value(shard[0]) < 0 || hex_value(shard[1]) < 0) return false;
+    const int shard_fd = open_child(objects_fd, shard_entry.d_name, O_RDONLY | O_DIRECTORY);
+    if (shard_fd < 0) return false;
+    const int entries_fd = open_child(shard_fd, ".", O_RDONLY | O_DIRECTORY);
+    DIR* entries = entries_fd >= 0 ? ::fdopendir(entries_fd) : nullptr;
+    if (!entries) {
+        if (entries_fd >= 0) ::close(entries_fd);
+        ::close(shard_fd);
+        return false;
+    }
+    bool read_error = false;
+    bool ok = true;
+    while (const dirent* entry = read_next(entries, read_error)) {
+        const std::string_view name{entry->d_name};
+        if (name == "." || name == "..") continue;
+        const auto id = parse_object_relative_path("objects/" + std::string(shard) + "/" +
+                                                   std::string(name));
+        const int file = id ? open_child(shard_fd, entry->d_name, O_RDONLY) : -1;
+        struct stat metadata {};
+        const bool valid = id && file >= 0 && owned_mode(file, S_IFREG, 0600, true) &&
+                           ::fstat(file, &metadata) == 0 && metadata.st_size >= 0;
+        if (file >= 0) ::close(file);
+        if (!valid) {
+            ok = false;
+            break;
+        }
+        result.emplace_back(*id, static_cast<uint64_t>(metadata.st_size),
+                            static_cast<int64_t>(metadata.st_mtim.tv_sec));
+    }
+    ok = ok && !read_error;
+    ::closedir(entries);
+    ::close(shard_fd);
+    return ok;
+}
+
+bool scan_objects(int objects_fd, std::vector<ObjectEntry>& result) noexcept
+{
+    const int scan_fd = open_child(objects_fd, ".", O_RDONLY | O_DIRECTORY);
+    if (scan_fd < 0) return false;
+    DIR* shards = ::fdopendir(scan_fd);
+    if (!shards) {
+        ::close(scan_fd);
+        return false;
+    }
+    bool read_error = false;
+    bool ok = true;
+    while (const dirent* entry = read_next(shards, read_error)) {
+        const std::string_view name{entry->d_name};
+        if (name == "." || name == "..") continue;
+        if (!scan_object_shard(objects_fd, *entry, result)) {
+            ok = false;
+            break;
+        }
+    }
+    ok = ok && !read_error;
+    ::closedir(shards);
+    return ok;
+}
+
+bool remove_old_staging_entries(int staging, DIR* entries, int64_t cutoff,
+                                StagingCleanup& result) noexcept
+{
+    bool read_error = false;
+    while (const dirent* entry = read_next(entries, read_error)) {
+        const std::string_view name{entry->d_name};
+        if (name == "." || name == "..") continue;
+        if (!owned_staging_name(name)) {
+            ++result.quarantined_or_foreign;
+            continue;
+        }
+        const int file = open_child(staging, entry->d_name, O_RDONLY);
+        struct stat metadata {};
+        const bool valid = file >= 0 && owned_mode(file, S_IFREG, 0600, true) &&
+                           ::fstat(file, &metadata) == 0;
+        if (file >= 0) ::close(file);
+        if (!valid) {
+            ++result.quarantined_or_foreign;
+            continue;
+        }
+        if (metadata.st_mtim.tv_sec >= cutoff) {
+            ++result.preserved_recent;
+            continue;
+        }
+        if (fail(FsFault::Unlink) || ::unlinkat(staging, entry->d_name, 0) != 0) return false;
+        ++result.removed;
+    }
+    return !read_error && (result.removed == 0 || sync_dir(staging));
+}
+
 bool validate_entries(int parent, bool shards, std::string_view expected_shard = {}) noexcept;
 
 std::optional<bool> entry_is_directory(std::string_view name, bool shards,
@@ -640,72 +741,7 @@ std::optional<std::vector<ObjectEntry>> VaultRoot::list_objects() const noexcept
     std::vector<ObjectEntry> result;
     const int objects = open_child(fd_, "objects", O_RDONLY | O_DIRECTORY);
     if (objects < 0) return std::nullopt;
-    const int scan_fd = open_child(objects, ".", O_RDONLY | O_DIRECTORY);
-    if (scan_fd < 0) {
-        ::close(objects);
-        return std::nullopt;
-    }
-    DIR* shards = ::fdopendir(scan_fd);
-    if (!shards) {
-        ::close(scan_fd);
-        ::close(objects);
-        return std::nullopt;
-    }
-    bool ok = true;
-    while (ok) {
-        errno = 0;
-        const dirent* shard_entry = ::readdir(shards);
-        if (!shard_entry) {
-            if (errno != 0) ok = false;
-            break;
-        }
-        const std::string_view shard{shard_entry->d_name};
-        if (shard == "." || shard == "..") continue;
-        if (shard.size() != 2 || hex_value(shard[0]) < 0 || hex_value(shard[1]) < 0) {
-            ok = false;
-            break;
-        }
-        const int shard_fd = open_child(objects, shard_entry->d_name, O_RDONLY | O_DIRECTORY);
-        if (shard_fd < 0) {
-            ok = false;
-            break;
-        }
-        const int entries_fd = open_child(shard_fd, ".", O_RDONLY | O_DIRECTORY);
-        DIR* entries = entries_fd >= 0 ? ::fdopendir(entries_fd) : nullptr;
-        if (!entries) {
-            if (entries_fd >= 0) ::close(entries_fd);
-            ::close(shard_fd);
-            ok = false;
-            break;
-        }
-        while (ok) {
-            errno = 0;
-            const dirent* entry = ::readdir(entries);
-            if (!entry) {
-                if (errno != 0) ok = false;
-                break;
-            }
-            const std::string_view name{entry->d_name};
-            if (name == "." || name == "..") continue;
-            const std::string relative =
-                "objects/" + std::string(shard) + "/" + std::string(name);
-            const auto id = parse_object_relative_path(relative);
-            const int file = id ? open_child(shard_fd, entry->d_name, O_RDONLY) : -1;
-            struct stat metadata {};
-            if (!id || file < 0 || !owned_mode(file, S_IFREG, 0600, true) ||
-                ::fstat(file, &metadata) != 0 || metadata.st_size < 0) {
-                if (file >= 0) ::close(file);
-                ok = false;
-                break;
-            }
-            ::close(file);
-            result.push_back({*id, static_cast<uint64_t>(metadata.st_size),
-                              static_cast<int64_t>(metadata.st_mtim.tv_sec)});
-        }
-        ::closedir(entries);
-        ::close(shard_fd);
-    }
-    ::closedir(shards);
+    const bool ok = scan_objects(objects, result);
     ::close(objects);
     if (!ok) return std::nullopt;
     return result;
@@ -735,40 +771,7 @@ std::optional<StagingCleanup> VaultRoot::cleanup_staging(const WriterLock&,
         ::close(staging);
         return std::nullopt;
     }
-    bool ok = true;
-    while (ok) {
-        errno = 0;
-        const dirent* entry = ::readdir(entries);
-        if (!entry) {
-            if (errno != 0) ok = false;
-            break;
-        }
-        const std::string_view name{entry->d_name};
-        if (name == "." || name == "..") continue;
-        if (!owned_staging_name(name)) {
-            ++result.quarantined_or_foreign;
-            continue;
-        }
-        const int file = open_child(staging, entry->d_name, O_RDONLY);
-        struct stat metadata {};
-        const bool valid = file >= 0 && owned_mode(file, S_IFREG, 0600, true) &&
-                           ::fstat(file, &metadata) == 0;
-        if (file >= 0) ::close(file);
-        if (!valid) {
-            ++result.quarantined_or_foreign;
-            continue;
-        }
-        if (metadata.st_mtim.tv_sec >= older_than_seconds) {
-            ++result.preserved_recent;
-            continue;
-        }
-        if (fail(FsFault::Unlink) || ::unlinkat(staging, entry->d_name, 0) != 0) {
-            ok = false;
-            break;
-        }
-        ++result.removed;
-    }
-    if (ok && result.removed != 0) ok = sync_dir(staging);
+    const bool ok = remove_old_staging_entries(staging, entries, older_than_seconds, result);
     ::closedir(entries);
     ::close(staging);
     return ok ? std::optional{result} : std::nullopt;

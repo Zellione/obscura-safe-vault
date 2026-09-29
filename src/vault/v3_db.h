@@ -14,6 +14,8 @@ struct sqlite3;
 
 namespace vault::v3 {
 
+class Database;
+
 enum class DbStatus {
     Ok,
     InvalidArgument,
@@ -110,8 +112,6 @@ public:
          std::span<const uint8_t, crypto::KEY_SIZE> database_key,
          bool writable) noexcept;
 
-    [[nodiscard]] bool healthy() const noexcept;
-    [[nodiscard]] Id root_node_id() const noexcept;
     [[nodiscard]] DbStatus insert_node(const NodeRecord& node) noexcept;
     [[nodiscard]] DbResult<std::vector<NodeRecord>> list_children(const Id& parent_id) const noexcept;
     [[nodiscard]] DbResult<std::optional<NodeRecord>> find_node(const Id& node_id) const noexcept;
@@ -143,10 +143,10 @@ public:
     [[nodiscard]] DbStatus backup_to(const std::filesystem::path& destination,
                                      std::span<const uint8_t, crypto::KEY_SIZE> database_key) const noexcept;
 
-    // Test-only migration seam; production never sets versions directly.
-    [[nodiscard]] DbStatus set_user_version_for_test(int version) noexcept;
-
 private:
+    friend bool database_healthy(const Database&) noexcept;
+    friend Id database_root_node_id(const Database&) noexcept;
+    friend DbStatus set_database_user_version_for_test(Database&, int) noexcept;
     [[nodiscard]] static OpenResult
     open_raw(const std::filesystem::path& path,
              std::span<const uint8_t, crypto::KEY_SIZE> database_key,
@@ -155,6 +155,12 @@ private:
     void close() noexcept;
     sqlite3* handle_ = nullptr;
 };
+
+[[nodiscard]] bool database_healthy(const Database& database) noexcept;
+[[nodiscard]] Id database_root_node_id(const Database& database) noexcept;
+// Test-only migration seam; production never sets versions directly.
+[[nodiscard]] DbStatus set_database_user_version_for_test(Database& database,
+                                                          int version) noexcept;
 
 struct Database::OpenResult {
     DbStatus status = DbStatus::IoError;
