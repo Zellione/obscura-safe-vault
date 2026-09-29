@@ -1,10 +1,14 @@
 #include "media/video_object_source.h"
 
 #include "platform/error_log.h"
+#include "platform/safe_print.h"
 #include "vault/v3_fs.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
+#include <exception>
+#include <format>
 #include <limits>
 #include <new>
 #include <ranges>
@@ -23,17 +27,18 @@ VideoObjectSource::open(const vault::v3::VaultRoot& root,
                         std::span<const uint8_t, crypto::KEY_SIZE> master_key,
                         const vault::v3::ObjectInfo& expected) noexcept
 {
+    using enum vault::v3::ObjectStatus;
     OpenResult result;
     if (expected.role != vault::v3::ObjectRole::OriginalVideo) {
-        result.status = vault::v3::ObjectStatus::InvalidArgument;
+        result.status = InvalidArgument;
         return result;
     }
     auto opened = vault::v3::ObjectReader::open(root, master_key, expected);
     result.status = opened.status;
-    if (opened.status == vault::v3::ObjectStatus::Ok) {
+    if (opened.status == Ok) {
         result.source = std::unique_ptr<VideoObjectSource>(
             new (std::nothrow) VideoObjectSource(std::move(opened.reader)));
-        if (!result.source) result.status = vault::v3::ObjectStatus::OutOfMemory;
+        if (!result.source) result.status = OutOfMemory;
     }
     return result;
 }
@@ -71,12 +76,13 @@ VideoObjectSource::CacheEntry* VideoObjectSource::load_frame(uint32_t index) noe
             try {
                 platform::log_error(
                     "VideoObjectSource",
-                    "object " + vault::v3::object_relative_path(reader_->info().object_id) +
-                        ", frame " + std::to_string(index) +
-                        ": authentication/read failure (status " +
-                        std::to_string(std::to_underlying(last_status_)) + ")");
-            } catch (...) {
-                // Diagnostics are best effort; authentication failure remains authoritative.
+                    std::format("object {}, frame {}: authentication/read failure (status {})",
+                                vault::v3::object_relative_path(reader_->info().object_id), index,
+                                std::to_underlying(last_status_)));
+            } catch (const std::exception& error) {
+                platform::safe_println(stderr,
+                                       "[VideoObjectSource] could not format diagnostic: {}",
+                                       error.what());
             }
             diagnostic_reported_ = true;
         }
@@ -91,7 +97,7 @@ VideoObjectSource::CacheEntry* VideoObjectSource::load_frame(uint32_t index) noe
 int64_t VideoObjectSource::read(uint64_t offset, std::span<uint8_t> out) noexcept
 {
     std::scoped_lock lock(mutex_);
-    if (cancelled_.load(std::memory_order_acquire)) {
+    if (cancelled_.load()) {
         clear_cache();
         last_status_ = vault::v3::ObjectStatus::IoError;
         return -1;
@@ -102,7 +108,7 @@ int64_t VideoObjectSource::read(uint64_t offset, std::span<uint8_t> out) noexcep
     uint64_t copied = 0;
     const uint32_t frame_limit = reader_->info().frame_plain_limit;
     while (copied < wanted) {
-        if (cancelled_.load(std::memory_order_acquire)) {
+        if (cancelled_.load()) {
             clear_cache();
             last_status_ = vault::v3::ObjectStatus::IoError;
             return -1;
@@ -112,9 +118,9 @@ int64_t VideoObjectSource::read(uint64_t offset, std::span<uint8_t> out) noexcep
         if (frame64 > std::numeric_limits<uint32_t>::max()) return -1;
         auto* frame = load_frame(static_cast<uint32_t>(frame64));
         if (!frame) return -1;
-        const size_t within = static_cast<size_t>(position % frame_limit);
+        const auto within = static_cast<size_t>(position % frame_limit);
         if (within >= frame->bytes.size()) return -1;
-        const size_t take = static_cast<size_t>(std::min<uint64_t>(
+        const auto take = static_cast<size_t>(std::min<uint64_t>(
             wanted - copied, frame->bytes.size() - within));
         std::memcpy(out.data() + static_cast<size_t>(copied), frame->bytes.data() + within, take);
         copied += take;
@@ -125,14 +131,14 @@ int64_t VideoObjectSource::read(uint64_t offset, std::span<uint8_t> out) noexcep
 
 void VideoObjectSource::cancel() noexcept
 {
-    cancelled_.store(true, std::memory_order_release);
+    cancelled_.store(true);
     std::scoped_lock lock(mutex_);
     clear_cache();
 }
 
 bool VideoObjectSource::cancelled() const noexcept
 {
-    return cancelled_.load(std::memory_order_acquire);
+    return cancelled_.load();
 }
 
 size_t VideoObjectSource::cached_frame_count() const noexcept

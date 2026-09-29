@@ -146,7 +146,7 @@ ObjectWriteResult write_object_stream(const VaultRoot& root,
         return result;
     }
     const auto frame_count = object_frame_count(plaintext_length, request.frame_plain_limit);
-    if (!frame_count) {
+    if (!frame_count.has_value()) {
         result.status = ObjectStatus::InvalidArgument;
         return result;
     }
