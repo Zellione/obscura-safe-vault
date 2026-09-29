@@ -12,6 +12,7 @@
 
 #include "crypto/crypto.h"        // KEY_SIZE, NODE_ID_SIZE
 #include "crypto/secure_mem.h"    // SecureBytes
+#include "media/video_byte_source.h"
 #include "vault/chunk_store.h"    // ChunkStore, ChunkSpan
 #include "vault/index.h"          // VideoMeta, VideoChunk
 
@@ -19,16 +20,16 @@ namespace vault { class Vault; }   // IndexNode/VideoMeta come from vault/index.
 
 namespace media {
 
-class VideoSource {
+class VideoSource final : public VideoByteSource {
 public:
     VideoSource(VideoSource&&) noexcept            = default;
     VideoSource& operator=(VideoSource&&) noexcept = default;
 
-    [[nodiscard]] uint64_t size() const noexcept { return total_size_; }
+    [[nodiscard]] uint64_t size() const noexcept override { return total_size_; }
 
     // Read up to dst.size() bytes from logical `offset`. Returns bytes read
     // (0 at/after EOF) or -1 on auth/decrypt failure (a wiped cache is left).
-    [[nodiscard]] int64_t read(uint64_t offset, std::span<uint8_t> dst) noexcept;
+    [[nodiscard]] int64_t read(uint64_t offset, std::span<uint8_t> dst) noexcept override;
 
     // Factory: create a VideoSource from an unlocked vault and a video node.
     // The source borrows the vault's file handle and master key — valid only

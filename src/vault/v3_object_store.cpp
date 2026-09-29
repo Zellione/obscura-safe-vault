@@ -110,6 +110,17 @@ std::optional<ObjectId> generate_object_id() noexcept
     return id;
 }
 
+std::optional<uint32_t> object_frame_count(uint64_t plaintext_length,
+                                           uint32_t frame_plain_limit) noexcept
+{
+    if (frame_plain_limit == 0 || frame_plain_limit > OBJECT_MAX_FRAME_PLAIN) return std::nullopt;
+    const uint64_t count =
+        plaintext_length == 0 ? 0 : 1 + (plaintext_length - 1) / frame_plain_limit;
+    if (count > OBJECT_MAX_FRAMES || count > std::numeric_limits<uint32_t>::max())
+        return std::nullopt;
+    return static_cast<uint32_t>(count);
+}
+
 std::array<uint8_t, OBJECT_PREAMBLE_SIZE> build_object_preamble(const Id& vault_id,
                                                                 const ObjectId& object_id,
                                                                 uint32_t frame_plain_limit) noexcept
@@ -134,9 +145,8 @@ ObjectWriteResult write_object_stream(const VaultRoot& root,
         result.status = ObjectStatus::InvalidArgument;
         return result;
     }
-    const uint64_t count64 =
-        plaintext_length == 0 ? 0 : 1 + (plaintext_length - 1) / request.frame_plain_limit;
-    if (count64 > OBJECT_MAX_FRAMES || count64 > std::numeric_limits<uint32_t>::max()) {
+    const auto frame_count = object_frame_count(plaintext_length, request.frame_plain_limit);
+    if (!frame_count) {
         result.status = ObjectStatus::InvalidArgument;
         return result;
     }
@@ -150,7 +160,7 @@ ObjectWriteResult write_object_stream(const VaultRoot& root,
                    .media_format = request.media_format,
                    .plaintext_length = plaintext_length,
                    .frame_plain_limit = request.frame_plain_limit,
-                   .frame_count = static_cast<uint32_t>(count64)};
+                   .frame_count = *frame_count};
     auto key = derive_object_key(master_key, request.vault_id, *id);
     const auto preamble = build_object_preamble(request.vault_id, *id, request.frame_plain_limit);
     std::array<uint8_t, 64> header{};
@@ -253,6 +263,20 @@ ObjectWriteResult write_object(const VaultRoot& root,
                             destination.size());
             return true;
         });
+}
+
+ObjectWriteResult write_video_object_stream(
+    const VaultRoot& root, std::span<const uint8_t, crypto::KEY_SIZE> master_key,
+    const Id& vault_id, const Id& owner_node_id, uint8_t media_format,
+    uint64_t plaintext_length, const ObjectReadFn& read) noexcept
+{
+    return write_object_stream(root, master_key,
+                               {.vault_id = vault_id,
+                                .owner_node_id = owner_node_id,
+                                .role = ObjectRole::OriginalVideo,
+                                .media_format = media_format,
+                                .frame_plain_limit = VIDEO_OBJECT_FRAME_PLAIN},
+                               plaintext_length, read);
 }
 
 ObjectReader::ObjectReader(ObjectFile file, crypto::SecureBuffer<crypto::KEY_SIZE> key,

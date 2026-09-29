@@ -9,6 +9,7 @@
 #include <cstdint>
 #include "media/ffmpeg_secure.h"
 #include "media/video_source.h"
+#include "media/video_byte_source.h"
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -27,6 +28,7 @@ namespace media {
 class ChunkAvio {
 public:
     explicit ChunkAvio(VideoSource source);   // takes ownership of the source
+    explicit ChunkAvio(std::unique_ptr<VideoByteSource> source);
     ~ChunkAvio();
     ChunkAvio(const ChunkAvio&)            = delete;
     ChunkAvio& operator=(const ChunkAvio&) = delete;
@@ -42,7 +44,7 @@ private:
     static int     read_cb(void* opaque, uint8_t* buf, int buf_size);
     static int64_t seek_cb(void* opaque, int64_t offset, int whence);
 
-    VideoSource  source_;
+    std::unique_ptr<VideoByteSource> source_;
     uint64_t     pos_ = 0;
     AVIOContext* ctx_ = nullptr;
     SecureAvioBufferState buffer_state_;

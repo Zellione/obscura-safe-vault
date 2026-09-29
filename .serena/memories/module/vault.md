@@ -80,6 +80,12 @@ only old `tmp-[0-9a-f]{32}` owner-only/single-link files; recent and malformed o
 foreign entries are preserved. v3 uses object GC/database maintenance rather than
 legacy `wasted_bytes`/hole-punch/compact semantics.
 
+Phase 110 freezes v1 original-video objects at 1 MiB plaintext frames through
+`write_video_object_stream`; generic `object_frame_count` performs checked 64-bit planning before
+any staging file is populated. `ObjectReader::read_frame` is public for bounded authenticated
+consumers. The existing AD already binds video role, vault/object/node identity, frame sequence,
+total count, and total plaintext length, while the authenticated table binds physical records.
+
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
 `seek_end`. WHY: `write_header` does `seek_to(fp_,0)` then `fwrite` as two separately-locked

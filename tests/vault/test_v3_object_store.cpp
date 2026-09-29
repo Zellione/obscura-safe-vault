@@ -342,3 +342,40 @@ TEST(v3_object_distinct_image_thumbnail_and_poster_roles_round_trip)
         CHECK_BYTES_EQ(out.as_span(), plain);
     }
 }
+
+TEST(v3_video_object_writer_freezes_one_mib_frames_and_video_role)
+{
+    TempRoot temp;
+    auto root = vault::v3::VaultRoot::create(temp.path);
+    REQUIRE(root.has_value());
+    auto lock = root->try_writer_lock();
+    REQUIRE(lock.has_value());
+    constexpr uint64_t total = static_cast<uint64_t>(vault::v3::VIDEO_OBJECT_FRAME_PLAIN) + 17;
+    const auto written = vault::v3::write_video_object_stream(
+        *root, MASTER_KEY, VAULT_ID, NODE_ID, 9, total,
+        [](uint64_t offset, std::span<uint8_t> out) {
+            for (size_t i = 0; i < out.size(); ++i)
+                out[i] = static_cast<uint8_t>((offset + i) % 251);
+            return true;
+        });
+    REQUIRE(written.status == vault::v3::ObjectStatus::Ok);
+    CHECK(written.info.role == vault::v3::ObjectRole::OriginalVideo);
+    CHECK_EQ(written.info.frame_plain_limit, vault::v3::VIDEO_OBJECT_FRAME_PLAIN);
+    CHECK_EQ(written.info.frame_count, 2U);
+}
+
+TEST(v3_object_frame_count_uses_checked_64_bit_math_for_multigigabyte_video)
+{
+    constexpr uint64_t five_gib_plus_one = 5ULL * 1024ULL * 1024ULL * 1024ULL + 1ULL;
+    const auto count = vault::v3::object_frame_count(
+        five_gib_plus_one, vault::v3::VIDEO_OBJECT_FRAME_PLAIN);
+    REQUIRE(count.has_value());
+    CHECK_EQ(*count, 5121U);
+    CHECK_EQ(*vault::v3::object_frame_count(0, vault::v3::VIDEO_OBJECT_FRAME_PLAIN), 0U);
+    CHECK_FALSE(vault::v3::object_frame_count(1, 0).has_value());
+    CHECK_FALSE(vault::v3::object_frame_count(
+        static_cast<uint64_t>(vault::v3::OBJECT_MAX_FRAMES) *
+                vault::v3::VIDEO_OBJECT_FRAME_PLAIN +
+            1,
+        vault::v3::VIDEO_OBJECT_FRAME_PLAIN).has_value());
+}
