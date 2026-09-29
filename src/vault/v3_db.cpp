@@ -349,23 +349,23 @@ Database::OpenResult Database::open(const std::filesystem::path& path,
     if (version < 0) return {WrongKeyOrCorrupt, std::nullopt};
     if (version > SCHEMA_VERSION) return {UnsupportedVersion, std::nullopt};
     if (version < SCHEMA_VERSION) return {UnsupportedVersion, std::nullopt};
-    if (!result.database->healthy()) return {WrongKeyOrCorrupt, std::nullopt};
+    if (!database_healthy(*result.database)) return {WrongKeyOrCorrupt, std::nullopt};
     return result;
 }
 
-bool Database::healthy() const noexcept
+bool database_healthy(const Database& database) noexcept
 {
-    if (!handle_) return false;
-    Statement statement{handle_, "PRAGMA quick_check"};
+    if (!database.handle_) return false;
+    Statement statement{database.handle_, "PRAGMA quick_check"};
     if (!statement.get() || sqlite3_step(statement.get()) != SQLITE_ROW) return false;
     const auto* text = sqlite3_column_text(statement.get(), 0);
     return text != nullptr && std::string_view{reinterpret_cast<const char*>(text)} == "ok";
 }
 
-Id Database::root_node_id() const noexcept
+Id database_root_node_id(const Database& database) noexcept
 {
     Id result{};
-    Statement statement{handle_, "SELECT root_node_id FROM vault_meta WHERE singleton=1"};
+    Statement statement{database.handle_, "SELECT root_node_id FROM vault_meta WHERE singleton=1"};
     if (!statement.get() || sqlite3_step(statement.get()) != SQLITE_ROW ||
         sqlite3_column_bytes(statement.get(), 0) != static_cast<int>(result.size()))
         return {};
@@ -521,6 +521,142 @@ DbResult<std::vector<ObjectRecord>> Database::object_references() const noexcept
         result.value.push_back(object);
     }
     return result;
+}
+
+DbStatus Database::commit_object_create(ObjectRecord object) noexcept
+{
+    if (!handle_) return InvalidArgument;
+    auto status = exec(handle_, "BEGIN IMMEDIATE");
+    if (status != Ok) return status;
+    const auto current = settings();
+    if (current.status != Ok || current.value.app_generation ==
+                                    static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+        exec(handle_, "ROLLBACK");
+        return current.status == Ok ? Constraint : current.status;
+    }
+    object.creation_generation = current.value.app_generation + 1;
+    status = insert_object(object);
+    if (status == Ok) {
+        Statement generation{handle_, "UPDATE vault_meta SET app_generation=? WHERE singleton=1"};
+        if (!generation.get())
+            status = map_status(sqlite3_extended_errcode(handle_));
+        else {
+            sqlite3_bind_int64(generation.get(), 1,
+                               static_cast<sqlite3_int64>(object.creation_generation));
+            status = map_status(sqlite3_step(generation.get()));
+        }
+    }
+    if (status == Ok) status = exec(handle_, "COMMIT");
+    if (status != Ok) exec(handle_, "ROLLBACK");
+    return status;
+}
+
+DbResult<std::optional<Id>> Database::commit_object_replace(ObjectRecord object) noexcept
+{
+    if (!handle_ || !id_valid(object.node_id)) return {InvalidArgument, std::nullopt};
+    auto status = exec(handle_, "BEGIN IMMEDIATE");
+    if (status != Ok) return {status, std::nullopt};
+    std::optional<Id> old;
+    {
+        Statement find{handle_, "SELECT object_id FROM objects WHERE node_id=? AND role=?"};
+        if (!find.get())
+            status = map_status(sqlite3_extended_errcode(handle_));
+        else {
+            bind_id(find.get(), 1, object.node_id);
+            sqlite3_bind_int(find.get(), 2, static_cast<int>(std::to_underlying(object.role)));
+            const int step = sqlite3_step(find.get());
+            if (step == SQLITE_ROW)
+                old = column_id(find.get(), 0);
+            else if (step != SQLITE_DONE)
+                status = map_status(step);
+        }
+    }
+    const auto current = settings();
+    if (status == Ok && current.status != Ok) status = current.status;
+    if (status == Ok && current.value.app_generation ==
+                            static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+        status = Constraint;
+    if (status == Ok && old) {
+        Statement erase{handle_, "DELETE FROM objects WHERE object_id=?"};
+        if (!erase.get())
+            status = map_status(sqlite3_extended_errcode(handle_));
+        else {
+            bind_id(erase.get(), 1, *old);
+            status = map_status(sqlite3_step(erase.get()));
+        }
+    }
+    if (status == Ok) {
+        object.creation_generation = current.value.app_generation + 1;
+        status = insert_object(object);
+    }
+    if (status == Ok) {
+        Statement generation{handle_, "UPDATE vault_meta SET app_generation=app_generation+1 "
+                                      "WHERE singleton=1"};
+        status = generation.get() ? map_status(sqlite3_step(generation.get()))
+                                  : map_status(sqlite3_extended_errcode(handle_));
+    }
+    if (status == Ok) status = exec(handle_, "COMMIT");
+    if (status != Ok) {
+        exec(handle_, "ROLLBACK");
+        return {status, std::nullopt};
+    }
+    return {Ok, old};
+}
+
+DbResult<std::optional<Id>> Database::commit_object_delete(const Id& node_id,
+                                                            ObjectRole role) noexcept
+{
+    if (!handle_ || !id_valid(node_id)) return {InvalidArgument, std::nullopt};
+    auto status = exec(handle_, "BEGIN IMMEDIATE");
+    if (status != Ok) return {status, std::nullopt};
+    std::optional<Id> old;
+    {
+        Statement find{handle_, "SELECT object_id FROM objects WHERE node_id=? AND role=?"};
+        if (!find.get())
+            status = map_status(sqlite3_extended_errcode(handle_));
+        else {
+            bind_id(find.get(), 1, node_id);
+            sqlite3_bind_int(find.get(), 2, static_cast<int>(std::to_underlying(role)));
+            const int step = sqlite3_step(find.get());
+            if (step == SQLITE_ROW)
+                old = column_id(find.get(), 0);
+            else if (step != SQLITE_DONE)
+                status = map_status(step);
+        }
+    }
+    if (status == Ok && old) {
+        Statement erase{handle_, "DELETE FROM objects WHERE object_id=?"};
+        if (!erase.get())
+            status = map_status(sqlite3_extended_errcode(handle_));
+        else {
+            bind_id(erase.get(), 1, *old);
+            status = map_status(sqlite3_step(erase.get()));
+        }
+    }
+    if (status == Ok && old) {
+        Statement generation{handle_, "UPDATE vault_meta SET app_generation=app_generation+1 "
+                                      "WHERE singleton=1"};
+        status = generation.get() ? map_status(sqlite3_step(generation.get()))
+                                  : map_status(sqlite3_extended_errcode(handle_));
+    }
+    if (status == Ok) status = exec(handle_, "COMMIT");
+    if (status != Ok) {
+        exec(handle_, "ROLLBACK");
+        return {status, std::nullopt};
+    }
+    return {Ok, old};
+}
+
+DbResult<bool> Database::object_is_referenced(const Id& object_id) const noexcept
+{
+    if (!handle_ || !id_valid(object_id)) return {InvalidArgument, false};
+    Statement statement{handle_, "SELECT 1 FROM objects WHERE object_id=?"};
+    if (!statement.get()) return {map_status(sqlite3_extended_errcode(handle_)), false};
+    bind_id(statement.get(), 1, object_id);
+    const int step = sqlite3_step(statement.get());
+    if (step == SQLITE_ROW) return {Ok, true};
+    if (step == SQLITE_DONE) return {Ok, false};
+    return {map_status(step), false};
 }
 
 DbStatus Database::add_tag(int64_t tag_id, std::string_view display_name,
@@ -826,7 +962,7 @@ DbStatus Database::backup_to(const std::filesystem::path& destination,
         return target.status;
     }
     if (const auto status = copy_database(handle_, target.database->handle_);
-        status != Ok || !target.database->healthy()) {
+        status != Ok || !database_healthy(*target.database)) {
         target.database.reset();
         remove_temporary();
         return status;
@@ -839,10 +975,10 @@ DbStatus Database::backup_to(const std::filesystem::path& destination,
     return Ok;
 }
 
-DbStatus Database::set_user_version_for_test(int version) noexcept
+DbStatus set_database_user_version_for_test(Database& database, int version) noexcept
 {
-    if (!handle_ || version < 0) return InvalidArgument;
-    return exec(handle_, std::format("PRAGMA user_version={}", version));
+    if (!database.handle_ || version < 0) return InvalidArgument;
+    return exec(database.handle_, std::format("PRAGMA user_version={}", version));
 }
 
 }  // namespace vault::v3

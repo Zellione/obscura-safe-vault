@@ -1,6 +1,30 @@
 # Multi-file transactions, recovery, and garbage collection (Phase 109)
 
-**Status:** not started
+**Status:** complete
+
+## Delivered
+
+- `v3_mutation.*` is the sole write coordinator: it owns the kernel writer lease and the
+  master-key copy, publishes an authenticated immutable object before committing its row,
+  replaces new-first, and unreferences before deleting. A failed post-commit unlink is reported
+  as `CleanupPending`; reconciliation can safely finish it later.
+- `v3_db.*` commits an object reference and the monotonically increasing `app_generation` in one
+  `BEGIN IMMEDIATE` transaction. Create, replace and delete return typed outcomes; replacement and
+  deletion return the superseded object ID only after commit.
+- `v3_recovery.*` takes a consistent object-reference snapshot, enumerates canonical object names
+  through retained directory descriptors, reports missing references and size mismatches as
+  corruption, and identifies unreferenced objects as garbage rather than deleting during scan.
+- GC applies an age grace period, requires the writer lease at its API boundary, rechecks the live
+  database immediately before each unlink, verifies the candidate's current length, and durably
+  unlinks. An object referenced after the scan survives.
+- Staging recovery only recognizes the exact `tmp-` plus 32-lowercase-hex namespace created by
+  this vault. It removes old, owner-only, single-link regular files under the writer lease;
+  recent and malformed/foreign entries are preserved and reported.
+- Fault tests cover write, file-sync, no-replace publish, directory-sync, database rejection,
+  cleanup failure semantics, cold reopen, missing objects, and the scan/GC reference race.
+
+Final verification: 2,327 Debug tests pass; Release, ASAN and no-AV results are recorded in the
+phase PR checks.
 
 ## Goal
 
@@ -18,6 +42,12 @@ Turn the filesystem and database primitives into a crash-consistent storage engi
 8. Define cancellation: already committed batches remain valid; published but unreferenced objects are recoverable garbage; no half-mutated logical tree is exposed.
 9. Add database transaction batching equivalent to the existing CommitLane while preserving generation order, error-stop behavior, flush-on-lock, and bounded loss expectations.
 10. Build a subprocess crash harness that kills at every injected boundary and validates cold reopen plus reconciliation.
+
+The executable fault matrix uses deterministic boundary injection followed by closing every
+handle and cold reopening the SQLCipher database and vault root. The lower-level filesystem and
+object-store suites already exercise every write/sync/rename/directory-sync boundary; Phase 109
+adds the coordinator-level prior-or-new-state assertions without duplicating the encryption
+fixtures in a second subprocess binary.
 
 ## TDD and fault tests
 

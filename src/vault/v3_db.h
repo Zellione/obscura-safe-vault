@@ -14,6 +14,8 @@ struct sqlite3;
 
 namespace vault::v3 {
 
+class Database;
+
 enum class DbStatus {
     Ok,
     InvalidArgument,
@@ -110,14 +112,20 @@ public:
          std::span<const uint8_t, crypto::KEY_SIZE> database_key,
          bool writable) noexcept;
 
-    [[nodiscard]] bool healthy() const noexcept;
-    [[nodiscard]] Id root_node_id() const noexcept;
     [[nodiscard]] DbStatus insert_node(const NodeRecord& node) noexcept;
     [[nodiscard]] DbResult<std::vector<NodeRecord>> list_children(const Id& parent_id) const noexcept;
     [[nodiscard]] DbResult<std::optional<NodeRecord>> find_node(const Id& node_id) const noexcept;
     [[nodiscard]] DbResult<std::vector<NodeRecord>> search_nodes(std::string_view term) const noexcept;
     [[nodiscard]] DbStatus insert_object(const ObjectRecord& object) noexcept;
     [[nodiscard]] DbResult<std::vector<ObjectRecord>> object_references() const noexcept;
+    // Phase 109 mutation primitives. The object reference and generation change are
+    // committed in one SQL transaction; callers must publish the immutable file first.
+    [[nodiscard]] DbStatus commit_object_create(ObjectRecord object) noexcept;
+    [[nodiscard]] DbResult<std::optional<Id>>
+    commit_object_replace(ObjectRecord object) noexcept;
+    [[nodiscard]] DbResult<std::optional<Id>>
+    commit_object_delete(const Id& node_id, ObjectRole role) noexcept;
+    [[nodiscard]] DbResult<bool> object_is_referenced(const Id& object_id) const noexcept;
     [[nodiscard]] DbStatus add_tag(int64_t tag_id, std::string_view display_name,
                                    std::string_view canonical_name) noexcept;
     [[nodiscard]] DbStatus assign_tag(const Id& node_id, int64_t tag_id) noexcept;
@@ -135,10 +143,10 @@ public:
     [[nodiscard]] DbStatus backup_to(const std::filesystem::path& destination,
                                      std::span<const uint8_t, crypto::KEY_SIZE> database_key) const noexcept;
 
-    // Test-only migration seam; production never sets versions directly.
-    [[nodiscard]] DbStatus set_user_version_for_test(int version) noexcept;
-
 private:
+    friend bool database_healthy(const Database&) noexcept;
+    friend Id database_root_node_id(const Database&) noexcept;
+    friend DbStatus set_database_user_version_for_test(Database&, int) noexcept;
     [[nodiscard]] static OpenResult
     open_raw(const std::filesystem::path& path,
              std::span<const uint8_t, crypto::KEY_SIZE> database_key,
@@ -147,6 +155,12 @@ private:
     void close() noexcept;
     sqlite3* handle_ = nullptr;
 };
+
+[[nodiscard]] bool database_healthy(const Database& database) noexcept;
+[[nodiscard]] Id database_root_node_id(const Database& database) noexcept;
+// Test-only migration seam; production never sets versions directly.
+[[nodiscard]] DbStatus set_database_user_version_for_test(Database& database,
+                                                          int version) noexcept;
 
 struct Database::OpenResult {
     DbStatus status = DbStatus::IoError;

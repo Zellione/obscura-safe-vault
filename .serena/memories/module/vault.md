@@ -44,7 +44,9 @@ rows transactionally; open verifies the key immediately, rejects unsupported
 versions, and runs an integrity check. SQLite handles and rows stay private and
 failures map to `DbStatus`. Prepared repositories cover nodes/search, immutable
 object-reference snapshots, tags/categories/templates/values/descriptions,
-saved searches and settings; decrypted results use secure string/blob owners.
+saved searches and settings; decrypted results use secure string/blob owners. Lightweight
+connection queries live as free helpers (`database_healthy`, `database_root_node_id`, and the
+test-only `set_database_user_version_for_test`) so `Database` stays below Sonar's 35-method cap.
 `backup_to` uses SQLCipher online backup into exclusive encrypted staging,
 verifies it, fsyncs, publishes no-replace, and directory-syncs. Schema v1 is
 both the supported minimum and maximum; future versions fail closed, and the
@@ -62,6 +64,21 @@ then requires every authenticated structure to agree. Structural inspection is m
 Tests cover all image/thumbnail/poster roles, compression, ranges, streaming/cancel, plaintext
 absence, substitution, bit flips, frame swaps, length/filename mismatch, bounds, and durable
 publication faults.
+
+Phase 109 adds `v3_mutation.*` and `v3_recovery.*`. `MutationCoordinator` owns the
+kernel writer lease and is the only boundary allowed to combine object publication
+with SQL reference mutations: create is publish-before-reference, replacement is
+new-first, and deletion is unreference-before-unlink. `Database::commit_object_*`
+changes the reference and increments `vault_meta.app_generation` in one
+`BEGIN IMMEDIATE` transaction; a post-commit unlink failure is recoverable garbage.
+Reconciliation snapshots all object rows, descriptor-enumerates canonical object
+files, reports missing/length-mismatched references as corruption, and returns
+unreferenced files as grace-aged GC candidates. GC requires the writer lease and
+rechecks the live DB plus current file length immediately before durable unlink,
+so a scan-to-reference race cannot delete newly live data. `cleanup_staging` owns
+only old `tmp-[0-9a-f]{32}` owner-only/single-link files; recent and malformed or
+foreign entries are preserved. v3 uses object GC/database maintenance rather than
+legacy `wasted_bytes`/hole-punch/compact semantics.
 
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER

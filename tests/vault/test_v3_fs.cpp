@@ -3,6 +3,7 @@
 #include "vault/v3_fs.h"
 
 #include <array>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <sys/stat.h>
@@ -271,4 +272,36 @@ TEST(v3_fs_unlink_staging_removes_only_a_plain_child)
     CHECK_TRUE(root->unlink_staging("debris.tmp"));
     CHECK_FALSE(fs::exists(debris));
     CHECK_FALSE(root->unlink_staging("../vault.db"));
+}
+
+TEST(v3_fs_staging_recovery_removes_only_old_owned_artifacts)
+{
+    TempDir d("staging_recovery");
+    auto root = VaultRoot::create(d.path / "a.osv");
+    REQUIRE(root.has_value());
+    auto lock = root->try_writer_lock();
+    REQUIRE(lock.has_value());
+    const auto staging = d.path / "a.osv/staging";
+    const auto old_path = staging / "tmp-00000000000000000000000000000000";
+    const auto recent_path = staging / "tmp-11111111111111111111111111111111";
+    { std::ofstream(old_path) << "old"; }
+    { std::ofstream(recent_path) << "recent"; }
+    REQUIRE(::chmod(old_path.c_str(), 0600) == 0);
+    REQUIRE(::chmod(recent_path.c_str(), 0600) == 0);
+    const auto now = fs::file_time_type::clock::now();
+    fs::last_write_time(old_path, now - std::chrono::hours(2));
+    fs::last_write_time(recent_path, now);
+    { std::ofstream(staging / "foreign") << "leave me"; }
+    REQUIRE(::chmod((staging / "foreign").c_str(), 0600) == 0);
+
+    const auto cutoff = std::chrono::duration_cast<std::chrono::seconds>(
+                            std::chrono::system_clock::now().time_since_epoch() -
+                            std::chrono::hours(1))
+                            .count();
+    const auto cleaned = root->cleanup_staging(*lock, cutoff);
+    REQUIRE(cleaned.has_value());
+    CHECK_EQ(cleaned->removed, 1);
+    CHECK_EQ(cleaned->preserved_recent, 1);
+    CHECK_EQ(cleaned->quarantined_or_foreign, 1);
+    CHECK_TRUE(fs::exists(staging / "foreign"));
 }
