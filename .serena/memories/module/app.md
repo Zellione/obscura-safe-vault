@@ -19,6 +19,11 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   called. Wipe paths (lock-now, switch, LockSecond, shutdown) all call `second_.wipe()` to
   zero the mlock'd key. Idle auto-lock deliberately does NOT wipe KeepSession mode (owner
   requirement — no key wipe except explicit user action).
+- **Phase 111:** VaultManager `Shift+O` opens the directory picker for an experimental v3
+  vault; ordinary `O` remains the legacy file picker. The existing pending/active unlock flow
+  accepts either shape through `Vault::open`. V3 galleries show a persistent read-only footer,
+  busy/future-version unlock failures have dedicated messages, automatic migration is skipped,
+  and a manually requested upgrade reports that v3 is read-only.
 - **Phase 50:** App owns `ui::ImportQueue queue_` (declared after vaults for destruction order, so queue drains before vault wipes key).
   `App::update(dt)` drains queue each frame: `queue_.drain(dt)` attaches staged nodes + triggers `on_vault_changed()` broadcast
   on all active screens (GalleryGrid, ImageViewer, FavoritesScreen, AdvancedSearchScreen refetch cached IndexNode* refs).
@@ -175,7 +180,8 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   from any module (vault, gfx, ui, app). Exists because narrow `path::string()`/
   `path{std::string}` go through the ANSI code page on Windows (throwing on CJK —
   the Phase-70 import crash) and are now banned in src/ (see `mem:conventions`).
-- `paths.*`, `file_dialog.*` — config dirs, SDL file dialogs (`save_vault()`). Each open is
+- `paths.*`, `file_dialog.*` — config dirs, SDL file dialogs (`save_vault()`). Phase 111 adds
+  `open_vault_directory()` / `Purpose::VaultDirectory` for v3 roots. Each open is
   tagged with a `Purpose` + `take_result(Purpose)` so one shared dialog polled by two handlers
   (image pick vs zip import) can't steal each other's result. `Purpose::TagList` +
   `open_tag_list()` (.txt); `open_zip()`'s filter accepts `zip;cbz`. Externally-supplied paths

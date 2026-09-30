@@ -2053,6 +2053,10 @@ void GalleryGrid::render(gfx::Renderer& r)
     const uint64_t waste_sz = vault::vault_wasted_bytes(vault_);
     const bool show_waste = should_display_waste(waste_sz, file_sz);
     const bool show_selection = !sel_.empty();
+    const std::string read_only_status = vault_.is_read_only()
+                                             ? "Experimental v3 vault - read only"
+                                             : "";
+    const std::string& visible_status = status_.empty() ? read_only_status : status_;
 
     draw_footer_status(r, font_, OX, bands.footer, FooterStatus{
         .show_waste = show_waste,
@@ -2060,7 +2064,7 @@ void GalleryGrid::render(gfx::Renderer& r)
         .waste_sz = waste_sz,
         .selection_count = static_cast<int>(sel_.count()),
         .error = error_,
-        .status = status_,
+        .status = visible_status,
         .import_summary = queue_.footer_summary(),  // Phase 50: display import queue status
         .position = nav_.selected(),                 // Phase 68: focused tile position
         .total = children_.size()                    // Phase 68: total children count

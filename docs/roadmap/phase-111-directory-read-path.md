@@ -1,6 +1,6 @@
 # Directory-vault read path and UI integration (Phase 111)
 
-**Status:** not started
+**Status:** complete
 
 ## Goal
 
@@ -27,3 +27,25 @@ Open and browse v3 directory vaults end to end without enabling general v3 mutat
 ## Acceptance criterion
 
 An internally generated v3 vault can be unlocked and fully browsed/viewed with feature parity, auto-lock is safe, legacy reading is unaffected, and production UI cannot yet mutate v3 vaults accidentally.
+
+## Delivered
+
+- `v3_header.*` strictly parses the fixed v3 header, derives the KEK, authenticates the
+  vault-bound master-key wrap, and distinguishes corruption, bad credentials, and future
+  versions.
+- `v3_read_session.*` owns the secure root/session lease, descriptor-pinned read-only
+  SQLCipher connection, bounded metadata snapshot, authenticated object readers, and
+  quiesce-before-key-wipe teardown. `Vault` selects this backend internally, leaving screens,
+  search, thumbnail workers, and the FFmpeg-facing `VideoSource` format-neutral.
+- The vault manager can select a v3 directory. Unlock errors cover busy and unsupported
+  vaults, and the gallery footer identifies the experimental read-only mode.
+- Every production mutation boundary, including staging and legacy migration helpers,
+  rejects v3. The integration fixture covers listing/search/tags/favorites, image and
+  thumbnail reads, random-access video, lock/re-unlock, competing-session exclusion, and
+  mutation denial.
+
+## Verification
+
+- Debug, Release, and no-AV suites: all green (`2335`, `2335`, and `2140` tests).
+- ASAN/UBSAN instrumented suite: all `2335` tests green with no sanitizer finding.
+- TSan suite: all `2335` tests green with no race report.

@@ -9,10 +9,12 @@
 #include <cstdio>
 #include <span>
 #include <vector>
+#include <memory>
 
 #include "crypto/crypto.h"        // KEY_SIZE, NODE_ID_SIZE
 #include "crypto/secure_mem.h"    // SecureBytes
 #include "media/video_byte_source.h"
+#include "media/video_object_source.h"
 #include "vault/chunk_store.h"    // ChunkStore, ChunkSpan
 #include "vault/index.h"          // VideoMeta, VideoChunk
 
@@ -40,12 +42,14 @@ private:
     VideoSource(std::FILE* fp, std::span<const uint8_t, crypto::KEY_SIZE> key,
                 const vault::VideoMeta& meta, bool framed,
                 std::array<uint8_t, crypto::NODE_ID_SIZE> node_id);
+    explicit VideoSource(std::unique_ptr<VideoObjectSource> source, uint64_t total_size);
 
     // Copy up to one chunk's worth covering `offset` into `dst`: bytes copied,
     // 0 on a corrupt mapping, -1 on an auth/decrypt failure.
     [[nodiscard]] int64_t fill_one(uint64_t offset, std::span<uint8_t> dst) noexcept;
 
-    vault::ChunkStore              store_;
+    std::unique_ptr<vault::ChunkStore> store_;
+    std::unique_ptr<VideoObjectSource> v3_source_;
     std::vector<vault::VideoChunk> chunks_;
     uint32_t                       chunk_size_ = 0;
     uint64_t                       total_size_ = 0;

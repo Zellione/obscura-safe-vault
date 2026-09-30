@@ -35,8 +35,12 @@
 #include "vault/vault_ops.h"
 #include "vault/vault_search.h"
 #include "vault/video_format.h"
+#include "vault/v3_detect.h"
+#include "vault/v3_read_session.h"
 
 namespace vault {
+
+Vault::Vault() = default;
 
 namespace {
 
@@ -519,6 +523,7 @@ Vault& Vault::operator=(Vault&& o) noexcept
         root_ = std::move(o.root_);
         saved_searches_ = std::move(o.saved_searches_);
         settings_ = std::move(o.settings_);
+        v3_ = std::move(o.v3_);
         o.fp_ = nullptr;
         o.read_fp_ = nullptr;
         o.thumb_fp_ = nullptr;
@@ -538,6 +543,12 @@ void Vault::lock() noexcept
         commit_router_ = nullptr;
     }
 
+    // Quiesce any asynchronous thumbnail/object read before closing the v3
+    // database/object boundary and wiping keys. Readers take the same mutex.
+    std::unique_lock<std::mutex> thumb_lock;
+    if (thumb_mutex_) thumb_lock = std::unique_lock<std::mutex>(*thumb_mutex_);
+
+    if (v3_) v3_->lock();
     master_key_.wipe();
     kek_.wipe();
     kek_valid_ = false;
@@ -579,6 +590,7 @@ void Vault::reset() noexcept
     path_.clear();
     header_ = Header{};
     settings_ = VaultSettings{};
+    v3_.reset();
 }
 
 VaultResult Vault::create(const std::string& path, std::span<const uint8_t> password,
@@ -699,6 +711,24 @@ VaultResult Vault::open(const std::string& path, Vault& out)
 {
     out.reset();
 
+    const auto candidate = v3::classify_candidate(platform::utf8_to_path(path));
+    if (candidate == v3::CandidateKind::DirectoryV3) {
+        auto opened = v3::ReadSession::open(platform::utf8_to_path(path));
+        if (opened.status != v3::ReadStatus::Ok || !opened.session) return VaultResult::BadFormat;
+        out.path_ = path;
+        out.v3_ = std::move(opened.session);
+        out.thumb_mutex_ = std::make_unique<std::mutex>();
+        out.unlocked_ = false;
+        return VaultResult::Ok;
+    }
+    if (candidate == v3::CandidateKind::UnsupportedVersion)
+        return VaultResult::UnsupportedVersion;
+    if (candidate != v3::CandidateKind::LegacyFile) {
+        std::error_code ec;
+        return std::filesystem::exists(platform::utf8_to_path(path), ec)
+                   ? VaultResult::BadFormat : VaultResult::IoError;
+    }
+
     std::FILE* fp = platform::fopen_path(platform::utf8_to_path(path), "r+b");
     if (!fp) return VaultResult::IoError;
 
@@ -803,6 +833,21 @@ namespace {
 VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uint8_t> keyfile)
 {
     using enum VaultResult;
+    if (v3_) {
+        switch (v3_->unlock(password, keyfile)) {
+        case v3::ReadStatus::Ok:
+            root_ = v3_->root();
+            settings_ = v3_->settings();
+            saved_searches_ = v3_->saved_searches();
+            unlocked_ = true;
+            return Ok;
+        case v3::ReadStatus::AuthenticationFailed: return AuthFailed;
+        case v3::ReadStatus::UnsupportedVersion: return UnsupportedVersion;
+        case v3::ReadStatus::Busy: return Busy;
+        case v3::ReadStatus::BadFormat: return BadFormat;
+        default: return IoError;
+        }
+    }
     if (fp_ == nullptr) {
         return IoError;
     }
@@ -860,6 +905,7 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
                                    std::span<const uint8_t> new_keyfile)
 {
     using enum VaultResult;
+    if (v3_) return InvalidArg;
     if (fp_ == nullptr) return IoError;
 
     // Verify the old credentials by unwrapping the master key from the header
@@ -934,6 +980,7 @@ const IndexNode* Vault::resolve_node(std::string_view path) const
 VaultResult Vault::create_gallery(std::string_view gallery_path)
 {
     using enum VaultResult;
+    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
 
     const auto segments = split_path(gallery_path);
@@ -968,6 +1015,7 @@ VaultResult Vault::add_image(std::string_view gallery_path, std::span<const uint
                              std::string_view filename)
 {
     using enum VaultResult;
+    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
     if (!is_safe_node_name(filename)) return InvalidArg;  // no traversal into the index
 
@@ -997,6 +1045,11 @@ VaultResult Vault::read_image(const IndexNode& node, crypto::SecureBytes& out) c
     using enum VaultResult;
     if (!unlocked_) return Locked;
     if (!node.is_image()) return InvalidArg;
+    if (v3_) {
+        const auto status = v3_->read(node, v3::ObjectRole::OriginalImage, out);
+        return status == v3::ReadStatus::Ok ? Ok
+               : status == v3::ReadStatus::AuthenticationFailed ? AuthFailed : BadFormat;
+    }
 
     const auto tag = chunk_tag(crypto::ChunkDomain::Data, node, node.meta.data_id);
     if (ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
@@ -1015,6 +1068,16 @@ VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& ou
     const uint64_t thumb_len = node.is_video() ? node.vmeta.poster_length : node.meta.thumb_length;
     const uint64_t thumb_off = node.is_video() ? node.vmeta.poster_offset : node.meta.thumb_offset;
     if (thumb_len == 0) return NotFound;
+
+    if (v3_) {
+        if (!thumb_mutex_) return Locked;
+        const std::lock_guard lk(*thumb_mutex_);
+        if (!unlocked_) return Locked;
+        const auto role = node.is_video() ? v3::ObjectRole::Poster : v3::ObjectRole::Thumbnail;
+        const auto status = v3_->read(node, role, out);
+        return status == v3::ReadStatus::Ok ? Ok
+               : status == v3::ReadStatus::AuthenticationFailed ? AuthFailed : BadFormat;
+    }
 
     const auto tag = node.is_video()
                          ? chunk_tag(crypto::ChunkDomain::Poster, node, node.vmeta.poster_id)
@@ -1089,6 +1152,14 @@ VaultResult read_thumb_span(const Vault& v, const ChunkRef& ref, crypto::SecureB
     const std::lock_guard lk(*v.thumb_mutex_);
     if (!v.unlocked_) return Locked;
 
+    if (v.v3_) {
+        const auto role = ref.domain == crypto::ChunkDomain::Poster
+                              ? v3::ObjectRole::Poster : v3::ObjectRole::Thumbnail;
+        const auto status = v.v3_->read_id(ref.node_id, role, out);
+        return status == v3::ReadStatus::Ok ? Ok
+               : status == v3::ReadStatus::AuthenticationFailed ? AuthFailed : BadFormat;
+    }
+
     crypto::ChunkTag tag;
     tag.domain        = ref.domain;
     tag.owner         = ref.node_id;
@@ -1114,6 +1185,7 @@ VaultResult Vault::add_video(std::string_view gallery_path, std::span<const uint
                              std::string_view filename, uint32_t chunk_size)
 {
     using enum VaultResult;
+    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
     if (!is_safe_node_name(filename)) return InvalidArg;  // no traversal into the index
     if (chunk_size == 0) return InvalidArg;
@@ -1147,6 +1219,11 @@ VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) c
     using enum VaultResult;
     if (!unlocked_) return Locked;
     if (!node.is_video()) return InvalidArg;
+    if (v3_) {
+        const auto status = v3_->read(node, v3::ObjectRole::OriginalVideo, out);
+        return status == v3::ReadStatus::Ok ? Ok
+               : status == v3::ReadStatus::AuthenticationFailed ? AuthFailed : BadFormat;
+    }
 
     if (!out.resize(node.vmeta.orig_size)) return IoError;
     ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
@@ -1177,6 +1254,7 @@ VaultResult apply_video_probe(Vault& v, std::string_view node_path,
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.v3_) return InvalidArg;
 
     IndexNode* n = v.resolve_node(node_path);
     if (!n || !n->is_video()) return NotFound;
@@ -1211,6 +1289,7 @@ VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.v3_) return InvalidArg;
     if (thumb_jpeg.empty()) return InvalidArg;
     IndexNode* n = v.resolve_node(node_path);
     if (!n || !n->is_image()) return NotFound;
@@ -1235,6 +1314,7 @@ VaultResult apply_video_poster(Vault& v, std::string_view node_path,
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.v3_) return InvalidArg;
     if (poster_jpeg.empty()) return InvalidArg;
     IndexNode* n = v.resolve_node(node_path);
     if (!n || !n->is_video()) return NotFound;
@@ -1258,6 +1338,7 @@ VaultResult apply_image_animated(Vault& v, std::string_view node_path, bool anim
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.v3_) return InvalidArg;
 
     IndexNode* n = v.resolve_node(node_path);
     if (!n || !n->is_image()) return NotFound;
@@ -1272,6 +1353,7 @@ VaultResult commit_migration(Vault& v, VaultSettings settings)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.v3_) return InvalidArg;
     v.settings_ = std::move(settings);
     return v.commit_index();
 }
@@ -1280,6 +1362,7 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.v3_) return InvalidArg;
     IndexNode* n = v.resolve_node(node_path);
     if (!n) return NotFound;
     if (!n->is_media()) return Ok;
@@ -1375,6 +1458,7 @@ VaultResult finalize_context_migration(Vault& v)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.v3_) return InvalidArg;
     if (context_bound_chunks(v.header_)) return Ok;
     if (!v.kek_valid_) return CryptoError;
 
@@ -1409,6 +1493,7 @@ VaultResult finalize_context_migration(Vault& v)
 
 bool uses_context_chunks(const Vault& v) noexcept
 {
+    if (v.v3_) return true;
     return context_bound_chunks(v.header_);
 }
 
@@ -1517,6 +1602,7 @@ void test_only_downgrade_to_legacy(Vault& v)  // NOSONAR cpp:S3776
 VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view filename)
 {
     using enum VaultResult;
+    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
 
     IndexNode* g = find_gallery(gallery_path);
@@ -1539,6 +1625,7 @@ VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view 
 VaultResult Vault::remove_gallery(std::string_view gallery_path)
 {
     using enum VaultResult;
+    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
 
     const auto segments = split_path(gallery_path);
@@ -1582,6 +1669,7 @@ VaultResult remove_media_batch(Vault& v, std::span<const std::string> node_paths
                                RemoveBatchStats* stats)
 {
     using enum VaultResult;
+    if (v.v3_) return InvalidArg;
     if (stats) *stats = {};
     if (!v.unlocked_) return Locked;
 
@@ -1627,6 +1715,7 @@ VaultResult remove_nodes_batch(Vault& v, std::span<const std::string> node_paths
                                RemoveBatchStats* stats)
 {
     using enum VaultResult;
+    if (v.v3_) return InvalidArg;
     if (stats) *stats = {};
     if (!v.unlocked_) return Locked;
 
@@ -1656,6 +1745,7 @@ VaultResult remove_nodes_batch(Vault& v, std::span<const std::string> node_paths
 VaultResult set_favorites_batch(Vault& v, std::span<const std::string> node_paths, bool value)
 {
     using enum VaultResult;
+    if (v.v3_) return InvalidArg;
     if (!v.unlocked_) return Locked;
 
     bool changed = false;
@@ -1674,6 +1764,7 @@ VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths,
                           std::string_view tag)
 {
     using enum VaultResult;
+    if (v.v3_) return InvalidArg;
     if (!v.unlocked_) return Locked;
     const auto trimmed = normalise_tag(tag);
     if (trimmed.empty()) return InvalidArg;
@@ -1700,6 +1791,7 @@ VaultResult remove_tag_batch(Vault& v, std::span<const std::string> node_paths,
                              std::string_view tag)
 {
     using enum VaultResult;
+    if (v.v3_) return InvalidArg;
     if (!v.unlocked_) return Locked;
     const auto trimmed = normalise_tag(tag);
     if (trimmed.empty()) return Ok;   // idempotent, like remove_tag
@@ -1742,6 +1834,7 @@ bool gallery_exists(const Vault& v, std::string_view gallery_path)
 
 VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key)
 {
+    if (v.v3_) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
 
@@ -1770,6 +1863,7 @@ const VaultSettings& vault_settings(const Vault& v) noexcept
 
 VaultResult set_vault_settings(Vault& v, VaultSettings s)
 {
+    if (v.v3_) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
     v.settings_ = std::move(s);
@@ -1780,6 +1874,7 @@ VaultResult rename_node(Vault& v, std::string_view gallery_path, std::string_vie
                         std::string_view new_name)
 {
     using enum VaultResult;
+    if (v.v3_) return InvalidArg;
     if (!v.unlocked_) return Locked;
     if (!is_safe_node_name(new_name)) return InvalidArg;
 
@@ -1801,6 +1896,7 @@ VaultResult rename_node(Vault& v, std::string_view gallery_path, std::string_vie
 VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::string>& tags)
 {
     using enum VaultResult;
+    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
 
     IndexNode* node = resolve_node(node_path);
@@ -1830,6 +1926,7 @@ VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::s
 VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
 {
     using enum VaultResult;
+    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
 
     auto trimmed = normalise_tag(tag);
@@ -1869,6 +1966,7 @@ VaultResult Vault::prune_tags(const std::function<bool(std::string_view)>& keep,
                               PruneTagsStats* stats)
 {
     using enum VaultResult;
+    if (v3_) return InvalidArg;
     if (stats) *stats = {};
     if (!unlocked_) return Locked;
     if (!keep) return InvalidArg;
@@ -1884,6 +1982,7 @@ VaultResult Vault::prune_tags(const std::function<bool(std::string_view)>& keep,
 VaultResult Vault::remove_tag(std::string_view node_path, std::string_view tag)
 {
     using enum VaultResult;
+    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
 
     auto trimmed = normalise_tag(tag);
@@ -2007,6 +2106,7 @@ std::vector<SavedSearch> VaultSearch::list_saved_searches() const
 VaultResult VaultSearch::save_search(std::string_view name, const ui::AdvancedQuery& query)
 {
     using enum VaultResult;
+    if (v_.v3_) return InvalidArg;
     if (!v_.unlocked_) return Locked;
     if (name.empty()) return InvalidArg;
 
@@ -2029,6 +2129,7 @@ VaultResult VaultSearch::save_search(std::string_view name, const ui::AdvancedQu
 VaultResult VaultSearch::delete_saved_search(std::string_view name)
 {
     using enum VaultResult;
+    if (v_.v3_) return InvalidArg;
     if (!v_.unlocked_) return Locked;
 
     const auto it = std::ranges::find_if(v_.saved_searches_,
@@ -2042,6 +2143,7 @@ VaultResult VaultSearch::delete_saved_search(std::string_view name)
 VaultResult toggle_favorite_node(Vault& v, std::string_view node_path)
 {
     using enum VaultResult;
+    if (v.v3_) return InvalidArg;
     if (!v.unlocked_) return Locked;
 
     IndexNode* node = v.resolve_node(node_path);
@@ -2213,6 +2315,7 @@ uint64_t vault_wasted_bytes(const Vault& v)
 VaultResult Vault::compact(OpProgress* progress)
 {
     using enum VaultResult;
+    if (v3_) return InvalidArg;
     if (!unlocked_ || !fp_) return Locked;
     // Early cancel is a true no-op: not even an index commit (a UI cancel that
     // races the job start must leave the file byte-identical).
@@ -2345,6 +2448,7 @@ VaultResult Vault::compact(OpProgress* progress)
 
 VaultResult vault_reclaim(Vault& v)
 {
+    if (v.v3_) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_ || !v.fp_) return Locked;
 
@@ -2422,6 +2526,7 @@ bool Vault::write_header()
 
 VaultResult Vault::commit_index()
 {
+    if (v3_) return VaultResult::InvalidArg;
     // Phase 50: if a commit router (CommitLane) is active and running, route through
     // it instead of committing synchronously. The router runs serialize on this thread
     // and enqueues the blob for asynchronous durability under the write mutex.

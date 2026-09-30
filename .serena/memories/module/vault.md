@@ -86,6 +86,17 @@ any staging file is populated. `ObjectReader::read_frame` is public for bounded 
 consumers. The existing AD already binds video role, vault/object/node identity, frame sequence,
 total count, and total plaintext length, while the authenticated table binds physical records.
 
+Phase 111 adds the experimental read-only v3 application path. `v3_header.*` strictly parses
+the 256-byte control header and authenticates its vault-bound master-key wrap.
+`v3_read_session.*` owns a descriptor-relative `VaultRoot`, exclusive session lease,
+descriptor-pinned read-only SQLCipher connection, bounded secure `IndexNode` snapshot, and
+authenticated object readers. `Vault::open` detects legacy files versus v3 directories and
+dispatches its existing listing/search/settings/read API internally; `lock()` first quiesces
+thumbnail readers, closes DB/object handles and clears snapshots, then wipes keys. V3 reads
+resolve database object references by node identity and role; the pseudo offsets stored in the
+snapshot are stable in-memory thumbnail-cache identities only. All production mutation and
+legacy-migration boundaries return `InvalidArg` for v3 until the later write-path phase.
+
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
 `seek_end`. WHY: `write_header` does `seek_to(fp_,0)` then `fwrite` as two separately-locked

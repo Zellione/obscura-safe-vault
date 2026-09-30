@@ -3,6 +3,7 @@
 #include "crypto/random.h"
 #include "vault/v3_schema.h"
 #include "vault/v3_sqlcipher_key.h"
+#include "vault/v3_fs.h"
 
 #include <sqlite3.h>
 
@@ -13,6 +14,7 @@
 #include <limits>
 #include <string>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <utility>
 
 namespace vault::v3 {
@@ -353,6 +355,25 @@ Database::OpenResult Database::open(const std::filesystem::path& path,
     return result;
 }
 
+Database::OpenResult Database::open_read_only(
+    const VaultRoot& root,
+    std::span<const uint8_t, crypto::KEY_SIZE> database_key) noexcept
+{
+    const int fd = ::openat(root.native_handle(), "vault.db",
+                            O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    struct stat st{};
+    if (fd < 0 || ::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 ||
+        (st.st_mode & 0777) != 0600 || st.st_uid != ::geteuid()) {
+        if (fd >= 0) ::close(fd);
+        return {IoError, std::nullopt};
+    }
+    const std::filesystem::path pinned =
+        std::filesystem::path{"/proc/self/fd"} / std::to_string(fd);
+    auto result = open(pinned, database_key, false);
+    ::close(fd);
+    return result;
+}
+
 bool database_healthy(const Database& database) noexcept
 {
     if (!database.handle_) return false;
@@ -506,18 +527,34 @@ DbResult<std::vector<ObjectRecord>> Database::object_references() const noexcept
                         "object_id,node_id,role,encrypted_length,plaintext_length,frame_plain_"
                         "limit,frame_count,creation_generation FROM objects ORDER BY object_id"};
     if (!statement.get()) return {map_status(sqlite3_extended_errcode(handle_)), {}};
-    while (sqlite3_step(statement.get()) == SQLITE_ROW) {
+    for (;;) {
+        const int step = sqlite3_step(statement.get());
+        if (step == SQLITE_DONE) break;
+        if (step != SQLITE_ROW) return {map_status(step), {}};
         const auto object_id = column_id(statement.get(), 0);
         const auto node_id = column_id(statement.get(), 1);
         if (!object_id || !node_id) return {WrongKeyOrCorrupt, {}};
+        const auto role = optional_integer<uint8_t>(statement.get(), 2);
+        const auto encrypted_length = optional_integer<uint64_t>(statement.get(), 3);
+        const auto plaintext_length = optional_integer<uint64_t>(statement.get(), 4);
+        const auto frame_plain_limit = optional_integer<uint32_t>(statement.get(), 5);
+        const auto frame_count = optional_integer<uint32_t>(statement.get(), 6);
+        const auto generation = optional_integer<uint64_t>(statement.get(), 7);
+        if (!role || *role < std::to_underlying(ObjectRole::OriginalImage) ||
+            *role > std::to_underlying(ObjectRole::OriginalVideo) || !encrypted_length ||
+            *encrypted_length == 0 || !plaintext_length || !frame_plain_limit ||
+            *frame_plain_limit == 0 || *frame_plain_limit > 1048576 || !frame_count ||
+            *frame_count == 0 || *frame_count > 1048576 || !generation)
+            return {WrongKeyOrCorrupt, {}};
         ObjectRecord object{*object_id,
                             *node_id,
-                            static_cast<ObjectRole>(sqlite3_column_int(statement.get(), 2)),
-                            static_cast<uint64_t>(sqlite3_column_int64(statement.get(), 3)),
-                            static_cast<uint64_t>(sqlite3_column_int64(statement.get(), 4)),
-                            static_cast<uint32_t>(sqlite3_column_int(statement.get(), 5)),
-                            static_cast<uint32_t>(sqlite3_column_int(statement.get(), 6)),
-                            static_cast<uint64_t>(sqlite3_column_int64(statement.get(), 7))};
+                            static_cast<ObjectRole>(*role),
+                            *encrypted_length,
+                            *plaintext_length,
+                            *frame_plain_limit,
+                            *frame_count,
+                            *generation};
+        if (result.value.size() >= 3'000'000) return {WrongKeyOrCorrupt, {}};
         result.value.push_back(object);
     }
     return result;
@@ -853,6 +890,59 @@ Database::tag_description(int64_t tag_id) const noexcept
     if (!text && size != 0) return {WrongKeyOrCorrupt, std::nullopt};
     return {Ok,
             crypto::SecureString{std::string_view{text ? text : "", static_cast<size_t>(size)}}};
+}
+
+DbResult<std::vector<TagDescriptionRecord>> Database::tag_descriptions() const noexcept
+{
+    DbResult<std::vector<TagDescriptionRecord>> result{Ok, {}};
+    Statement statement{handle_, "SELECT t.display_name,d.description FROM tag_descriptions d "
+                                 "JOIN tags t ON t.tag_id=d.tag_id ORDER BY t.canonical_name"};
+    if (!statement.get()) return {map_status(sqlite3_extended_errcode(handle_)), {}};
+    for (;;) {
+        const int step = sqlite3_step(statement.get());
+        if (step == SQLITE_DONE) break;
+        if (step != SQLITE_ROW) return {map_status(step), {}};
+        std::array<crypto::SecureString, 2> values;
+        for (int column = 0; column < 2; ++column) {
+            const auto* text = reinterpret_cast<const char*>(sqlite3_column_text(statement.get(), column));
+            const int size = sqlite3_column_bytes(statement.get(), column);
+            if ((!text && size != 0) || size < (column == 0 ? 1 : 0))
+                return {WrongKeyOrCorrupt, {}};
+            values[static_cast<size_t>(column)] =
+                crypto::SecureString(std::string_view{text ? text : "", static_cast<size_t>(size)});
+        }
+        result.value.push_back({std::move(values[0]), std::move(values[1])});
+    }
+    return result;
+}
+
+DbResult<std::vector<ResolvedTagFieldValueRecord>>
+Database::resolved_tag_field_values() const noexcept
+{
+    DbResult<std::vector<ResolvedTagFieldValueRecord>> result{Ok, {}};
+    Statement statement{handle_, "SELECT t.display_name,f.display_name,v.value "
+                                 "FROM tag_field_values v JOIN tags t ON t.tag_id=v.tag_id "
+                                 "JOIN category_fields f ON f.category_id=v.category_id AND "
+                                 "f.field_order=v.field_order ORDER BY t.canonical_name,"
+                                 "v.category_id,v.field_order"};
+    if (!statement.get()) return {map_status(sqlite3_extended_errcode(handle_)), {}};
+    for (;;) {
+        const int step = sqlite3_step(statement.get());
+        if (step == SQLITE_DONE) break;
+        if (step != SQLITE_ROW) return {map_status(step), {}};
+        std::array<crypto::SecureString, 3> values;
+        for (int column = 0; column < 3; ++column) {
+            const auto* text = reinterpret_cast<const char*>(sqlite3_column_text(statement.get(), column));
+            const int size = sqlite3_column_bytes(statement.get(), column);
+            if ((!text && size != 0) || size < (column < 2 ? 1 : 0))
+                return {WrongKeyOrCorrupt, {}};
+            values[static_cast<size_t>(column)] =
+                crypto::SecureString(std::string_view{text ? text : "", static_cast<size_t>(size)});
+        }
+        result.value.push_back({std::move(values[0]), std::move(values[1]),
+                                std::move(values[2])});
+    }
+    return result;
 }
 
 DbStatus Database::set_settings(const SettingsRecord& settings) noexcept

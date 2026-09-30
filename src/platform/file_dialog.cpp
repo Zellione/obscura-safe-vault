@@ -51,6 +51,12 @@ void FileDialog::open_vault(SDL_Window* parent)
                            static_cast<int>(f.size()), nullptr, /*allow_many*/ false);
 }
 
+void FileDialog::open_vault_directory(SDL_Window* parent)
+{
+    if (!begin_open(Purpose::VaultDirectory)) return;
+    SDL_ShowOpenFolderDialog(on_files, this, parent, nullptr, /*allow_many*/ false);
+}
+
 void FileDialog::open_images(SDL_Window* parent)
 {
     if (!begin_open(Purpose::Images)) return;

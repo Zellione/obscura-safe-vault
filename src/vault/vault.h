@@ -40,6 +40,8 @@ namespace media { class VideoSource; }
 
 namespace vault {
 
+namespace v3 { class ReadSession; }
+
 class CommitLane;
 
 enum class VaultResult {
@@ -52,6 +54,8 @@ enum class VaultResult {
     AlreadyExists,  // gallery / image name already taken
     InvalidArg,     // bad argument or leaf-invariant violation
     CryptoError,    // RNG / KDF failure
+    Busy,           // another process holds the required vault resource
+    UnsupportedVersion, // valid vault from a newer unsupported format/schema
 };
 
 // Video chunk size (1 MiB plaintext split).
@@ -114,7 +118,7 @@ public:
     static constexpr uint64_t AUTO_COMPACT_MIN_WASTE   = 256 * 1024;
     static constexpr uint64_t AUTO_COMPACT_WASTE_RATIO = 4;  // waste >= size/4
 
-    Vault() = default;
+    Vault();
     ~Vault();
 
     // Move-only: declaring the move operations implicitly deletes the copy ones,
@@ -195,6 +199,7 @@ public:
     friend VaultResult commit_staged(Vault& v);
 
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
+    [[nodiscard]] bool is_read_only() const noexcept { return v3_ != nullptr; }
 
     // Phase 99: true when this vault's index blob + master-key wrap are sealed
     // with the context-bound AEAD (header FLAG_CONTEXT_BOUND_CHUNKS). A clear
@@ -489,6 +494,9 @@ private:
     // to a CommitLane for asynchronous index commits. Null = synchronous commits.
     // Main-thread only.
     CommitLane*                            commit_router_ = nullptr;
+    // Phase 111: non-null for an experimental v3 directory vault. The existing
+    // public read facade remains stable while storage dispatch stays centralized.
+    std::unique_ptr<v3::ReadSession>       v3_;
 };
 
 // Phase 99 (OSV-AUD-004): a stored chunk's decrypt context — the offset/length

@@ -15,6 +15,7 @@ struct sqlite3;
 namespace vault::v3 {
 
 class Database;
+class VaultRoot;
 
 enum class DbStatus {
     Ok,
@@ -87,6 +88,17 @@ struct TagFieldValueRecord {
     crypto::SecureString value;
 };
 
+struct TagDescriptionRecord {
+    crypto::SecureString tag;
+    crypto::SecureString description;
+};
+
+struct ResolvedTagFieldValueRecord {
+    crypto::SecureString tag;
+    crypto::SecureString field;
+    crypto::SecureString value;
+};
+
 template <typename T> struct DbResult {
     DbStatus status = DbStatus::IoError;
     T value{};
@@ -111,6 +123,9 @@ public:
     open(const std::filesystem::path& path,
          std::span<const uint8_t, crypto::KEY_SIZE> database_key,
          bool writable) noexcept;
+    [[nodiscard]] static OpenResult
+    open_read_only(const VaultRoot& root,
+                   std::span<const uint8_t, crypto::KEY_SIZE> database_key) noexcept;
 
     [[nodiscard]] DbStatus insert_node(const NodeRecord& node) noexcept;
     [[nodiscard]] DbResult<std::vector<NodeRecord>> list_children(const Id& parent_id) const noexcept;
@@ -136,6 +151,9 @@ public:
     [[nodiscard]] DbResult<std::vector<TagFieldValueRecord>> tag_field_values(int64_t tag_id) const noexcept;
     [[nodiscard]] DbStatus set_tag_description(int64_t tag_id, std::string_view description) noexcept;
     [[nodiscard]] DbResult<std::optional<crypto::SecureString>> tag_description(int64_t tag_id) const noexcept;
+    [[nodiscard]] DbResult<std::vector<TagDescriptionRecord>> tag_descriptions() const noexcept;
+    [[nodiscard]] DbResult<std::vector<ResolvedTagFieldValueRecord>>
+    resolved_tag_field_values() const noexcept;
     [[nodiscard]] DbStatus set_settings(const SettingsRecord& settings) noexcept;
     [[nodiscard]] DbResult<SettingsRecord> settings() const noexcept;
     [[nodiscard]] DbStatus add_saved_search(const SavedSearchRecord& search) noexcept;
