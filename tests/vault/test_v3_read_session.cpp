@@ -202,7 +202,7 @@ TEST(v3_vault_facade_lists_searches_reads_and_rejects_mutation)
 
     vault::Vault opened;
     REQUIRE(vault::Vault::open(temp.path.string(), opened) == vault::VaultResult::Ok);
-    CHECK(opened.is_read_only());
+    CHECK(vault_is_read_only(opened));
     REQUIRE(opened.unlock(PASSWORD, {}) == vault::VaultResult::Ok);
     const auto listing = opened.list("");
     REQUIRE(listing.size() == 2U);

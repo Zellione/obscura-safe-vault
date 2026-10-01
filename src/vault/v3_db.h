@@ -112,8 +112,6 @@ public:
     ~Database();
     Database(Database&& other) noexcept;
     Database& operator=(Database&& other) noexcept;
-    Database(const Database&) = delete;
-    Database& operator=(const Database&) = delete;
 
     [[nodiscard]] static OpenResult
     create(const std::filesystem::path& path,
@@ -170,7 +168,6 @@ private:
              std::span<const uint8_t, crypto::KEY_SIZE> database_key,
              int flags) noexcept;
     explicit Database(sqlite3* handle) noexcept : handle_(handle) {}
-    void close() noexcept;
     sqlite3* handle_ = nullptr;
 };
 

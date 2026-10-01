@@ -257,7 +257,7 @@ bool publish_backup(const std::filesystem::path& temporary,
 
 Database::~Database()
 {
-    close();
+    if (handle_ != nullptr) sqlite3_close(handle_);
 }
 
 Database::Database(Database&& other) noexcept : handle_(std::exchange(other.handle_, nullptr)) {}
@@ -265,16 +265,10 @@ Database::Database(Database&& other) noexcept : handle_(std::exchange(other.hand
 Database& Database::operator=(Database&& other) noexcept
 {
     if (this != &other) {
-        close();
+        if (handle_ != nullptr) sqlite3_close(handle_);
         handle_ = std::exchange(other.handle_, nullptr);
     }
     return *this;
-}
-
-void Database::close() noexcept
-{
-    if (handle_ != nullptr) sqlite3_close(handle_);
-    handle_ = nullptr;
 }
 
 Database::OpenResult Database::open_raw(const std::filesystem::path& path,

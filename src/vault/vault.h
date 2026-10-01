@@ -199,7 +199,7 @@ public:
     friend VaultResult commit_staged(Vault& v);
 
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
-    [[nodiscard]] bool is_read_only() const noexcept { return v3_ != nullptr; }
+    friend bool vault_is_read_only(const Vault& v) noexcept;
 
     // Phase 99: true when this vault's index blob + master-key wrap are sealed
     // with the context-bound AEAD (header FLAG_CONTEXT_BOUND_CHUNKS). A clear
@@ -498,6 +498,8 @@ private:
     // public read facade remains stable while storage dispatch stays centralized.
     std::unique_ptr<v3::ReadSession>       v3_;
 };
+
+[[nodiscard]] bool vault_is_read_only(const Vault& v) noexcept;
 
 // Phase 99 (OSV-AUD-004): a stored chunk's decrypt context — the offset/length
 // span PLUS the logical identity the AEAD binds (owner node_id, per-record id,

@@ -94,7 +94,7 @@ void apply_object_markers(IndexNode& node, const std::vector<ObjectRecord>& obje
         apply_object_markers(child, objects);
 }
 
-bool load_settings(Database& database, VaultSettings& settings) noexcept
+bool load_settings(const Database& database, VaultSettings& settings) noexcept
 {
     auto db_settings = database.settings();
     if (db_settings.status != DbStatus::Ok || db_settings.value.default_sort > 7) return false;

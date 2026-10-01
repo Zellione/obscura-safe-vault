@@ -80,7 +80,7 @@ std::array<uint8_t, V3_MASTER_WRAP_AD_SIZE> master_wrap_ad(const V3Header& heade
     ad[0] = 0x10;
     ad[1] = 1;
     put16(ad, 2, FORMAT_VERSION);
-    std::copy(header.vault_id.begin(), header.vault_id.end(), ad.begin() + 4);
+    std::ranges::copy(header.vault_id, ad.begin() + 4);
     put16(ad, 20, V3_HEADER_SIZE);
     put32(ad, 22, header.flags);
     return ad;
@@ -96,8 +96,8 @@ HeaderStatus unwrap_v3_master_key(const V3Header& header,
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
     if (!crypto::derive_key(password, keyfile, header.salt, header.kdf, kek)) return CryptoError;
     std::array<uint8_t, crypto::KEY_SIZE + crypto::TAG_SIZE> sealed{};
-    std::copy(header.wrapped_master_key.begin(), header.wrapped_master_key.end(), sealed.begin());
-    std::copy(header.tag.begin(), header.tag.end(), sealed.begin() + crypto::KEY_SIZE);
+    std::ranges::copy(header.wrapped_master_key, sealed.begin());
+    std::ranges::copy(header.tag, sealed.begin() + crypto::KEY_SIZE);
     if (const auto ad = master_wrap_ad(header);
         !crypto::open_to(kek.as_span(), header.nonce, sealed, master_key.span(), ad)) {
         master_key.wipe();

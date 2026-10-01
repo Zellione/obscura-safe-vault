@@ -42,6 +42,11 @@ namespace vault {
 
 Vault::Vault() = default;
 
+bool vault_is_read_only(const Vault& v) noexcept
+{
+    return v.v3_ != nullptr;
+}
+
 namespace {
 
 VaultResult map_v3_read_status(v3::ReadStatus status) noexcept

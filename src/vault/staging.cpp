@@ -56,7 +56,7 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
 {
     using enum VaultResult;
 
-    if (v.is_read_only()) return {InvalidArg, {}};
+    if (vault_is_read_only(v)) return {InvalidArg, {}};
 
     if (!v.unlocked_) {
         return {Locked, {}};
@@ -168,7 +168,7 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
 {
     using enum VaultResult;
 
-    if (v.is_read_only()) return {InvalidArg, {}};
+    if (vault_is_read_only(v)) return {InvalidArg, {}};
 
     if (!v.unlocked_) {
         return {Locked, {}};
@@ -272,7 +272,7 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
 
 VaultResult attach_staged(Vault& v, std::string_view gallery_path, IndexNode&& node)
 {
-    if (v.is_read_only()) return VaultResult::InvalidArg;
+    if (vault_is_read_only(v)) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
 
@@ -291,7 +291,7 @@ VaultResult attach_staged(Vault& v, std::string_view gallery_path, IndexNode&& n
 
 VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path)
 {
-    if (v.is_read_only()) return VaultResult::InvalidArg;
+    if (vault_is_read_only(v)) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
 
@@ -326,7 +326,7 @@ VaultResult attach_image_prestaged(Vault& v, std::string_view gallery_path,
                                    const StagedThumb& thumb, uint64_t created_ts,
                                    const NodeExtras* extras)
 {
-    if (v.is_read_only()) return VaultResult::InvalidArg;
+    if (vault_is_read_only(v)) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
     if (!is_safe_node_name(filename)) return InvalidArg;
@@ -353,7 +353,7 @@ VaultResult attach_image_prestaged(Vault& v, std::string_view gallery_path,
 
 VaultResult commit_staged(Vault& v)
 {
-    if (v.is_read_only()) return VaultResult::InvalidArg;
+    if (vault_is_read_only(v)) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
     if (ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
@@ -382,7 +382,7 @@ VaultResult attach_video_prestaged(Vault& v, std::string_view gallery_path,
                                    const StagedVideoInfo& info, uint64_t created_ts,
                                    const NodeExtras* extras)
 {
-    if (v.is_read_only()) return VaultResult::InvalidArg;
+    if (vault_is_read_only(v)) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
     if (!is_safe_node_name(filename)) return InvalidArg;

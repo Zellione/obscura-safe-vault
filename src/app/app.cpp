@@ -200,8 +200,8 @@ void App::promote_pending()
     migration_ui_.progress_open = false;
     migration_ui_.result_open = false;
     migration_ui_.job.reset();  // reset migration job from previous vault
-    if (const bool context_stale = !vault::uses_context_chunks(*vault_state_.active);   // Phase 99
-        !vault_state_.active->is_read_only() &&
+    if (const bool context_stale = !vault::uses_context_chunks(*vault_state_.active);  // Phase 99
+        !vault::vault_is_read_only(*vault_state_.active) &&
         vault::migration_pending(vault::vault_settings(*vault_state_.active), media::PROBE_CAPS_GEN,
                                  static_cast<uint16_t>(image::THUMB_MAX_SIDE), context_stale)) {
         // Phase 75: compute thumbs_stale to include thumbnail regen in the scan
@@ -780,7 +780,7 @@ struct App::OverlayDispatch {
         }
         app.overlays_.settings.trigger_migration = false;
 
-        if (app.vault_state_.active->is_read_only()) {
+        if (vault::vault_is_read_only(*app.vault_state_.active)) {
             app.overlays_.settings.error = "Experimental v3 vaults are read only";
             return true;
         }

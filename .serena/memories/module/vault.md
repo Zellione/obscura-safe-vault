@@ -95,7 +95,9 @@ dispatches its existing listing/search/settings/read API internally; `lock()` fi
 thumbnail readers, closes DB/object handles and clears snapshots, then wipes keys. V3 reads
 resolve database object references by node identity and role; the pseudo offsets stored in the
 snapshot are stable in-memory thumbnail-cache identities only. All production mutation and
-legacy-migration boundaries return `InvalidArg` for v3 until the later write-path phase.
+legacy-migration boundaries return `InvalidArg` for v3 until the later write-path phase. The
+free `vault_is_read_only(const Vault&)` query exposes this state without expanding the already
+large `Vault` member-method surface.
 
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
