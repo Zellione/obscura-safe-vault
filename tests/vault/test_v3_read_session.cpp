@@ -10,6 +10,7 @@
 #include "vault/v3_header.h"
 #include "vault/v3_object_store.h"
 #include "vault/v3_read_session.h"
+#include "vault/staging.h"
 #include "vault/vault.h"
 
 #include <array>
@@ -349,6 +350,38 @@ TEST(v3_directory_create_refuses_existing_paths_and_locked_password_rotation_wor
     REQUIRE(output.change_password(PASSWORD, {}, replacement, {}) == vault::VaultResult::Ok);
     CHECK(output.unlock(PASSWORD, {}) == vault::VaultResult::AuthFailed);
     CHECK(output.unlock(replacement, {}) == vault::VaultResult::Ok);
+}
+
+TEST(v3_prestaged_image_persists_original_thumbnail_and_metadata)
+{
+    TempRoot temp;
+    vault::Vault created;
+    const crypto::KdfParams params{1, 8, 1};
+    REQUIRE(vault::Vault::create_directory(temp.path.string(), PASSWORD, {}, params, created) ==
+            vault::VaultResult::Ok);
+    constexpr std::array<uint8_t, 4> original{4, 3, 2, 1};
+    constexpr std::array<uint8_t, 6> jpeg{0xff, 0xd8, 9, 8, 0xff, 0xd9};
+    vault::StagedThumb thumb;
+    REQUIRE(thumb.thumb_jpeg.assign(jpeg));
+    thumb.format = vault::ImageFormat::JPEG;
+    thumb.width = 321;
+    thumb.height = 123;
+    REQUIRE(vault::add_image_prestaged(created, "", original, "pre.jpg", thumb, 424242) ==
+            vault::VaultResult::Ok);
+    created.lock();
+    REQUIRE(created.unlock(PASSWORD, {}) == vault::VaultResult::Ok);
+    const auto listing = created.list("");
+    REQUIRE(listing.size() == 1U);
+    CHECK(listing[0]->meta.format == vault::ImageFormat::JPEG);
+    CHECK_EQ(listing[0]->meta.width, 321U);
+    CHECK_EQ(listing[0]->meta.height, 123U);
+    CHECK_EQ(listing[0]->meta.created_ts, 424242U);
+    crypto::SecureBytes original_back;
+    crypto::SecureBytes thumb_back;
+    REQUIRE(created.read_image(*listing[0], original_back) == vault::VaultResult::Ok);
+    REQUIRE(created.read_thumbnail(*listing[0], thumb_back) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(original_back.as_span(), original);
+    CHECK_BYTES_EQ(thumb_back.as_span(), jpeg);
 }
 
 TEST(v3_unattached_staged_object_becomes_garbage_without_blocking_later_commits)
