@@ -95,7 +95,13 @@ void VaultManager::handle_key(const SDL_KeyboardEvent& key)
         case SDLK_KP_ENTER:
         case SDLK_SPACE:  open_selected(); break;
         case SDLK_N:      dlg_.save_vault(win_.sdl_window()); awaiting_dialog_ = true; break;
-        case SDLK_O:      dlg_.open_vault(win_.sdl_window()); awaiting_dialog_ = true; break;
+        case SDLK_O:
+            if (key.mod & SDL_KMOD_SHIFT)
+                dlg_.open_vault_directory(win_.sdl_window());
+            else
+                dlg_.open_vault(win_.sdl_window());
+            awaiting_dialog_ = true;
+            break;
         case SDLK_R:
         case SDLK_DELETE: remove_selected(); break;
         case SDLK_L: {
@@ -225,7 +231,8 @@ std::vector<ui::HelpGroup> VaultManager::help_groups() const
     return {
         {"Vaults", {
             {"Up/Down", "Move selection"}, {"Enter / Space", "Open selected vault"},
-            {"N", "Create new vault"}, {"O", "Open existing vault file"},
+            {"N", "Create new vault"}, {"O", "Open legacy vault file"},
+            {"Shift+O", "Open v3 vault directory"},
             {"R / Del", "Remove from list"}, {"L", "Lock the selected/active vault"},
             {"Shift+I", "Import status"},
         }},

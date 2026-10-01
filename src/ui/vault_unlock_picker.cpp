@@ -30,6 +30,8 @@ std::string unlock_error_message(vault::VaultResult r) noexcept
     using enum vault::VaultResult;
     if (r == AuthFailed) return "Wrong password or keyfile.";
     if (r == BadFormat)  return "Not a valid vault file.";
+    if (r == Busy) return "Vault is busy in another process.";
+    if (r == UnsupportedVersion) return "Vault version is not supported.";
     return "Could not open the destination vault.";
 }
 

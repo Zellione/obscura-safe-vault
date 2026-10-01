@@ -5,15 +5,22 @@
 
 #include "vault/header.h"   // for framed_chunks
 #include "vault/vault.h"   // for the friend factory's access to read_fp_ / master_key_
+#include "media/video_object_source.h"
+#include "vault/v3_read_session.h"
 
 namespace media {
 
 VideoSource::VideoSource(std::FILE* fp, std::span<const uint8_t, crypto::KEY_SIZE> key,
                          const vault::VideoMeta& meta, bool framed,
                          std::array<uint8_t, crypto::NODE_ID_SIZE> node_id)
-    : store_(fp, key, framed), chunks_(meta.chunks), chunk_size_(meta.chunk_size),
+    : store_(std::make_unique<vault::ChunkStore>(fp, key, framed)),
+      chunks_(meta.chunks), chunk_size_(meta.chunk_size),
       total_size_(meta.orig_size), node_id_(std::move(node_id)),
       context_bound_(meta.context_bound) {}
+
+VideoSource::VideoSource(std::unique_ptr<VideoObjectSource> source, uint64_t total_size)
+    : v3_source_(std::move(source)), total_size_(total_size)
+{}
 
 // Copy up to one chunk's worth of plaintext covering `offset` into `dst`,
     // decrypting that chunk on demand. Returns bytes copied, 0 on a corrupt
@@ -29,9 +36,9 @@ VideoSource::VideoSource(std::FILE* fp, std::span<const uint8_t, crypto::KEY_SIZ
         tag.record        = chunks_[static_cast<size_t>(idx)].id;
         tag.sequence      = chunks_[static_cast<size_t>(idx)].sequence;
         tag.context_bound = context_bound_;
-        if (!store_.read_chunk({chunks_[static_cast<size_t>(idx)].offset,
-                                chunks_[static_cast<size_t>(idx)].length},
-                               tag, cache_)) {
+        if (!store_ || !store_->read_chunk({chunks_[static_cast<size_t>(idx)].offset,
+                                            chunks_[static_cast<size_t>(idx)].length},
+                                           tag, cache_)) {
             (void)cache_.resize(0);                         // wipe any stale plaintext
             cached_index_ = -1;
             return -1;                                      // auth/decrypt failure
@@ -47,6 +54,7 @@ VideoSource::VideoSource(std::FILE* fp, std::span<const uint8_t, crypto::KEY_SIZ
 
 int64_t VideoSource::read(uint64_t offset, std::span<uint8_t> dst) noexcept
 {
+    if (v3_source_) return v3_source_->read(offset, dst);
     if (offset >= total_size_ || chunk_size_ == 0) return 0;
     const uint64_t want = std::min<uint64_t>(dst.size(), total_size_ - offset);
     uint64_t written = 0;
@@ -61,6 +69,16 @@ int64_t VideoSource::read(uint64_t offset, std::span<uint8_t> dst) noexcept
 
 VideoSource VideoSource::open(const vault::Vault& v, const vault::IndexNode& node)
 {
+    if (v.v3_) {
+        if (const auto info =
+                v.v3_->object_for(node.node_id, vault::v3::ObjectRole::OriginalVideo)) {
+            auto opened = VideoObjectSource::open(v.v3_->root_handle_,
+                                                   v.v3_->master_key_.as_span(), *info);
+            if (opened.source)
+                return VideoSource(std::move(opened.source), info->plaintext_length);
+        }
+        return VideoSource(std::unique_ptr<VideoObjectSource>{}, 0);
+    }
     return VideoSource(v.read_fp_, v.master_key_.as_span(), node.vmeta, framed_chunks(v.header_),
                        node.node_id);
 }

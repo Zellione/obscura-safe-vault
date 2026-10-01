@@ -110,6 +110,8 @@ Files: `video_byte_source.h`, `video_source.*`, `video_object_source.*`, `chunk_
   only object identity/frame/status. `ChunkAvio` owns either backend through this interface;
   `MemAvio` remains the callback source used by duplicate scanning. All are read+seek and never
   create a plaintext temporary file.
+  Phase 111 makes `VideoSource::open(Vault&, IndexNode&)` select either the legacy chunk source
+  or a v3 `VideoObjectSource`, preserving the existing FFmpeg/AVIO call sites.
 - `VideoDecoder` = FFmpeg shared demuxer feeding both video + audio via per-stream packet
   queues (`vq_`/`aq_`); H.264/HEVC + ~34 legacy codecs (Phase 52: MPEG-1/2, MPEG-4 ASP,
   MS-MPEG4 v1–v3, WMV1/2/3, VC-1, H.263, FLV1, VP6/a/f, SVQ1/3, DV, MSVideo1, RPZA,

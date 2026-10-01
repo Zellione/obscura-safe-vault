@@ -747,6 +747,30 @@ std::optional<std::vector<ObjectEntry>> VaultRoot::list_objects() const noexcept
     return result;
 }
 
+bool VaultRoot::read_header(std::span<uint8_t> destination) const noexcept
+{
+    const int header = open_child(fd_, "vault.header", O_RDONLY);
+    if (header < 0 || !owned_mode(header, S_IFREG, 0600, true)) {
+        if (header >= 0) ::close(header);
+        return false;
+    }
+    size_t done = 0;
+    while (done < destination.size()) {
+        const ssize_t got = ::pread(header, destination.data() + done,
+                                    destination.size() - done, static_cast<off_t>(done));
+        if (got <= 0) {
+            ::close(header);
+            return false;
+        }
+        done += static_cast<size_t>(got);
+    }
+    struct stat st{};
+    const bool exact = ::fstat(header, &st) == 0 &&
+                       static_cast<uint64_t>(st.st_size) == destination.size();
+    ::close(header);
+    return exact;
+}
+
 bool VaultRoot::unlink_staging(std::string_view name) const noexcept
 {
     if (!plain_staging_name(name) || fail(FsFault::Unlink)) return false;

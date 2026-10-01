@@ -111,6 +111,8 @@ public:
     [[nodiscard]] bool publish(DurableFile& file, const ObjectId& id) const noexcept;
     [[nodiscard]] bool unlink_object(const ObjectId& id) const noexcept;
     [[nodiscard]] std::optional<std::vector<ObjectEntry>> list_objects() const noexcept;
+    // Control files have fixed application-owned names; callers never pass user metadata.
+    [[nodiscard]] bool read_header(std::span<uint8_t> destination) const noexcept;
     [[nodiscard]] bool unlink_staging(std::string_view name) const noexcept;
     [[nodiscard]] std::optional<StagingCleanup>
     cleanup_staging(const WriterLock& writer_lock, int64_t older_than_seconds) const noexcept;

@@ -40,6 +40,8 @@ namespace media { class VideoSource; }
 
 namespace vault {
 
+namespace v3 { class ReadSession; }
+
 class CommitLane;
 
 enum class VaultResult {
@@ -52,6 +54,8 @@ enum class VaultResult {
     AlreadyExists,  // gallery / image name already taken
     InvalidArg,     // bad argument or leaf-invariant violation
     CryptoError,    // RNG / KDF failure
+    Busy,           // another process holds the required vault resource
+    UnsupportedVersion, // valid vault from a newer unsupported format/schema
 };
 
 // Video chunk size (1 MiB plaintext split).
@@ -114,7 +118,7 @@ public:
     static constexpr uint64_t AUTO_COMPACT_MIN_WASTE   = 256 * 1024;
     static constexpr uint64_t AUTO_COMPACT_WASTE_RATIO = 4;  // waste >= size/4
 
-    Vault() = default;
+    Vault();
     ~Vault();
 
     // Move-only: declaring the move operations implicitly deletes the copy ones,
@@ -195,6 +199,7 @@ public:
     friend VaultResult commit_staged(Vault& v);
 
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
+    friend bool vault_is_read_only(const Vault& v) noexcept;
 
     // Phase 99: true when this vault's index blob + master-key wrap are sealed
     // with the context-bound AEAD (header FLAG_CONTEXT_BOUND_CHUNKS). A clear
@@ -461,7 +466,7 @@ private:
     // fetch either completes against valid state or observes Locked. Never
     // taken together with write_mutex_/header_mutex_ (no nesting, no ordering).
     std::FILE*                             thumb_fp_ = nullptr;
-    std::unique_ptr<std::mutex>            thumb_mutex_;
+    mutable std::mutex thumb_mutex_;
     // Phase 50: serialises ALL writes to fp_ (chunk appends from stage_*,
     // index slot writes from the commit lane / commit_index). unique_ptr keeps
     // Vault movable. Held for one whole chunk per acquisition — never released
@@ -489,7 +494,12 @@ private:
     // to a CommitLane for asynchronous index commits. Null = synchronous commits.
     // Main-thread only.
     CommitLane*                            commit_router_ = nullptr;
+    // Phase 111: non-null for an experimental v3 directory vault. The existing
+    // public read facade remains stable while storage dispatch stays centralized.
+    std::unique_ptr<v3::ReadSession>       v3_;
 };
+
+[[nodiscard]] bool vault_is_read_only(const Vault& v) noexcept;
 
 // Phase 99 (OSV-AUD-004): a stored chunk's decrypt context — the offset/length
 // span PLUS the logical identity the AEAD binds (owner node_id, per-record id,
