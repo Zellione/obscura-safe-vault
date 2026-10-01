@@ -189,10 +189,10 @@ bool scan_object_shard(int objects_fd, const dirent& shard_entry,
     while (const dirent* entry = read_next(entries, read_error)) {
         const std::string_view name{entry->d_name};
         if (name == "." || name == "..") continue;
-        const auto id = parse_object_relative_path("objects/" + std::string(shard) + "/" +
-                                                   std::string(name));
+        const auto id =
+            parse_object_relative_path("objects/" + std::string(shard) + "/" + std::string(name));
         const int file = id ? open_child(shard_fd, entry->d_name, O_RDONLY) : -1;
-        struct stat metadata {};
+        struct stat metadata{};
         const bool valid = id && file >= 0 && owned_mode(file, S_IFREG, 0600, true) &&
                            ::fstat(file, &metadata) == 0 && metadata.st_size >= 0;
         if (file >= 0) ::close(file);
@@ -245,9 +245,9 @@ bool remove_old_staging_entries(int staging, DIR* entries, int64_t cutoff,
             continue;
         }
         const int file = open_child(staging, entry->d_name, O_RDONLY);
-        struct stat metadata {};
-        const bool valid = file >= 0 && owned_mode(file, S_IFREG, 0600, true) &&
-                           ::fstat(file, &metadata) == 0;
+        struct stat metadata{};
+        const bool valid =
+            file >= 0 && owned_mode(file, S_IFREG, 0600, true) && ::fstat(file, &metadata) == 0;
         if (file >= 0) ::close(file);
         if (!valid) {
             ++result.quarantined_or_foreign;
@@ -756,8 +756,8 @@ bool VaultRoot::read_header(std::span<uint8_t> destination) const noexcept
     }
     size_t done = 0;
     while (done < destination.size()) {
-        const ssize_t got = ::pread(header, destination.data() + done,
-                                    destination.size() - done, static_cast<off_t>(done));
+        const ssize_t got = ::pread(header, destination.data() + done, destination.size() - done,
+                                    static_cast<off_t>(done));
         if (got <= 0) {
             ::close(header);
             return false;
@@ -765,10 +765,74 @@ bool VaultRoot::read_header(std::span<uint8_t> destination) const noexcept
         done += static_cast<size_t>(got);
     }
     struct stat st{};
-    const bool exact = ::fstat(header, &st) == 0 &&
-                       static_cast<uint64_t>(st.st_size) == destination.size();
+    const bool exact =
+        ::fstat(header, &st) == 0 && static_cast<uint64_t>(st.st_size) == destination.size();
     ::close(header);
     return exact;
+}
+
+bool VaultRoot::write_header(std::span<const uint8_t> bytes) const noexcept
+{
+    if (bytes.empty() || fail(FsFault::Write)) return false;
+    const int header = open_child(fd_, "vault.header", O_WRONLY);
+    if (header < 0 || !owned_mode(header, S_IFREG, 0600, true)) {
+        if (header >= 0) ::close(header);
+        return false;
+    }
+    bool ok = ::ftruncate(header, 0) == 0;
+    size_t done = 0;
+    while (ok && done < bytes.size()) {
+        // `header` was descriptor-opened with O_NOFOLLOW; `bytes` is payload, not a path.
+        const ssize_t wrote = ::pwrite( // NOSONAR cppsecurity:S2083
+            header, bytes.data() + done, bytes.size() - done, static_cast<off_t>(done));
+        if (wrote <= 0)
+            ok = false;
+        else
+            done += static_cast<size_t>(wrote);
+    }
+    ok = ok && !fail(FsFault::FileSync) && ::fdatasync(header) == 0;
+    ::close(header);
+    return ok && !fail(FsFault::DirectorySync) && sync_dir(fd_);
+}
+
+bool VaultRoot::replace_header(std::span<const uint8_t> bytes) const noexcept
+{
+    if (bytes.empty()) return false;
+    auto staged = create_staging_file();
+    if (!staged || !staged->write_all(bytes) || !staged->sync()) return false;
+    if (fail(FsFault::Rename) ||
+        ::renameat(staged->staging_fd_, staged->name_.c_str(), fd_, "vault.header") != 0)
+        return false;
+    staged->published_ = true;
+    return !fail(FsFault::DirectorySync) && sync_dir(fd_) && sync_dir(staged->staging_fd_);
+}
+
+bool VaultRoot::rollback_creation() noexcept
+{
+    if (fd_ < 0 || display_path_.filename().empty()) return false;
+    const std::filesystem::path parent_path =
+        display_path_.has_parent_path() ? display_path_.parent_path() : ".";
+    const std::string leaf = display_path_.filename().string();
+    const int parent = open_root(parent_path);
+    struct stat held{};
+    if (struct stat named{}; parent < 0 || ::fstat(fd_, &held) != 0 ||
+        ::fstatat(parent, leaf.c_str(), &named, AT_SYMLINK_NOFOLLOW) != 0 ||
+        held.st_dev != named.st_dev || held.st_ino != named.st_ino || !S_ISDIR(named.st_mode)) {
+        if (parent >= 0) ::close(parent);
+        return false;
+    }
+    bool ok = true;
+    for (const char* name : {"vault.header", "vault.db", "lock"})
+        if (::unlinkat(fd_, name, 0) != 0 && errno != ENOENT) ok = false;
+    for (const char* name : {"objects", "staging"})
+        if (::unlinkat(fd_, name, AT_REMOVEDIR) != 0 && errno != ENOENT) ok = false;
+    // `leaf` is one filename component and the inode was matched to our retained root fd above.
+    if (ok)
+        ok = ::unlinkat( // NOSONAR cppsecurity:S2083 -- validated component and inode
+                 parent, leaf.c_str(), AT_REMOVEDIR) == 0 && sync_dir(parent);
+    ::close(parent);
+    if (ok) close();
+    return ok;
 }
 
 bool VaultRoot::unlink_staging(std::string_view name) const noexcept

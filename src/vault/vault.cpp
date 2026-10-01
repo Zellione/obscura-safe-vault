@@ -16,9 +16,9 @@
 #include "chunk_store.h"
 #include "compact_plan.h"
 #include "file_util.h"
-#include "safe_name.h"
 #include "platform/path_utf8.h"
 #include "platform/paths.h"
+#include "safe_name.h"
 
 #include "image/anim_info.h"
 #include "image/decode.h"
@@ -32,17 +32,23 @@
 #include "vault/index.h"
 #include "vault/index_io.h"
 #include "vault/staging.h"
+#include "vault/v3_detect.h"
+#include "vault/v3_read_session.h"
 #include "vault/vault_ops.h"
 #include "vault/vault_search.h"
 #include "vault/video_format.h"
-#include "vault/v3_detect.h"
-#include "vault/v3_read_session.h"
 
 namespace vault {
 
 Vault::Vault() = default;
 
 bool vault_is_read_only(const Vault& v) noexcept
+{
+    (void)v;
+    return false;
+}
+
+bool vault_uses_directory_storage(const Vault& v) noexcept
 {
     return v.v3_ != nullptr;
 }
@@ -54,6 +60,9 @@ VaultResult map_v3_read_status(v3::ReadStatus status) noexcept
     using enum VaultResult;
     if (status == v3::ReadStatus::Ok) return Ok;
     if (status == v3::ReadStatus::AuthenticationFailed) return AuthFailed;
+    if (status == v3::ReadStatus::Busy) return Busy;
+    if (status == v3::ReadStatus::UnsupportedVersion) return UnsupportedVersion;
+    if (status == v3::ReadStatus::IoError) return IoError;
     return BadFormat;
 }
 
@@ -69,10 +78,10 @@ std::span<const uint8_t> header_record_ad(crypto::ChunkDomain domain, const Head
 {
     if (!context_bound_chunks(h)) return {};
     crypto::ChunkTag t;
-    t.domain        = domain;
-    t.owner         = h.vault_id;
+    t.domain = domain;
+    t.owner = h.vault_id;
     t.context_bound = true;
-    scratch         = crypto::build_chunk_ad(t);
+    scratch = crypto::build_chunk_ad(t);
     return scratch;
 }
 
@@ -100,7 +109,6 @@ std::string_view trim_ws(std::string_view s)
         --end;
     return s.substr(start, end - start);
 }
-
 
 // Case-insensitive substring check.
 bool ci_contains(std::string_view haystack, std::string_view needle)
@@ -214,7 +222,10 @@ std::string join_child_path(std::string_view prefix, std::string_view name)
 struct FieldTagMap {
     std::vector<std::pair<std::string, std::vector<std::string>>> by_tag;
 
-    [[nodiscard]] bool empty() const noexcept { return by_tag.empty(); }
+    [[nodiscard]] bool empty() const noexcept
+    {
+        return by_tag.empty();
+    }
 
     static FieldTagMap build(const VaultSettings& s)
     {
@@ -238,8 +249,7 @@ struct FieldTagMap {
         std::vector<std::string> out = tags;
         for (const auto& t : tags)
             for (const auto& [tag, values] : by_tag)
-                if (tag_ci_equal(tag, t))
-                    out.insert(out.end(), values.begin(), values.end());
+                if (tag_ci_equal(tag, t)) out.insert(out.end(), values.begin(), values.end());
         return out;
     }
 };
@@ -251,8 +261,7 @@ struct FieldTagMap {
 std::vector<std::string> search_dfs(const IndexNode& node, std::string_view prefix,
                                     const std::vector<std::string>& inherited,
                                     std::string_view query, SearchScope scope,
-                                    std::vector<SearchHit>& out,
-                                    const FieldTagMap& fmap)
+                                    std::vector<SearchHit>& out, const FieldTagMap& fmap)
 {
     std::vector<std::string> subtree_tags;
 
@@ -349,8 +358,8 @@ void collect_tags(const IndexNode& node, std::vector<std::string>& out)
 // to keep that walk's nesting shallow (cpp:S134).
 void bump_tag_tally(std::vector<ui::TagTally>& tallies, std::string_view tag, bool is_gallery)
 {
-    auto it = std::ranges::find_if(tallies,
-                                   [&](const ui::TagTally& tt) { return tag_ci_equal(tt.tag, tag); });
+    auto it = std::ranges::find_if(
+        tallies, [&](const ui::TagTally& tt) { return tag_ci_equal(tt.tag, tag); });
     if (it == tallies.end()) return;
     if (is_gallery)
         ++it->gallery_count;
@@ -420,8 +429,8 @@ void accumulate_subtree_union(std::vector<std::string>& subtree_tags,
                               const std::vector<std::string>& child_subtree, bool is_child_gallery)
 {
     // For galleries, include the subtree recursion result.
-    const auto to_union = is_child_gallery ? compute_effective_tags(child_subtree, child_tags)
-                                           : child_tags;
+    const auto to_union =
+        is_child_gallery ? compute_effective_tags(child_subtree, child_tags) : child_tags;
 
     for (const auto& tag : to_union) {
         if (!std::ranges::any_of(subtree_tags,
@@ -617,8 +626,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     // (never truncate an existing one) with owner-only permissions from the
     // first byte, instead of "w+b" landing 0644 under a default umask.
     std::FILE* fp = nullptr;
-    const platform::OwnerOnlyCreate created =
-        platform::create_owner_only_file(vault_path, fp);
+    const platform::OwnerOnlyCreate created = platform::create_owner_only_file(vault_path, fp);
     if (created == platform::OwnerOnlyCreate::AlreadyExists) return VaultResult::AlreadyExists;
     if (created != platform::OwnerOnlyCreate::Ok) return VaultResult::IoError;
 
@@ -671,8 +679,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     out.kek_ = std::move(kek);
     out.kek_valid_ = true;
     out.root_ = IndexNode::gallery("");
-    if (const bool ctx = context_bound_chunks(h);
-        ctx && !crypto::fill_random(out.root_.node_id)) {
+    if (const bool ctx = context_bound_chunks(h); ctx && !crypto::fill_random(out.root_.node_id)) {
         out.reset();
         discard_failed_create();
         return VaultResult::CryptoError;
@@ -715,6 +722,26 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     return VaultResult::Ok;
 }
 
+VaultResult Vault::create_directory(const std::string& path, std::span<const uint8_t> password,
+                                    std::span<const uint8_t> keyfile,
+                                    const crypto::KdfParams& params, Vault& out)
+{
+    out.reset();
+    auto created = v3::ReadSession::create(platform::utf8_to_path(path), password, keyfile, params);
+    if (created.status != v3::ReadStatus::Ok || !created.session) {
+        if (created.status == v3::ReadStatus::Busy) return VaultResult::Busy;
+        if (created.status == v3::ReadStatus::AlreadyExists) return VaultResult::AlreadyExists;
+        return VaultResult::IoError;
+    }
+    out.path_ = path;
+    out.v3_ = std::move(created.session);
+    out.root_ = out.v3_->root();
+    out.settings_ = out.v3_->settings();
+    out.saved_searches_ = out.v3_->saved_searches();
+    out.unlocked_ = true;
+    return VaultResult::Ok;
+}
+
 VaultResult Vault::open(const std::string& path, Vault& out)
 {
     out.reset();
@@ -728,12 +755,11 @@ VaultResult Vault::open(const std::string& path, Vault& out)
         out.unlocked_ = false;
         return VaultResult::Ok;
     }
-    if (candidate == v3::CandidateKind::UnsupportedVersion)
-        return VaultResult::UnsupportedVersion;
+    if (candidate == v3::CandidateKind::UnsupportedVersion) return VaultResult::UnsupportedVersion;
     if (candidate != v3::CandidateKind::LegacyFile) {
         std::error_code ec;
-        return std::filesystem::exists(platform::utf8_to_path(path), ec)
-                   ? VaultResult::BadFormat : VaultResult::IoError;
+        return std::filesystem::exists(platform::utf8_to_path(path), ec) ? VaultResult::BadFormat
+                                                                         : VaultResult::IoError;
     }
 
     std::FILE* fp = platform::fopen_path(platform::utf8_to_path(path), "r+b");
@@ -847,11 +873,16 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
             saved_searches_ = v3_->saved_searches();
             unlocked_ = true;
             return Ok;
-        case v3::ReadStatus::AuthenticationFailed: return AuthFailed;
-        case v3::ReadStatus::UnsupportedVersion: return UnsupportedVersion;
-        case v3::ReadStatus::Busy: return Busy;
-        case v3::ReadStatus::BadFormat: return BadFormat;
-        default: return IoError;
+        case v3::ReadStatus::AuthenticationFailed:
+            return AuthFailed;
+        case v3::ReadStatus::UnsupportedVersion:
+            return UnsupportedVersion;
+        case v3::ReadStatus::Busy:
+            return Busy;
+        case v3::ReadStatus::BadFormat:
+            return BadFormat;
+        default:
+            return IoError;
         }
     }
     if (fp_ == nullptr) {
@@ -863,7 +894,8 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
 
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
     if (const auto input_format = domain_separated_kdf(header_)
-            ? crypto::KdfInputFormat::DomainSeparatedV2 : crypto::KdfInputFormat::LegacyConcat;
+                                      ? crypto::KdfInputFormat::DomainSeparatedV2
+                                      : crypto::KdfInputFormat::LegacyConcat;
         !crypto::derive_key(password, keyfile, header_.salt, header_.kdf, kek, input_format)) {
         return CryptoError;
     }
@@ -881,9 +913,8 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
 
     // Load the index from the active slot, falling back to the other slot if the
     // active one is unreadable (crash during a swap left it truncated/corrupt).
-    if (const uint8_t active = header_.active_slot == 0 ? 0 : 1;
-        !try_load_slot(fp_, header_, master_key_.as_span(), active, root_, saved_searches_,
-                       settings_)) {
+    if (const uint8_t active = header_.active_slot == 0 ? 0 : 1; !try_load_slot(
+            fp_, header_, master_key_.as_span(), active, root_, saved_searches_, settings_)) {
         if (!try_load_slot(fp_, header_, master_key_.as_span(), active == 0 ? 1 : 0, root_,
                            saved_searches_, settings_)) {
             master_key_.wipe();
@@ -911,7 +942,9 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
                                    std::span<const uint8_t> new_keyfile)
 {
     using enum VaultResult;
-    if (v3_) return InvalidArg;
+    if (v3_)
+        return map_v3_read_status(
+            v3_->change_password(old_password, old_keyfile, new_password, new_keyfile));
     if (fp_ == nullptr) return IoError;
 
     // Verify the old credentials by unwrapping the master key from the header
@@ -919,7 +952,8 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
     // new wrap is safely on disk).
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
     if (const auto old_format = domain_separated_kdf(header_)
-            ? crypto::KdfInputFormat::DomainSeparatedV2 : crypto::KdfInputFormat::LegacyConcat;
+                                    ? crypto::KdfInputFormat::DomainSeparatedV2
+                                    : crypto::KdfInputFormat::LegacyConcat;
         !crypto::derive_key(old_password, old_keyfile, header_.salt, header_.kdf, kek,
                             old_format)) {
         return CryptoError;
@@ -986,7 +1020,6 @@ const IndexNode* Vault::resolve_node(std::string_view path) const
 VaultResult Vault::create_gallery(std::string_view gallery_path)
 {
     using enum VaultResult;
-    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
 
     const auto segments = split_path(gallery_path);
@@ -1007,7 +1040,7 @@ VaultResult Vault::create_gallery(std::string_view gallery_path)
         } else {
             cur->children.push_back(IndexNode::gallery(seg));
             cur = &cur->children.back();
-            if (context_bound_chunks(header_) && !crypto::fill_random(cur->node_id))
+            if ((v3_ || context_bound_chunks(header_)) && !crypto::fill_random(cur->node_id))
                 return CryptoError;
             created = true;
         }
@@ -1021,7 +1054,6 @@ VaultResult Vault::add_image(std::string_view gallery_path, std::span<const uint
                              std::string_view filename)
 {
     using enum VaultResult;
-    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
     if (!is_safe_node_name(filename)) return InvalidArg;  // no traversal into the index
 
@@ -1040,8 +1072,10 @@ VaultResult Vault::add_image(std::string_view gallery_path, std::span<const uint
         return r;
 
     // Synchronize the staged chunks to stable storage (fsync).
-    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_)); !store.sync())
-        return IoError;
+    if (!v3_) {
+        ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+        if (!store.sync()) return IoError;
+    }
 
     return commit_index();
 }
@@ -1100,16 +1134,16 @@ ChunkRef media_thumb_chunk_ref(const IndexNode& node) noexcept
 {
     ChunkRef r;
     if (node.is_video()) {
-        r.offset        = node.vmeta.poster_offset;
-        r.length        = node.vmeta.poster_length;
-        r.domain        = crypto::ChunkDomain::Poster;
-        r.record        = node.vmeta.poster_id;
+        r.offset = node.vmeta.poster_offset;
+        r.length = node.vmeta.poster_length;
+        r.domain = crypto::ChunkDomain::Poster;
+        r.record = node.vmeta.poster_id;
         r.context_bound = node.vmeta.context_bound;
     } else {
-        r.offset        = node.meta.thumb_offset;
-        r.length        = node.meta.thumb_length;
-        r.domain        = crypto::ChunkDomain::Thumb;
-        r.record        = node.meta.thumb_id;
+        r.offset = node.meta.thumb_offset;
+        r.length = node.meta.thumb_length;
+        r.domain = crypto::ChunkDomain::Thumb;
+        r.record = node.meta.thumb_id;
         r.context_bound = node.meta.context_bound;
     }
     r.node_id = node.node_id;
@@ -1119,12 +1153,12 @@ ChunkRef media_thumb_chunk_ref(const IndexNode& node) noexcept
 ChunkRef image_data_chunk_ref(const IndexNode& node) noexcept
 {
     ChunkRef r;
-    r.offset        = node.meta.data_offset;
-    r.length        = node.meta.data_length;
-    r.domain        = crypto::ChunkDomain::Data;
-    r.record        = node.meta.data_id;
+    r.offset = node.meta.data_offset;
+    r.length = node.meta.data_length;
+    r.domain = crypto::ChunkDomain::Data;
+    r.record = node.meta.data_id;
     r.context_bound = node.meta.context_bound;
-    r.node_id       = node.node_id;
+    r.node_id = node.node_id;
     return r;
 }
 
@@ -1133,14 +1167,14 @@ ChunkRef video_chunk_ref(const IndexNode& node, size_t index) noexcept
     ChunkRef r;
     if (index < node.vmeta.chunks.size()) {
         const VideoChunk& c = node.vmeta.chunks[index];
-        r.offset        = c.offset;
-        r.length        = c.length;
-        r.domain        = crypto::ChunkDomain::Video;
-        r.record        = c.id;
-        r.sequence      = c.sequence;
+        r.offset = c.offset;
+        r.length = c.length;
+        r.domain = crypto::ChunkDomain::Video;
+        r.record = c.id;
+        r.sequence = c.sequence;
     }
     r.context_bound = node.vmeta.context_bound;
-    r.node_id       = node.node_id;
+    r.node_id = node.node_id;
     return r;
 }
 
@@ -1154,17 +1188,17 @@ VaultResult read_thumb_span(const Vault& v, const ChunkRef& ref, crypto::SecureB
     if (!v.unlocked_) return Locked;
 
     if (v.v3_) {
-        const auto role = ref.domain == crypto::ChunkDomain::Poster
-                              ? v3::ObjectRole::Poster : v3::ObjectRole::Thumbnail;
+        const auto role = ref.domain == crypto::ChunkDomain::Poster ? v3::ObjectRole::Poster
+                                                                    : v3::ObjectRole::Thumbnail;
         const auto status = v.v3_->read_id(ref.node_id, role, out);
         return map_v3_read_status(status);
     }
 
     crypto::ChunkTag tag;
-    tag.domain        = ref.domain;
-    tag.owner         = ref.node_id;
-    tag.record        = ref.record;
-    tag.sequence      = ref.sequence;
+    tag.domain = ref.domain;
+    tag.owner = ref.node_id;
+    tag.record = ref.record;
+    tag.sequence = ref.sequence;
     tag.context_bound = ref.context_bound;
     if (ChunkStore store(v.thumb_fp_, v.master_key_.as_span(), framed_chunks(v.header_));
         !store.read_chunk({ref.offset, ref.length}, tag, out)) {
@@ -1185,7 +1219,6 @@ VaultResult Vault::add_video(std::string_view gallery_path, std::span<const uint
                              std::string_view filename, uint32_t chunk_size)
 {
     using enum VaultResult;
-    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
     if (!is_safe_node_name(filename)) return InvalidArg;  // no traversal into the index
     if (chunk_size == 0) return InvalidArg;
@@ -1208,8 +1241,10 @@ VaultResult Vault::add_video(std::string_view gallery_path, std::span<const uint
         return r;
 
     // Synchronize the staged chunks to stable storage (fsync).
-    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_)); !store.sync())
-        return IoError;
+    if (!v3_) {
+        ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+        if (!store.sync()) return IoError;
+    }
 
     return commit_index();
 }
@@ -1248,37 +1283,46 @@ VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) c
     return Ok;
 }
 
-VaultResult apply_video_probe(Vault& v, std::string_view node_path,
-                              const VideoProbeApply& probe, bool sync)
+VaultResult apply_video_probe(Vault& v, std::string_view node_path, const VideoProbeApply& probe,
+                              bool sync)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
-    if (v.v3_) return InvalidArg;
 
     IndexNode* n = v.resolve_node(node_path);
     if (!n || !n->is_video()) return NotFound;
-    if (n->vmeta.codec != VideoCodec::Unknown) return Ok;   // already real metadata
-    if (probe.codec == VideoCodec::Unknown) return Ok;      // nothing learned
+    if (n->vmeta.codec != VideoCodec::Unknown) return Ok;  // already real metadata
+    if (probe.codec == VideoCodec::Unknown) return Ok;     // nothing learned
 
-    n->vmeta.codec       = probe.codec;
-    n->vmeta.width       = probe.width;
-    n->vmeta.height      = probe.height;
+    n->vmeta.codec = probe.codec;
+    n->vmeta.width = probe.width;
+    n->vmeta.height = probe.height;
     n->vmeta.duration_us = probe.duration_us;
 
     if (n->vmeta.poster_length == 0 && !probe.poster_jpeg.empty()) {
+        if (v.v3_) {
+            v3::ObjectInfo info;
+            if (v.v3_->stage_object(n->node_id, v3::ObjectRole::Poster,
+                                    std::to_underlying(n->vmeta.container), probe.poster_jpeg,
+                                    &info) != v3::ReadStatus::Ok)
+                return IoError;
+            n->vmeta.poster_offset = 1;
+            n->vmeta.poster_length = info.encrypted_length;
+            return Ok;
+        }
         // Phase 50 protocol: every append to fp_ holds write_mutex_.
         std::lock_guard lk(*v.write_mutex_);
         ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
         crypto::ChunkTag tag;
-        tag.domain        = crypto::ChunkDomain::Poster;
-        tag.owner         = n->node_id;
+        tag.domain = crypto::ChunkDomain::Poster;
+        tag.owner = n->node_id;
         tag.context_bound = n->vmeta.context_bound;
         ChunkSpan poster_span;
         if (!store.append_chunk(probe.poster_jpeg, tag, poster_span)) return IoError;
         if (sync && !store.sync()) return IoError;
         n->vmeta.poster_offset = poster_span.offset;
         n->vmeta.poster_length = poster_span.length;
-        n->vmeta.poster_id     = tag.record;
+        n->vmeta.poster_id = tag.record;
     }
     return Ok;
 }
@@ -1288,23 +1332,32 @@ VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
-    if (v.v3_) return InvalidArg;
     if (thumb_jpeg.empty()) return InvalidArg;
     IndexNode* n = v.resolve_node(node_path);
     if (!n || !n->is_image()) return NotFound;
 
+    if (v.v3_) {
+        v3::ObjectInfo info;
+        if (v.v3_->stage_object(n->node_id, v3::ObjectRole::Thumbnail,
+                                std::to_underlying(n->meta.format), thumb_jpeg,
+                                &info) != v3::ReadStatus::Ok)
+            return IoError;
+        n->meta.thumb_offset = 1;
+        n->meta.thumb_length = info.encrypted_length;
+        return Ok;
+    }
     std::lock_guard lk(*v.write_mutex_);
     ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
     crypto::ChunkTag tag;
-    tag.domain        = crypto::ChunkDomain::Thumb;
-    tag.owner         = n->node_id;
+    tag.domain = crypto::ChunkDomain::Thumb;
+    tag.owner = n->node_id;
     tag.context_bound = n->meta.context_bound;
     ChunkSpan span;
     if (!store.append_chunk(thumb_jpeg, tag, span)) return IoError;
     if (sync && !store.sync()) return IoError;
     n->meta.thumb_offset = span.offset;
     n->meta.thumb_length = span.length;
-    n->meta.thumb_id     = tag.record;
+    n->meta.thumb_id = tag.record;
     return Ok;
 }
 
@@ -1313,23 +1366,32 @@ VaultResult apply_video_poster(Vault& v, std::string_view node_path,
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
-    if (v.v3_) return InvalidArg;
     if (poster_jpeg.empty()) return InvalidArg;
     IndexNode* n = v.resolve_node(node_path);
     if (!n || !n->is_video()) return NotFound;
 
+    if (v.v3_) {
+        v3::ObjectInfo info;
+        if (v.v3_->stage_object(n->node_id, v3::ObjectRole::Poster,
+                                std::to_underlying(n->vmeta.container), poster_jpeg,
+                                &info) != v3::ReadStatus::Ok)
+            return IoError;
+        n->vmeta.poster_offset = 1;
+        n->vmeta.poster_length = info.encrypted_length;
+        return Ok;
+    }
     std::lock_guard lk(*v.write_mutex_);
     ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
     crypto::ChunkTag tag;
-    tag.domain        = crypto::ChunkDomain::Poster;
-    tag.owner         = n->node_id;
+    tag.domain = crypto::ChunkDomain::Poster;
+    tag.owner = n->node_id;
     tag.context_bound = n->vmeta.context_bound;
     ChunkSpan span;
     if (!store.append_chunk(poster_jpeg, tag, span)) return IoError;
     if (sync && !store.sync()) return IoError;
     n->vmeta.poster_offset = span.offset;
     n->vmeta.poster_length = span.length;
-    n->vmeta.poster_id     = tag.record;
+    n->vmeta.poster_id = tag.record;
     return Ok;
 }
 
@@ -1337,7 +1399,6 @@ VaultResult apply_image_animated(Vault& v, std::string_view node_path, bool anim
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
-    if (v.v3_) return InvalidArg;
 
     IndexNode* n = v.resolve_node(node_path);
     if (!n || !n->is_image()) return NotFound;
@@ -1352,7 +1413,6 @@ VaultResult commit_migration(Vault& v, VaultSettings settings)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
-    if (v.v3_) return InvalidArg;
     v.settings_ = std::move(settings);
     return v.commit_index();
 }
@@ -1383,16 +1443,15 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
     // under the node's (new) identity, persisting the fresh span + record id.
     // A zero-length span (no thumb / no poster) is a no-op.
     auto reencode = [&](uint64_t off, uint64_t len, crypto::ChunkDomain domain, uint32_t seq,
-                        std::array<uint8_t, crypto::NODE_ID_SIZE>& id_out,
-                        ChunkSpan& span_out) {
+                        std::array<uint8_t, crypto::NODE_ID_SIZE>& id_out, ChunkSpan& span_out) {
         if (len == 0) return Ok;
         crypto::SecureBytes plain;
         if (crypto::ChunkTag old{.domain = domain, .sequence = seq};
             !reader.read_chunk({off, len}, old, plain))
             return AuthFailed;
         std::lock_guard lk(*v.write_mutex_);
-        crypto::ChunkTag nt{.domain = domain, .owner = n->node_id, .sequence = seq,
-                            .context_bound = true};
+        crypto::ChunkTag nt{
+            .domain = domain, .owner = n->node_id, .sequence = seq, .context_bound = true};
         if (ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
             !writer.append_chunk(plain.as_span(), nt, span_out))
             return IoError;
@@ -1409,8 +1468,8 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
                                      m.data_id, data_out);
             r != Ok)
             return r;
-        if (VaultResult r = reencode(m.thumb_offset, m.thumb_length, crypto::ChunkDomain::Thumb,
-                                     0, m.thumb_id, thumb_out);
+        if (VaultResult r = reencode(m.thumb_offset, m.thumb_length, crypto::ChunkDomain::Thumb, 0,
+                                     m.thumb_id, thumb_out);
             r != Ok)
             return r;
         m.data_offset = data_out.offset;
@@ -1426,17 +1485,17 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
     fresh.reserve(m.chunks.size());
     for (size_t i = 0; i < m.chunks.size(); ++i) {
         const VideoChunk& c = m.chunks[i];
-        ChunkSpan     out;
+        ChunkSpan out;
         std::array<uint8_t, crypto::NODE_ID_SIZE> id{};
         if (VaultResult r = reencode(c.offset, c.length, crypto::ChunkDomain::Video,
                                      static_cast<uint32_t>(i), id, out);
             r != Ok)
             return r;
         VideoChunk fc;
-        fc.offset   = out.offset;
-        fc.length   = out.length;
+        fc.offset = out.offset;
+        fc.length = out.length;
         fc.sequence = static_cast<uint32_t>(i);
-        fc.id       = id;
+        fc.id = id;
         fresh.push_back(std::move(fc));
     }
     m.chunks = std::move(fresh);
@@ -1448,7 +1507,7 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
         return r;
     m.poster_offset = poster_out.offset;
     m.poster_length = poster_out.length;
-    m.poster_id     = poster_id;
+    m.poster_id = poster_id;
     m.context_bound = true;
     return Ok;
 }
@@ -1472,8 +1531,8 @@ VaultResult finalize_context_migration(Vault& v)
     // was captured at unlock. The next commit's slot-swap persists this wrap
     // and the flag together.
     crypto::ChunkTag t;
-    t.domain        = crypto::ChunkDomain::MkWrap;
-    t.owner         = v.header_.vault_id;
+    t.domain = crypto::ChunkDomain::MkWrap;
+    t.owner = v.header_.vault_id;
     t.context_bound = true;
     const std::array<uint8_t, crypto::AD_SIZE> ad = crypto::build_chunk_ad(t);
 
@@ -1514,7 +1573,7 @@ void test_only_downgrade_to_legacy(Vault& v)  // NOSONAR cpp:S3776
         crypto::SecureBytes plain;
         if (!reader.read_chunk({off, len}, tag_in, plain)) return false;
         std::lock_guard lk(*v.write_mutex_);
-        crypto::ChunkTag lt{.domain = domain, .sequence = seq};   // context_bound stays false
+        crypto::ChunkTag lt{.domain = domain, .sequence = seq};  // context_bound stays false
         if (ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
             !writer.append_chunk(plain.as_span(), lt, out))
             return false;
@@ -1545,7 +1604,7 @@ void test_only_downgrade_to_legacy(Vault& v)  // NOSONAR cpp:S3776
     };
 
     // Re-encode a video node's records to legacy and wipe its identity.
-    auto downgrade_video = [&](IndexNode& c) {
+    auto downgrade_video = [&](IndexNode& c) { // NOSONAR cpp:S1188
         VideoMeta& m = c.vmeta;
         std::vector<VideoChunk> legacy;
         for (const VideoChunk& ck : m.chunks) {
@@ -1563,7 +1622,9 @@ void test_only_downgrade_to_legacy(Vault& v)  // NOSONAR cpp:S3776
                 m.poster_length = out.length;
             }
         }
-        m.poster_id.fill(0); m.context_bound = false; c.node_id.fill(0);
+        m.poster_id.fill(0);
+        m.context_bound = false;
+        c.node_id.fill(0);
     };
 
     std::function<void(IndexNode&)> walk = [&](IndexNode& g) {
@@ -1601,7 +1662,6 @@ void test_only_downgrade_to_legacy(Vault& v)  // NOSONAR cpp:S3776
 VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view filename)
 {
     using enum VaultResult;
-    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
 
     IndexNode* g = find_gallery(gallery_path);
@@ -1624,7 +1684,6 @@ VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view 
 VaultResult Vault::remove_gallery(std::string_view gallery_path)
 {
     using enum VaultResult;
-    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
 
     const auto segments = split_path(gallery_path);
@@ -1668,7 +1727,6 @@ VaultResult remove_media_batch(Vault& v, std::span<const std::string> node_paths
                                RemoveBatchStats* stats)
 {
     using enum VaultResult;
-    if (v.v3_) return InvalidArg;
     if (stats) *stats = {};
     if (!v.unlocked_) return Locked;
 
@@ -1676,13 +1734,11 @@ VaultResult remove_media_batch(Vault& v, std::span<const std::string> node_paths
     std::size_t missing = 0;
     for (const std::string& path : node_paths) {
         // Split "gal/sub/name" into parent gallery + leaf name.
-        const auto   slash  = path.find_last_of('/');
-        const auto   parent = (slash == std::string::npos)
-                                  ? std::string_view{}
-                                  : std::string_view(path).substr(0, slash);
-        const auto   leaf   = (slash == std::string::npos)
-                                  ? std::string_view(path)
-                                  : std::string_view(path).substr(slash + 1);
+        const auto slash = path.find_last_of('/');
+        const auto parent = (slash == std::string::npos) ? std::string_view{}
+                                                         : std::string_view(path).substr(0, slash);
+        const auto leaf = (slash == std::string::npos) ? std::string_view(path)
+                                                       : std::string_view(path).substr(slash + 1);
         const bool hit = erase_media_child(v.find_gallery(parent), leaf);
         hit ? ++removed : ++missing;
     }
@@ -1714,21 +1770,21 @@ VaultResult remove_nodes_batch(Vault& v, std::span<const std::string> node_paths
                                RemoveBatchStats* stats)
 {
     using enum VaultResult;
-    if (v.v3_) return InvalidArg;
     if (stats) *stats = {};
     if (!v.unlocked_) return Locked;
 
     std::size_t removed = 0;
     std::size_t missing = 0;
     for (const std::string& path : node_paths) {
-        if (path.empty()) { ++missing; continue; }   // the root is not deletable
-        const auto   slash  = path.find_last_of('/');
-        const auto   parent = (slash == std::string::npos)
-                                  ? std::string_view{}
-                                  : std::string_view(path).substr(0, slash);
-        const auto   leaf   = (slash == std::string::npos)
-                                  ? std::string_view(path)
-                                  : std::string_view(path).substr(slash + 1);
+        if (path.empty()) {
+            ++missing;
+            continue;
+        }  // the root is not deletable
+        const auto slash = path.find_last_of('/');
+        const auto parent = (slash == std::string::npos) ? std::string_view{}
+                                                         : std::string_view(path).substr(0, slash);
+        const auto leaf = (slash == std::string::npos) ? std::string_view(path)
+                                                       : std::string_view(path).substr(slash + 1);
         const bool hit = erase_any_child(v.find_gallery(parent), leaf);
         hit ? ++removed : ++missing;
     }
@@ -1744,13 +1800,12 @@ VaultResult remove_nodes_batch(Vault& v, std::span<const std::string> node_paths
 VaultResult set_favorites_batch(Vault& v, std::span<const std::string> node_paths, bool value)
 {
     using enum VaultResult;
-    if (v.v3_) return InvalidArg;
     if (!v.unlocked_) return Locked;
 
     bool changed = false;
     for (const std::string& path : node_paths) {
         IndexNode* node = v.resolve_node(path);
-        if (!node || node->favorite == value) continue;   // missing: skipped, not an error
+        if (!node || node->favorite == value) continue;  // missing: skipped, not an error
         node->favorite = value;
         changed = true;
     }
@@ -1759,11 +1814,9 @@ VaultResult set_favorites_batch(Vault& v, std::span<const std::string> node_path
     return changed ? v.commit_index() : Ok;
 }
 
-VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths,
-                          std::string_view tag)
+VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths, std::string_view tag)
 {
     using enum VaultResult;
-    if (v.v3_) return InvalidArg;
     if (!v.unlocked_) return Locked;
     const auto trimmed = normalise_tag(tag);
     if (trimmed.empty()) return InvalidArg;
@@ -1790,10 +1843,9 @@ VaultResult remove_tag_batch(Vault& v, std::span<const std::string> node_paths,
                              std::string_view tag)
 {
     using enum VaultResult;
-    if (v.v3_) return InvalidArg;
     if (!v.unlocked_) return Locked;
     const auto trimmed = normalise_tag(tag);
-    if (trimmed.empty()) return Ok;   // idempotent, like remove_tag
+    if (trimmed.empty()) return Ok;  // idempotent, like remove_tag
 
     bool changed = false;
     for (const std::string& path : node_paths) {
@@ -1833,7 +1885,6 @@ bool gallery_exists(const Vault& v, std::string_view gallery_path)
 
 VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key)
 {
-    if (v.v3_) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
 
@@ -1862,7 +1913,6 @@ const VaultSettings& vault_settings(const Vault& v) noexcept
 
 VaultResult set_vault_settings(Vault& v, VaultSettings s)
 {
-    if (v.v3_) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
     v.settings_ = std::move(s);
@@ -1873,7 +1923,6 @@ VaultResult rename_node(Vault& v, std::string_view gallery_path, std::string_vie
                         std::string_view new_name)
 {
     using enum VaultResult;
-    if (v.v3_) return InvalidArg;
     if (!v.unlocked_) return Locked;
     if (!is_safe_node_name(new_name)) return InvalidArg;
 
@@ -1892,10 +1941,38 @@ VaultResult rename_node(Vault& v, std::string_view gallery_path, std::string_vie
     return v.commit_index();
 }
 
+VaultResult move_node_within(Vault& v, std::string_view source_gallery, std::string_view name,
+                             std::string_view destination_gallery,
+                             std::string_view destination_name)
+{
+    using enum VaultResult;
+    if (!v.v3_) return InvalidArg;
+    if (!v.unlocked_) return Locked;
+    IndexNode* source = v.find_gallery(source_gallery);
+    IndexNode* destination = v.find_gallery(destination_gallery);
+    if (!source || !destination) return NotFound;
+    if (source == destination) return Ok;
+    if (!is_safe_node_name(destination_name)) return InvalidArg;
+    if (child_named(destination, destination_name)) return AlreadyExists;
+    const auto item = std::ranges::find_if(
+        source->children, [&](const IndexNode& node) { return node.name == name; });
+    if (item == source->children.end()) return NotFound;
+    if (const std::string source_path = source_gallery.empty()
+                                            ? std::string(name)
+                                            : std::string(source_gallery) + "/" + std::string(name);
+        item->is_gallery() &&
+        (destination_gallery == source_path || destination_gallery.starts_with(source_path + "/")))
+        return InvalidArg;
+    IndexNode moved = *item;
+    moved.name = destination_name;
+    if (!vault_ops::push_child(destination->children, std::move(moved))) return IoError;
+    source->children.erase(item);
+    return v.commit_index();
+}
+
 VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::string>& tags)
 {
     using enum VaultResult;
-    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
 
     IndexNode* node = resolve_node(node_path);
@@ -1925,7 +2002,6 @@ VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::s
 VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
 {
     using enum VaultResult;
-    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
 
     auto trimmed = normalise_tag(tag);
@@ -1956,7 +2032,8 @@ void prune_node_tags(IndexNode& node, const std::function<bool(std::string_view)
         stats.tags_removed += removed;
         ++stats.nodes_touched;
     }
-    for (IndexNode& c : node.children) prune_node_tags(c, keep, stats);
+    for (IndexNode& c : node.children)
+        prune_node_tags(c, keep, stats);
 }
 
 }  // namespace
@@ -1965,7 +2042,6 @@ VaultResult Vault::prune_tags(const std::function<bool(std::string_view)>& keep,
                               PruneTagsStats* stats)
 {
     using enum VaultResult;
-    if (v3_) return InvalidArg;
     if (stats) *stats = {};
     if (!unlocked_) return Locked;
     if (!keep) return InvalidArg;
@@ -1974,14 +2050,13 @@ VaultResult Vault::prune_tags(const std::function<bool(std::string_view)>& keep,
     prune_node_tags(root_, keep, local);
     if (stats) *stats = local;
 
-    if (local.tags_removed == 0) return Ok;   // nothing changed — no commit
+    if (local.tags_removed == 0) return Ok;  // nothing changed — no commit
     return commit_index();
 }
 
 VaultResult Vault::remove_tag(std::string_view node_path, std::string_view tag)
 {
     using enum VaultResult;
-    if (v3_) return InvalidArg;
     if (!unlocked_) return Locked;
 
     auto trimmed = normalise_tag(tag);
@@ -2105,7 +2180,6 @@ std::vector<SavedSearch> VaultSearch::list_saved_searches() const
 VaultResult VaultSearch::save_search(std::string_view name, const ui::AdvancedQuery& query)
 {
     using enum VaultResult;
-    if (v_.v3_) return InvalidArg;
     if (!v_.unlocked_) return Locked;
     if (name.empty()) return InvalidArg;
 
@@ -2128,7 +2202,6 @@ VaultResult VaultSearch::save_search(std::string_view name, const ui::AdvancedQu
 VaultResult VaultSearch::delete_saved_search(std::string_view name)
 {
     using enum VaultResult;
-    if (v_.v3_) return InvalidArg;
     if (!v_.unlocked_) return Locked;
 
     const auto it = std::ranges::find_if(v_.saved_searches_,
@@ -2142,7 +2215,6 @@ VaultResult VaultSearch::delete_saved_search(std::string_view name)
 VaultResult toggle_favorite_node(Vault& v, std::string_view node_path)
 {
     using enum VaultResult;
-    if (v.v3_) return InvalidArg;
     if (!v.unlocked_) return Locked;
 
     IndexNode* node = v.resolve_node(node_path);
@@ -2496,13 +2568,14 @@ VaultResult vault_reclaim(Vault& v)
 
 void Vault::auto_reclaim_space()
 {
+    if (v3_) return;  // immutable-object garbage is reclaimed by v3 GC
     // Gate: only worth reclaiming when the waste is both absolutely large and a
     // meaningful fraction of the file (rewriting to save a few KiB costs more I/O
     // than it saves). Same thresholds the two delete paths shared before.
     uint64_t size = 0;
     if (const uint64_t waste = vault_wasted_bytes(*this); waste < AUTO_COMPACT_MIN_WASTE ||
-                                                        !fileutil::file_size(fp_, size) ||
-                                                        waste * AUTO_COMPACT_WASTE_RATIO < size) {
+                                                          !fileutil::file_size(fp_, size) ||
+                                                          waste * AUTO_COMPACT_WASTE_RATIO < size) {
         return;
     }
 #if defined(__linux__)
@@ -2525,7 +2598,7 @@ bool Vault::write_header()
 
 VaultResult Vault::commit_index()
 {
-    if (v3_) return VaultResult::InvalidArg;
+    if (v3_) return map_v3_read_status(v3_->commit_metadata(root_, settings_, saved_searches_));
     // Phase 50: if a commit router (CommitLane) is active and running, route through
     // it instead of committing synchronously. The router runs serialize on this thread
     // and enqueues the blob for asynchronous durability under the write mutex.

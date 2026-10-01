@@ -4,12 +4,13 @@
 #include "chunk_store.h"
 #include "crypto/random.h"
 #include "safe_name.h"
-#include "vault.h"
 #include "staging.h"
+#include "v3_read_session.h"
+#include "vault.h"
 #include "vault_ops.h"
 
-#include "image/decode.h"
 #include "image/anim_info.h"
+#include "image/decode.h"
 #include "image/thumbnail.h"
 #include "media/video_probe.h"
 #include "platform/error_log.h"
@@ -17,46 +18,44 @@
 namespace vault {
 
 namespace {
-    // Decode image and generate thumbnail from decoded pixels (pure CPU, no lock)
-    struct DecodedThumb {
-        ImageFormat         format;
-        uint32_t            width;
-        uint32_t            height;
-        bool                animated;
-        crypto::SecureBytes thumb_bytes;   // Phase 96 (OSV-AUD-003): secure bytes
-    };
+// Decode image and generate thumbnail from decoded pixels (pure CPU, no lock)
+struct DecodedThumb {
+    ImageFormat format;
+    uint32_t width;
+    uint32_t height;
+    bool animated;
+    crypto::SecureBytes thumb_bytes;  // Phase 96 (OSV-AUD-003): secure bytes
+};
 
-    DecodedThumb decode_and_thumbnail(std::span<const uint8_t> file_data)
-    {
-        DecodedThumb result{ImageFormat::Unknown, 0, 0, false, {}};
-        if (auto decoded = image::decode_from_memory(file_data)) {
-            result.format = static_cast<ImageFormat>(decoded->format);
-            result.width = static_cast<uint32_t>(decoded->width);
-            result.height = static_cast<uint32_t>(decoded->height);
-            result.animated = image::is_animated(decoded->format, file_data);
-            if (auto thumb_jpeg = image::make_thumbnail(*decoded, image::THUMB_MAX_SIDE, 85)) {
-                result.thumb_bytes = std::move(*thumb_jpeg);
-            }
+DecodedThumb decode_and_thumbnail(std::span<const uint8_t> file_data)
+{
+    DecodedThumb result{ImageFormat::Unknown, 0, 0, false, {}};
+    if (auto decoded = image::decode_from_memory(file_data)) {
+        result.format = static_cast<ImageFormat>(decoded->format);
+        result.width = static_cast<uint32_t>(decoded->width);
+        result.height = static_cast<uint32_t>(decoded->height);
+        result.animated = image::is_animated(decoded->format, file_data);
+        if (auto thumb_jpeg = image::make_thumbnail(*decoded, image::THUMB_MAX_SIDE, 85)) {
+            result.thumb_bytes = std::move(*thumb_jpeg);
         }
-        return result;
     }
+    return result;
+}
 
-    // Phase 99: a new node in a context-bound vault needs a fresh node_id (all
-    // its chunks bind to it). Legacy vaults keep an all-zero id and write
-    // contextless chunks. Returns false on RNG failure (impossible in practice).
-    [[nodiscard]] bool assign_fresh_node_id(IndexNode& n, bool context_bound)
-    {
-        if (!context_bound) return true;
-        return crypto::fill_random(n.node_id);
-    }
+// Phase 99: a new node in a context-bound vault needs a fresh node_id (all
+// its chunks bind to it). Legacy vaults keep an all-zero id and write
+// contextless chunks. Returns false on RNG failure (impossible in practice).
+[[nodiscard]] bool assign_fresh_node_id(IndexNode& n, bool context_bound)
+{
+    if (!context_bound) return true;
+    return crypto::fill_random(n.node_id);
+}
 }  // namespace
 
-StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
-                       std::string_view filename, const StagedThumb* precomputed)
+StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data, std::string_view filename, // NOSONAR cpp:S3776
+                       const StagedThumb* precomputed)
 {
     using enum VaultResult;
-
-    if (vault_is_read_only(v)) return {InvalidArg, {}};
 
     if (!v.unlocked_) {
         return {Locked, {}};
@@ -65,23 +64,72 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
         return {InvalidArg, {}};
     }
 
-    ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
-
     // Build the fully-populated but UNATTACHED IndexNode FIRST so its node_id
     // exists before any chunk append (every chunk AD binds to it).
-    IndexNode img        = IndexNode::image(filename);
-    img.meta.context_bound = context_bound_chunks(v.header_);
+    IndexNode img = IndexNode::image(filename);
+    img.meta.context_bound = v.v3_ || context_bound_chunks(v.header_);
     if (!assign_fresh_node_id(img, img.meta.context_bound)) {
         return {CryptoError, {}};
     }
 
+    if (v.v3_) {
+        ImageFormat format = ImageFormat::Unknown;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        bool animated = false;
+        crypto::SecureBytes generated_thumb;
+        std::span<const uint8_t> thumb;
+        if (precomputed) {
+            format = precomputed->format;
+            width = precomputed->width;
+            height = precomputed->height;
+            animated = precomputed->animated;
+            thumb = precomputed->thumb_jpeg.as_span();
+        } else {
+            auto decoded = decode_and_thumbnail(file_data);
+            format = decoded.format;
+            width = decoded.width;
+            height = decoded.height;
+            animated = decoded.animated;
+            generated_thumb = std::move(decoded.thumb_bytes);
+            thumb = generated_thumb.as_span();
+        }
+        v3::ObjectInfo data_info;
+        if (v.v3_->stage_object(img.node_id, v3::ObjectRole::OriginalImage,
+                                std::to_underlying(format), file_data,
+                                &data_info) != v3::ReadStatus::Ok)
+            return {IoError, {}};
+        img.meta.data_offset = 1;
+        img.meta.data_length = data_info.encrypted_length;
+        if (!thumb.empty()) {
+            v3::ObjectInfo thumb_info;
+            if (v.v3_->stage_object(img.node_id, v3::ObjectRole::Thumbnail,
+                                    std::to_underlying(format), thumb,
+                                    &thumb_info) != v3::ReadStatus::Ok)
+                return {IoError, {}};
+            img.meta.thumb_offset = 1;
+            img.meta.thumb_length = thumb_info.encrypted_length;
+        }
+        img.meta.format = format;
+        img.meta.width = width;
+        img.meta.height = height;
+        img.meta.orig_size = file_data.size();
+        img.meta.animated = animated;
+        img.meta.created_ts =
+            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                                      std::chrono::system_clock::now().time_since_epoch())
+                                      .count());
+        return {Ok, std::move(img)};
+    }
+
+    ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
     // Append the main image data chunk, holding the write mutex for the entire chunk.
     ChunkSpan data_span;
     {
         std::lock_guard lk(*v.write_mutex_);
         crypto::ChunkTag tag;
-        tag.domain        = crypto::ChunkDomain::Data;
-        tag.owner         = img.node_id;
+        tag.domain = crypto::ChunkDomain::Data;
+        tag.owner = img.node_id;
         tag.context_bound = img.meta.context_bound;
         if (!store.append_chunk(file_data, tag, data_span)) {
             return {IoError, {}};
@@ -111,8 +159,8 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
         if (!precomputed->thumb_jpeg.empty()) {
             std::lock_guard lk(*v.write_mutex_);
             crypto::ChunkTag tag;
-            tag.domain        = crypto::ChunkDomain::Thumb;
-            tag.owner         = img.node_id;
+            tag.domain = crypto::ChunkDomain::Thumb;
+            tag.owner = img.node_id;
             tag.context_bound = img.meta.context_bound;
             if (!store.append_chunk(precomputed->thumb_jpeg.as_span(), tag, thumb_span)) {
                 return {IoError, {}};
@@ -132,8 +180,8 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
         if (!decoded_thumb.thumb_bytes.empty()) {
             std::lock_guard lk(*v.write_mutex_);
             crypto::ChunkTag tag;
-            tag.domain        = crypto::ChunkDomain::Thumb;
-            tag.owner         = img.node_id;
+            tag.domain = crypto::ChunkDomain::Thumb;
+            tag.owner = img.node_id;
             tag.context_bound = img.meta.context_bound;
             if (!store.append_chunk(decoded_thumb.thumb_bytes.as_span(), tag, thumb_span)) {
                 return {IoError, {}};
@@ -147,9 +195,10 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
     img.meta.width = width;
     img.meta.height = height;
     img.meta.orig_size = file_data.size();
-    img.meta.created_ts = static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
+    img.meta.created_ts =
+        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                                  std::chrono::system_clock::now().time_since_epoch())
+                                  .count());
     img.meta.data_offset = data_span.offset;
     img.meta.data_length = data_span.length;
     img.meta.thumb_offset = thumb_span.offset;
@@ -162,13 +211,10 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
     return result;
 }
 
-StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
-                       std::string_view filename, uint32_t chunk_size,
-                       const StagedVideoInfo* precomputed)
+StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data, std::string_view filename, // NOSONAR cpp:S3776
+                       uint32_t chunk_size, const StagedVideoInfo* precomputed)
 {
     using enum VaultResult;
-
-    if (vault_is_read_only(v)) return {InvalidArg, {}};
 
     if (!v.unlocked_) {
         return {Locked, {}};
@@ -188,14 +234,47 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
         return {InvalidArg, {}};
     }
 
-    ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
-
     // Build the node's identity before appending (chunk ADs bind to it).
-    IndexNode vid            = IndexNode::video(filename);
-    vid.vmeta.context_bound  = context_bound_chunks(v.header_);
+    IndexNode vid = IndexNode::video(filename);
+    vid.vmeta.context_bound = v.v3_ || context_bound_chunks(v.header_);
     if (!assign_fresh_node_id(vid, vid.vmeta.context_bound)) {
         return {CryptoError, {}};
     }
+
+    if (v.v3_) {
+        const auto format = precomputed ? precomputed->container : probe.container;
+        v3::ObjectInfo video_info;
+        if (v.v3_->stage_object(vid.node_id, v3::ObjectRole::OriginalVideo,
+                                std::to_underlying(format), file_data,
+                                &video_info) != v3::ReadStatus::Ok)
+            return {IoError, {}};
+        if (const std::span<const uint8_t> poster =
+                precomputed ? precomputed->poster_jpeg.as_span() : probe.poster_jpeg.as_span();
+            !poster.empty()) {
+            v3::ObjectInfo poster_info;
+            if (v.v3_->stage_object(vid.node_id, v3::ObjectRole::Poster,
+                                    std::to_underlying(format), poster,
+                                    &poster_info) != v3::ReadStatus::Ok)
+                return {IoError, {}};
+            vid.vmeta.poster_offset = 1;
+            vid.vmeta.poster_length = poster_info.encrypted_length;
+        }
+        vid.vmeta.container = format;
+        vid.vmeta.codec = precomputed ? precomputed->codec : probe.codec;
+        vid.vmeta.width = precomputed ? precomputed->width : probe.width;
+        vid.vmeta.height = precomputed ? precomputed->height : probe.height;
+        vid.vmeta.duration_us = precomputed ? precomputed->duration_us : probe.duration_us;
+        vid.vmeta.orig_size = file_data.size();
+        vid.vmeta.created_ts =
+            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                                      std::chrono::system_clock::now().time_since_epoch())
+                                      .count());
+        vid.vmeta.chunk_size = video_info.frame_plain_limit;
+        vid.vmeta.chunks.resize(video_info.frame_count);
+        return {Ok, std::move(vid)};
+    }
+
+    ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
 
     // Append video data chunks, one per 1-MiB chunk, with a lock_guard per chunk.
     std::vector<VideoChunk> chunks;
@@ -205,19 +284,19 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
         {
             std::lock_guard lk(*v.write_mutex_);
             crypto::ChunkTag tag;
-            tag.domain        = crypto::ChunkDomain::Video;
-            tag.owner         = vid.node_id;
-            tag.sequence      = static_cast<uint32_t>(chunks.size());
+            tag.domain = crypto::ChunkDomain::Video;
+            tag.owner = vid.node_id;
+            tag.sequence = static_cast<uint32_t>(chunks.size());
             tag.context_bound = vid.vmeta.context_bound;
             if (!store.append_chunk(file_data.subspan(off, len), tag, span)) {
                 return {IoError, {}};
             }
             std::fflush(v.fp_);
             VideoChunk c;
-            c.offset   = span.offset;
-            c.length   = span.length;
+            c.offset = span.offset;
+            c.length = span.length;
             c.sequence = tag.sequence;
-            c.id       = tag.record;
+            c.id = tag.record;
             chunks.push_back(c);
         }
     }
@@ -237,8 +316,8 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
         {
             std::lock_guard lk(*v.write_mutex_);
             crypto::ChunkTag tag;
-            tag.domain        = crypto::ChunkDomain::Poster;
-            tag.owner         = vid.node_id;
+            tag.domain = crypto::ChunkDomain::Poster;
+            tag.owner = vid.node_id;
             tag.context_bound = vid.vmeta.context_bound;
             if (!store.append_chunk(poster, tag, poster_span)) {
                 return {IoError, {}};
@@ -250,15 +329,16 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
         poster_length = poster_span.length;
     }
 
-    vid.vmeta.container   = precomputed ? precomputed->container   : probe.container;
-    vid.vmeta.codec       = precomputed ? precomputed->codec       : probe.codec;
-    vid.vmeta.width       = precomputed ? precomputed->width       : probe.width;
-    vid.vmeta.height      = precomputed ? precomputed->height      : probe.height;
+    vid.vmeta.container = precomputed ? precomputed->container : probe.container;
+    vid.vmeta.codec = precomputed ? precomputed->codec : probe.codec;
+    vid.vmeta.width = precomputed ? precomputed->width : probe.width;
+    vid.vmeta.height = precomputed ? precomputed->height : probe.height;
     vid.vmeta.duration_us = precomputed ? precomputed->duration_us : probe.duration_us;
     vid.vmeta.orig_size = file_data.size();
-    vid.vmeta.created_ts = static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
+    vid.vmeta.created_ts =
+        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                                  std::chrono::system_clock::now().time_since_epoch())
+                                  .count());
     vid.vmeta.chunk_size = chunk_size;
     vid.vmeta.chunks = std::move(chunks);
     vid.vmeta.poster_offset = poster_offset;
@@ -272,7 +352,6 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
 
 VaultResult attach_staged(Vault& v, std::string_view gallery_path, IndexNode&& node)
 {
-    if (vault_is_read_only(v)) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
 
@@ -291,7 +370,6 @@ VaultResult attach_staged(Vault& v, std::string_view gallery_path, IndexNode&& n
 
 VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path)
 {
-    if (vault_is_read_only(v)) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
 
@@ -312,7 +390,7 @@ VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path)
         } else {
             cur->children.push_back(IndexNode::gallery(seg));
             cur = &cur->children.back();
-            if (context_bound_chunks(v.header_) && !crypto::fill_random(cur->node_id))
+            if ((v.v3_ || context_bound_chunks(v.header_)) && !crypto::fill_random(cur->node_id))
                 return CryptoError;
         }
     }
@@ -321,12 +399,10 @@ VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path)
 }
 
 VaultResult attach_image_prestaged(Vault& v, std::string_view gallery_path,
-                                   std::span<const uint8_t> file_data,
-                                   std::string_view filename,
+                                   std::span<const uint8_t> file_data, std::string_view filename,
                                    const StagedThumb& thumb, uint64_t created_ts,
                                    const NodeExtras* extras)
 {
-    if (vault_is_read_only(v)) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
     if (!is_safe_node_name(filename)) return InvalidArg;
@@ -343,8 +419,7 @@ VaultResult attach_image_prestaged(Vault& v, std::string_view gallery_path,
         staged.node.tags.clear();
         for (const auto& t : extras->tags)
             staged.node.tags.emplace_back(t);
-        if (staged.node.tags.size() > INDEX_MAX_TAGS)
-            staged.node.tags.resize(INDEX_MAX_TAGS);
+        if (staged.node.tags.size() > INDEX_MAX_TAGS) staged.node.tags.resize(INDEX_MAX_TAGS);
         staged.node.favorite = extras->favorite;
     }
 
@@ -353,18 +428,16 @@ VaultResult attach_image_prestaged(Vault& v, std::string_view gallery_path,
 
 VaultResult commit_staged(Vault& v)
 {
-    if (vault_is_read_only(v)) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
-    if (ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
-        !store.sync())
+    if (v.v3_) return v.commit_index();
+    if (ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_)); !store.sync())
         return IoError;
     return v.commit_index();
 }
 
 VaultResult add_image_prestaged(Vault& v, std::string_view gallery_path,
-                                std::span<const uint8_t> file_data,
-                                std::string_view filename,
+                                std::span<const uint8_t> file_data, std::string_view filename,
                                 const StagedThumb& thumb, uint64_t created_ts,
                                 const NodeExtras* extras)
 {
@@ -377,12 +450,10 @@ VaultResult add_image_prestaged(Vault& v, std::string_view gallery_path,
 }
 
 VaultResult attach_video_prestaged(Vault& v, std::string_view gallery_path,
-                                   std::span<const uint8_t> file_data,
-                                   std::string_view filename,
+                                   std::span<const uint8_t> file_data, std::string_view filename,
                                    const StagedVideoInfo& info, uint64_t created_ts,
                                    const NodeExtras* extras)
 {
-    if (vault_is_read_only(v)) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
     if (!is_safe_node_name(filename)) return InvalidArg;
@@ -399,8 +470,7 @@ VaultResult attach_video_prestaged(Vault& v, std::string_view gallery_path,
         staged.node.tags.clear();
         for (const auto& t : extras->tags)
             staged.node.tags.emplace_back(t);
-        if (staged.node.tags.size() > INDEX_MAX_TAGS)
-            staged.node.tags.resize(INDEX_MAX_TAGS);
+        if (staged.node.tags.size() > INDEX_MAX_TAGS) staged.node.tags.resize(INDEX_MAX_TAGS);
         staged.node.favorite = extras->favorite;
     }
 
@@ -408,8 +478,7 @@ VaultResult attach_video_prestaged(Vault& v, std::string_view gallery_path,
 }
 
 VaultResult add_video_prestaged(Vault& v, std::string_view gallery_path,
-                                std::span<const uint8_t> file_data,
-                                std::string_view filename,
+                                std::span<const uint8_t> file_data, std::string_view filename,
                                 const StagedVideoInfo& info, uint64_t created_ts,
                                 const NodeExtras* extras)
 {

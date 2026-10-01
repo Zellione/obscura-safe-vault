@@ -99,6 +99,22 @@ legacy-migration boundaries return `InvalidArg` for v3 until the later write-pat
 free `vault_is_read_only(const Vault&)` query exposes this state without expanding the already
 large `Vault` member-method surface.
 
+Phase 112 makes that v3 facade writable while keeping legacy creation/writes operational.
+`Vault::create_directory` exclusively creates and verifies a v3 root; `v3_header` can create,
+serialize, and rewrap headers, while `VaultRoot::replace_header` stages, syncs, renames, and
+directory-syncs password changes. `ReadSession` now owns a writable descriptor-pinned database,
+serializes state/object staging, and commits a full logical snapshot with staged object refs in
+one SQL transaction. `Database::sync_metadata` increments the generation with the mutation,
+preserves live immutable refs, drops dead refs, and ignores published-but-unattached objects so
+they are recoverable garbage. `staging.*` writes each original/thumbnail/poster independently;
+the existing import queue attaches them in bounded commits. V3 same-vault moves preserve node
+and object IDs through metadata-only relocation; cross-vault transfer follows the existing
+secure-buffer staging path and therefore mints fresh destination identities. Gallery/media CRUD,
+tags/favorites and tag metadata, searches, settings, derived-object regeneration, export, and
+password/keyfile rotation now share the public facade across both backends. Phase 114—not this
+phase—switches default creation; `vault_uses_directory_storage` is the internal dispatch query,
+while the retained `vault_is_read_only` compatibility query is now false.
+
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
 `seek_end`. WHY: `write_header` does `seek_to(fp_,0)` then `fwrite` as two separately-locked

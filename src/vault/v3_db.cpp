@@ -1,9 +1,9 @@
 #include "vault/v3_db.h"
 
 #include "crypto/random.h"
+#include "vault/v3_fs.h"
 #include "vault/v3_schema.h"
 #include "vault/v3_sqlcipher_key.h"
-#include "vault/v3_fs.h"
 
 #include <sqlite3.h>
 
@@ -13,8 +13,8 @@
 #include <format>
 #include <limits>
 #include <string>
-#include <unistd.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <utility>
 
 namespace vault::v3 {
@@ -334,6 +334,50 @@ Database::OpenResult Database::create(const std::filesystem::path& path,
     return result;
 }
 
+Database::OpenResult
+Database::create_in_root(const VaultRoot& root,
+                         std::span<const uint8_t, crypto::KEY_SIZE> database_key,
+                         const Id& root_node_id) noexcept
+{
+    if (!id_valid(root_node_id)) return {InvalidArgument, std::nullopt};
+    const int fd =
+        ::openat(root.native_handle(), "vault.db", O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (struct stat st{}; fd < 0 || ::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
+                          st.st_size != 0 || st.st_nlink != 1 || (st.st_mode & 0777) != 0600 ||
+                          st.st_uid != ::geteuid()) {
+        if (fd >= 0) ::close(fd);
+        return {IoError, std::nullopt};
+    }
+    const std::filesystem::path pinned =
+        std::filesystem::path{"/proc/self/fd"} / std::to_string(fd);
+    auto result = open_raw(pinned, database_key, SQLITE_OPEN_READWRITE);
+    ::close(fd);
+    if (!result.database) return result;
+    auto* db = result.database->handle_;
+    if (exec(db, "BEGIN IMMEDIATE") != Ok || exec(db, SCHEMA_SQL) != Ok) {
+        exec(db, "ROLLBACK");
+        return {map_status(sqlite3_extended_errcode(db)), std::nullopt};
+    }
+    Statement meta{db,
+                   "INSERT INTO vault_meta(singleton,schema_version,root_node_id) VALUES(1,1,?)"};
+    if (Statement root_row{
+            db,
+            "INSERT INTO nodes(node_id,parent_id,node_type,display_name,sibling_order,sort_key) "
+            "VALUES(?,NULL,0,'/',0,7)"};
+        !meta.get() || !root_row.get() ||
+        sqlite3_bind_blob(meta.get(), 1, root_node_id.data(), static_cast<int>(root_node_id.size()),
+                          SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_blob(root_row.get(), 1, root_node_id.data(),
+                          static_cast<int>(root_node_id.size()), SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_step(meta.get()) != SQLITE_DONE || sqlite3_step(root_row.get()) != SQLITE_DONE ||
+        exec(db, "COMMIT") != Ok) {
+        const auto status = map_status(sqlite3_extended_errcode(db));
+        exec(db, "ROLLBACK");
+        return {status, std::nullopt};
+    }
+    return result;
+}
+
 Database::OpenResult Database::open(const std::filesystem::path& path,
                                     std::span<const uint8_t, crypto::KEY_SIZE> database_key,
                                     bool writable) noexcept
@@ -349,12 +393,12 @@ Database::OpenResult Database::open(const std::filesystem::path& path,
     return result;
 }
 
-Database::OpenResult Database::open_read_only(
-    const VaultRoot& root,
-    std::span<const uint8_t, crypto::KEY_SIZE> database_key) noexcept
+Database::OpenResult
+Database::open_read_only(const VaultRoot& root,
+                         std::span<const uint8_t, crypto::KEY_SIZE> database_key) noexcept
 {
-    const int fd = ::openat(root.native_handle(), "vault.db",
-                            O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    const int fd =
+        ::openat(root.native_handle(), "vault.db", O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
     if (struct stat st{}; fd < 0 || ::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
                           st.st_nlink != 1 || (st.st_mode & 0777) != 0600 ||
                           st.st_uid != ::geteuid()) {
@@ -364,6 +408,25 @@ Database::OpenResult Database::open_read_only(
     const std::filesystem::path pinned =
         std::filesystem::path{"/proc/self/fd"} / std::to_string(fd);
     auto result = open(pinned, database_key, false);
+    ::close(fd);
+    return result;
+}
+
+Database::OpenResult
+Database::open_writable(const VaultRoot& root,
+                        std::span<const uint8_t, crypto::KEY_SIZE> database_key) noexcept
+{
+    const int fd =
+        ::openat(root.native_handle(), "vault.db", O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (struct stat st{}; fd < 0 || ::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
+                          st.st_nlink != 1 || (st.st_mode & 0777) != 0600 ||
+                          st.st_uid != ::geteuid()) {
+        if (fd >= 0) ::close(fd);
+        return {IoError, std::nullopt};
+    }
+    const std::filesystem::path pinned =
+        std::filesystem::path{"/proc/self/fd"} / std::to_string(fd);
+    auto result = open(pinned, database_key, true);
     ::close(fd);
     return result;
 }
@@ -427,6 +490,285 @@ DbStatus Database::insert_node(const NodeRecord& node) noexcept
     bind_optional(14, node.sort_key);
     bind_optional(15, node.animated);
     return map_status(sqlite3_step(statement.get()));
+}
+
+DbStatus Database::sync_metadata(const IndexNode& root, const VaultSettings& settings, // NOSONAR cpp:S3776
+                                 std::span<const SavedSearch> searches,
+                                 std::span<const ObjectRecord> staged_objects) noexcept
+{
+    if (!handle_ || !id_valid(root.node_id) || !root.is_gallery()) return InvalidArgument;
+    auto status = exec(handle_, "BEGIN IMMEDIATE");
+    if (status != Ok) return status;
+    const auto rollback = [&] { (void)exec(handle_, "ROLLBACK"); };
+    const auto prior_settings = this->settings();
+    if (prior_settings.status != Ok) {
+        rollback();
+        return prior_settings.status;
+    }
+    const uint64_t next_generation = prior_settings.value.app_generation + 1;
+    status = exec(handle_, "CREATE TEMP TABLE IF NOT EXISTS osv_live_nodes("
+                           "node_id BLOB PRIMARY KEY CHECK(length(node_id)=16)) WITHOUT ROWID");
+    if (status == Ok) status = exec(handle_, "DELETE FROM osv_live_nodes");
+    // Free the persisted sibling-order namespace before applying a potentially
+    // arbitrary reorder; the unique(parent_id,sibling_order) constraint remains active.
+    if (status == Ok)
+        status = exec(handle_, "UPDATE nodes SET sibling_order=sibling_order+2000000");
+
+    Statement live{handle_, "INSERT INTO osv_live_nodes(node_id) VALUES(?)"};
+    Statement upsert{
+        handle_,
+        "INSERT INTO nodes(node_id,parent_id,node_type,display_name,sibling_order,favorite,"
+        "created_ts,media_format,width,height,duration_ms,codec,original_size,sort_key,animated) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(node_id) DO UPDATE SET "
+        "parent_id=excluded.parent_id,node_type=excluded.node_type,display_name=excluded.display_"
+        "name,"
+        "sibling_order=excluded.sibling_order,favorite=excluded.favorite,created_ts=excluded."
+        "created_ts,"
+        "media_format=excluded.media_format,width=excluded.width,height=excluded.height,"
+        "duration_ms=excluded.duration_ms,codec=excluded.codec,original_size=excluded.original_"
+        "size,"
+        "sort_key=excluded.sort_key,animated=excluded.animated"};
+    if (status == Ok && (!live.get() || !upsert.get())) status = IoError;
+    const auto bind_optional = [](sqlite3_stmt* statement, int index, auto value) {
+        if (value.has_value())
+            sqlite3_bind_int64(statement, index, static_cast<sqlite3_int64>(*value));
+        else
+            sqlite3_bind_null(statement, index);
+    };
+    std::function<bool(const IndexNode&, const Id*, uint64_t)> store_node;
+    store_node = [&](const IndexNode& node, const Id* parent, uint64_t order) { // NOSONAR cpp:S3608 cpp:S1188
+        if (!id_valid(node.node_id)) return false;
+        sqlite3_reset(live.get());
+        sqlite3_clear_bindings(live.get());
+        bind_id(live.get(), 1, node.node_id);
+        if (sqlite3_step(live.get()) != SQLITE_DONE) return false;
+        sqlite3_reset(upsert.get());
+        sqlite3_clear_bindings(upsert.get());
+        bind_id(upsert.get(), 1, node.node_id);
+        if (parent)
+            bind_id(upsert.get(), 2, *parent);
+        else
+            sqlite3_bind_null(upsert.get(), 2);
+        sqlite3_bind_int(upsert.get(), 3, static_cast<int>(std::to_underlying(node.type)));
+        const std::string_view display = parent ? node.name.view() : std::string_view{"/"};
+        sqlite3_bind_text(upsert.get(), 4, display.data(), static_cast<int>(display.size()),
+                          SQLITE_TRANSIENT);
+        sqlite3_bind_int64(upsert.get(), 5, static_cast<sqlite3_int64>(order));
+        sqlite3_bind_int(upsert.get(), 6, node.favorite ? 1 : 0);
+        const uint64_t created = node.is_video() ? node.vmeta.created_ts : node.meta.created_ts;
+        sqlite3_bind_int64(upsert.get(), 7, static_cast<sqlite3_int64>(created));
+        std::optional<int> format;
+        std::optional<uint32_t> width;
+        std::optional<uint32_t> height;
+        std::optional<uint64_t> duration_ms;
+        std::optional<int> codec;
+        std::optional<uint64_t> original_size;
+        std::optional<uint8_t> sort_key;
+        std::optional<bool> animated;
+        if (node.is_image()) {
+            format = std::to_underlying(node.meta.format);
+            width = node.meta.width;
+            height = node.meta.height;
+            original_size = node.meta.orig_size;
+            animated = node.meta.animated;
+        } else if (node.is_video()) {
+            format = std::to_underlying(node.vmeta.container);
+            width = node.vmeta.width;
+            height = node.vmeta.height;
+            duration_ms = node.vmeta.duration_us / 1000;
+            codec = std::to_underlying(node.vmeta.codec);
+            original_size = node.vmeta.orig_size;
+        } else {
+            sort_key = std::to_underlying(node.sort_key);
+        }
+        bind_optional(upsert.get(), 8, format);
+        bind_optional(upsert.get(), 9, width);
+        bind_optional(upsert.get(), 10, height);
+        bind_optional(upsert.get(), 11, duration_ms);
+        bind_optional(upsert.get(), 12, codec);
+        bind_optional(upsert.get(), 13, original_size);
+        bind_optional(upsert.get(), 14, sort_key);
+        bind_optional(upsert.get(), 15, animated);
+        if (sqlite3_step(upsert.get()) != SQLITE_DONE) return false;
+        for (size_t i = 0; i < node.children.size(); ++i)
+            if (!store_node(node.children[i], &node.node_id, i)) return false;
+        return true;
+    };
+    if (status == Ok && !store_node(root, nullptr, 0))
+        status = map_status(sqlite3_extended_errcode(handle_));
+    if (status == Ok)
+        status =
+            exec(handle_,
+                 "DELETE FROM objects WHERE node_id NOT IN (SELECT node_id FROM osv_live_nodes)");
+    if (status == Ok)
+        status = exec(
+            handle_, "DELETE FROM nodes WHERE node_id NOT IN (SELECT node_id FROM osv_live_nodes)");
+    Statement staged_owner_is_live{handle_, "SELECT 1 FROM osv_live_nodes WHERE node_id=?"};
+    if (status == Ok && !staged_owner_is_live.get()) status = IoError;
+    for (const auto& object : staged_objects) { // NOSONAR cpp:S924 -- fail-fast transaction loop
+        if (status != Ok) break;
+        sqlite3_reset(staged_owner_is_live.get());
+        sqlite3_clear_bindings(staged_owner_is_live.get());
+        bind_id(staged_owner_is_live.get(), 1, object.node_id);
+        if (sqlite3_step(staged_owner_is_live.get()) != SQLITE_ROW) continue;
+        Statement erase{handle_, "DELETE FROM objects WHERE node_id=? AND role=?"};
+        if (!erase.get()) {
+            status = IoError;
+            break;
+        }
+        bind_id(erase.get(), 1, object.node_id);
+        sqlite3_bind_int(erase.get(), 2, static_cast<int>(std::to_underlying(object.role)));
+        status = map_status(sqlite3_step(erase.get()));
+        if (status == Ok) {
+            ObjectRecord committed = object;
+            committed.creation_generation = next_generation;
+            status = insert_object(committed);
+        }
+    }
+
+    // Rebuild the bounded metadata joins inside the same transaction. Object
+    // rows are deliberately untouched for every live node.
+    for (const char* sql :
+         {"DELETE FROM node_tags", "DELETE FROM tag_field_values", "DELETE FROM tag_descriptions",
+          "DELETE FROM category_fields", "DELETE FROM tag_categories", "DELETE FROM tags",
+          "DELETE FROM saved_searches"})
+        if (status == Ok) status = exec(handle_, sql);
+
+    std::vector<std::pair<std::string, std::string>> tags;
+    const auto register_tag = [&](std::string_view display) {
+        std::string canonical(display);
+        std::ranges::transform(canonical, canonical.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        if (std::ranges::none_of(tags, [&](const auto& item) { return item.first == canonical; }))
+            tags.emplace_back(std::move(canonical), display);
+    };
+    std::function<void(const IndexNode&)> gather_tags = [&](const IndexNode& node) {
+        for (const auto& tag : node.tags)
+            register_tag(tag.view());
+        for (const auto& child : node.children)
+            gather_tags(child);
+    };
+    gather_tags(root);
+    for (const auto& item : settings.tag_descriptions)
+        register_tag(item.tag.view());
+    for (const auto& item : settings.tag_field_values)
+        register_tag(item.tag.view());
+    if (tags.size() > 4096) status = Constraint;
+    if (status == Ok) {
+        for (size_t i = 0; i < tags.size() && status == Ok; ++i) // NOSONAR cpp:S886
+            status = add_tag(static_cast<int64_t>(i + 1), tags[i].second, tags[i].first);
+    }
+    const auto tag_id = [&](std::string_view value) { // NOSONAR cpp:S3574
+        std::string canonical(value);
+        std::ranges::transform(canonical, canonical.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        const auto it = std::ranges::find(tags, canonical, &decltype(tags)::value_type::first);
+        return it == tags.end() ? 0 : static_cast<int64_t>(std::distance(tags.begin(), it) + 1);
+    };
+    std::function<void(const IndexNode&)> assign_tags = [&](const IndexNode& node) {
+        for (const auto& tag : node.tags)
+            if (status == Ok) status = assign_tag(node.node_id, tag_id(tag.view()));
+        for (const auto& child : node.children)
+            assign_tags(child);
+    };
+    if (status == Ok) assign_tags(root);
+    if (status == Ok) {
+        for (size_t i = 0; i < settings.categories.size() && status == Ok; ++i) {
+            const auto& category = settings.categories[i];
+            Statement insert{
+                handle_,
+                "INSERT INTO tag_categories(category_id,display_name,swatch) VALUES(?,?,?)"};
+            if (!insert.get()) {
+                status = IoError;
+                break;
+            }
+            const auto category_id = static_cast<int64_t>(i + 1);
+            sqlite3_bind_int64(insert.get(), 1, category_id);
+            sqlite3_bind_text(insert.get(), 2, category.name.view().data(),
+                              static_cast<int>(category.name.size()), SQLITE_TRANSIENT);
+            sqlite3_bind_int(insert.get(), 3, category.swatch);
+            status = map_status(sqlite3_step(insert.get()));
+            for (size_t field_index = 0; field_index < category.fields.size() && status == Ok;
+                 ++field_index) {
+                Statement field{handle_,
+                                "INSERT INTO category_fields(category_id,field_order,display_name) "
+                                "VALUES(?,?,?)"};
+                if (!field.get()) { // NOSONAR cpp:S134 -- bounded category/field hierarchy
+                    status = IoError;
+                    break;
+                }
+                sqlite3_bind_int64(field.get(), 1, category_id);
+                sqlite3_bind_int64(field.get(), 2, static_cast<sqlite3_int64>(field_index));
+                sqlite3_bind_text(field.get(), 3, category.fields[field_index].view().data(),
+                                  static_cast<int>(category.fields[field_index].size()),
+                                  SQLITE_TRANSIENT);
+                status = map_status(sqlite3_step(field.get()));
+            }
+        }
+    }
+    if (status == Ok) {
+        for (const auto& description : settings.tag_descriptions) {
+            status = set_tag_description(tag_id(description.tag.view()), description.text.view());
+            if (status != Ok) break;
+        }
+    }
+    if (status == Ok) {
+        const auto ci_equal = [](std::string_view a, std::string_view b) {
+            return a.size() == b.size() &&
+                   std::ranges::equal(a, b, [](unsigned char x, unsigned char y) {
+                       return std::tolower(x) == std::tolower(y);
+                   });
+        };
+        for (const auto& value : settings.tag_field_values) { // NOSONAR cpp:S924 -- validation exits uniformly
+            const std::string_view tag = value.tag.view();
+            const size_t colon = tag.find(':');
+            if (colon == std::string_view::npos) {
+                status = Constraint;
+                break;
+            }
+            const std::string_view category_name = tag.substr(0, colon);
+            const auto category = std::ranges::find_if(settings.categories, [&](const auto& item) {
+                return ci_equal(item.name.view(), category_name);
+            });
+            if (category == settings.categories.end()) {
+                status = Constraint;
+                break;
+            }
+            const auto field = std::ranges::find_if(category->fields, [&](const auto& item) {
+                return ci_equal(item.view(), value.field.view());
+            });
+            if (field == category->fields.end()) {
+                status = Constraint;
+                break;
+            }
+            status = set_tag_field_value(
+                {tag_id(tag),
+                 static_cast<int64_t>(std::distance(settings.categories.begin(), category) + 1),
+                 static_cast<uint32_t>(std::distance(category->fields.begin(), field)),
+                 value.value});
+            if (status != Ok) break;
+        }
+    }
+    if (status == Ok) {
+        SettingsRecord record;
+        record.app_generation = next_generation;
+        record.default_sort = std::to_underlying(settings.default_sort);
+        record.tiles_show_tags = settings.tiles_show_tags;
+        record.migrated_index_version = settings.migrated_index_version;
+        record.migrated_probe_caps = settings.migrated_probe_caps;
+        record.migrated_thumb_side = settings.migrated_thumb_side;
+        status = set_settings(record);
+    }
+    if (status == Ok) {
+        for (size_t i = 0; i < searches.size() && status == Ok; ++i) // NOSONAR cpp:S886
+            status = add_saved_search(
+                {static_cast<int64_t>(i + 1), searches[i].name, searches[i].query});
+    }
+    if (status == Ok) status = exec(handle_, "COMMIT");
+    if (status != Ok) rollback();
+    return status;
 }
 
 DbResult<std::vector<NodeRecord>> Database::list_children(const Id& parent_id) const noexcept
@@ -541,14 +883,9 @@ DbResult<std::vector<ObjectRecord>> Database::object_references() const noexcept
             *frame_plain_limit == 0 || *frame_plain_limit > 1048576 || !frame_count.has_value() ||
             *frame_count == 0 || *frame_count > 1048576 || !generation.has_value())
             return {WrongKeyOrCorrupt, {}};
-        ObjectRecord object{*object_id,
-                            *node_id,
-                            static_cast<ObjectRole>(*role),
-                            *encrypted_length,
-                            *plaintext_length,
-                            *frame_plain_limit,
-                            *frame_count,
-                            *generation};
+        ObjectRecord object{*object_id,        *node_id,          static_cast<ObjectRole>(*role),
+                            *encrypted_length, *plaintext_length, *frame_plain_limit,
+                            *frame_count,      *generation};
         if (result.value.size() >= 3'000'000) return {WrongKeyOrCorrupt, {}};
         result.value.emplace_back(std::move(object));
     }
@@ -605,8 +942,8 @@ DbResult<std::optional<Id>> Database::commit_object_replace(ObjectRecord object)
     }
     const auto current = settings();
     if (status == Ok && current.status != Ok) status = current.status;
-    if (status == Ok && current.value.app_generation ==
-                            static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+    if (status == Ok &&
+        current.value.app_generation == static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
         status = Constraint;
     if (status == Ok && old) {
         Statement erase{handle_, "DELETE FROM objects WHERE object_id=?"};
@@ -636,7 +973,7 @@ DbResult<std::optional<Id>> Database::commit_object_replace(ObjectRecord object)
 }
 
 DbResult<std::optional<Id>> Database::commit_object_delete(const Id& node_id,
-                                                            ObjectRole role) noexcept
+                                                           ObjectRole role) noexcept
 {
     if (!handle_ || !id_valid(node_id)) return {InvalidArgument, std::nullopt};
     auto status = exec(handle_, "BEGIN IMMEDIATE");
@@ -899,7 +1236,8 @@ DbResult<std::vector<TagDescriptionRecord>> Database::tag_descriptions() const n
         if (step != SQLITE_ROW) return {map_status(step), {}};
         std::array<crypto::SecureString, 2> values;
         for (int column = 0; column < 2; ++column) {
-            const auto* text = reinterpret_cast<const char*>(sqlite3_column_text(statement.get(), column));
+            const auto* text =
+                reinterpret_cast<const char*>(sqlite3_column_text(statement.get(), column));
             const int size = sqlite3_column_bytes(statement.get(), column);
             if ((!text && size != 0) || size < (column == 0 ? 1 : 0))
                 return {WrongKeyOrCorrupt, {}};
@@ -927,10 +1265,10 @@ Database::resolved_tag_field_values() const noexcept
         if (step != SQLITE_ROW) return {map_status(step), {}};
         std::array<crypto::SecureString, 3> values;
         for (int column = 0; column < 3; ++column) {
-            const auto* text = reinterpret_cast<const char*>(sqlite3_column_text(statement.get(), column));
+            const auto* text =
+                reinterpret_cast<const char*>(sqlite3_column_text(statement.get(), column));
             const int size = sqlite3_column_bytes(statement.get(), column);
-            if ((!text && size != 0) || size < (column < 2 ? 1 : 0))
-                return {WrongKeyOrCorrupt, {}};
+            if ((!text && size != 0) || size < (column < 2 ? 1 : 0)) return {WrongKeyOrCorrupt, {}};
             values[static_cast<size_t>(column)] =
                 crypto::SecureString(std::string_view{text ? text : "", static_cast<size_t>(size)});
         }

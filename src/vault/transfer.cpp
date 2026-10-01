@@ -40,7 +40,7 @@ std::vector<std::string> effective_tags(const Vault& v, std::string_view node_pa
     std::string prefix;
     for (std::string_view rest = node_path;;) {
         const auto slash = rest.find('/');
-        if (slash == std::string_view::npos) break;     // last segment = the node itself
+        if (slash == std::string_view::npos) break;  // last segment = the node itself
         prefix.append(prefix.empty() ? "" : "/").append(rest.substr(0, slash));
         if (const IndexNode* g = v.resolve_node(prefix); g && g->is_gallery()) add_ci(g->tags);
         rest.remove_prefix(slash + 1);
@@ -58,27 +58,27 @@ inline constexpr size_t TRANSFER_COMMIT_BATCH = 32;
 
 // Shared context for the subtree copy loop (bundled for cpp:S107).
 struct CopyCtx {
-    Vault&               src;
-    Vault&               dst;
-    TransferMode         mode;
+    Vault& src;
+    Vault& dst;
+    TransferMode mode;
     crypto::SecureBytes& plain;
-    OpProgress*          progress;   // may be null
-    TransferTally&       tally;
+    OpProgress* progress;  // may be null
+    TransferTally& tally;
     // Batch state (Phase 69). `pending` holds full source slash-paths of files
     // attached at the destination but not yet durably committed; `moved` holds
     // committed paths awaiting the deferred Move removal. `dirty` tracks
     // uncommitted destination-tree mutations (attaches AND ensured galleries).
     std::vector<std::string> pending{};
     std::vector<std::string> moved{};
-    bool                     dirty         = false;
-    bool                     commit_failed = false;
+    bool dirty = false;
+    bool commit_failed = false;
 };
 
 // Result of collision resolution (bundled for cpp:S107).
 struct CollisionResolution {
-    VaultResult code;           // Ok, AlreadyExists, or a combine result
-    std::string dest_name;      // Name to use at destination (rewritten by Suffix)
-    bool        handled;        // True if combine_galleries ran; caller returns immediately
+    VaultResult code;       // Ok, AlreadyExists, or a combine result
+    std::string dest_name;  // Name to use at destination (rewritten by Suffix)
+    bool handled;           // True if combine_galleries ran; caller returns immediately
 };
 
 // Append `gallery`'s slash-path child name; "" stays "".
@@ -92,8 +92,7 @@ std::string child_path(std::string_view gallery, std::string_view name)
 
 // Every gallery in the subtree (self + all descendants) — since Phase 46,
 // any gallery can accept either media or a sub-gallery.
-void collect_all_galleries(const Vault& v, std::string_view gallery,
-                           std::vector<std::string>& out)
+void collect_all_galleries(const Vault& v, std::string_view gallery, std::vector<std::string>& out)
 {
     out.emplace_back(gallery);
     for (const auto* c : v.list(gallery)) {
@@ -106,10 +105,11 @@ void collect_all_galleries(const Vault& v, std::string_view gallery,
 // One snapshotted gallery: its path relative to the moved subtree root ("" = the
 // moved gallery itself) and the media (image/video) filenames it directly holds.
 struct GallerySnap {
-    std::string              rel;
-    std::vector<std::string> images;   // names of media children (images and videos)
-    std::vector<std::string> tags;     // the gallery's OWN tags (root snap: effective tags — set by the driver)
-    bool                     favorite = false;
+    std::string rel;
+    std::vector<std::string> images;  // names of media children (images and videos)
+    std::vector<std::string>
+        tags;  // the gallery's OWN tags (root snap: effective tags — set by the driver)
+    bool favorite = false;
 };
 
 // Walk `abs` (a gallery in `src`) parent-before-child, recording each gallery's
@@ -160,7 +160,8 @@ std::string trim_utf8(std::string_view s, size_t max_bytes)
 {
     if (s.size() <= max_bytes) return std::string(s);
     size_t end = max_bytes;
-    while (end > 0 && (static_cast<std::byte>(s[end]) & std::byte{0xC0}) == std::byte{0x80}) --end;
+    while (end > 0 && (static_cast<std::byte>(s[end]) & std::byte{0xC0}) == std::byte{0x80})
+        --end;
     return std::string(s.substr(0, end));
 }
 
@@ -177,8 +178,7 @@ std::optional<std::string> unique_child_name(const Vault& dst, std::string_view 
     };
     for (int i = 2; i <= 9999; ++i) {
         const std::string suffix = std::format("_{}", i);
-        const std::string cand =
-            trim_utf8(name, MAX_NODE_NAME_BYTES - suffix.size()) + suffix;
+        const std::string cand = trim_utf8(name, MAX_NODE_NAME_BYTES - suffix.size()) + suffix;
         if (!taken(cand)) return cand;
     }
     return std::nullopt;
@@ -200,7 +200,7 @@ CollisionResolution resolve_dest_collision(Vault& src, std::string_view src_gall
         if (c->name != name) continue;
         if (opts.policy == CollisionPolicy::Suffix) {
             auto fresh = unique_child_name(dst, dst_parent, name);
-            if (!fresh) return {AlreadyExists, {}, false};   // probe bound exhausted
+            if (!fresh) return {AlreadyExists, {}, false};  // probe bound exhausted
             return {Ok, std::move(*fresh), false};
         }
         if (opts.policy == CollisionPolicy::Combine && c->is_gallery()) {
@@ -210,19 +210,18 @@ CollisionResolution resolve_dest_collision(Vault& src, std::string_view src_gall
             const VaultResult r = combine_galleries(
                 src, src_gallery, dst, child_path(dst_parent, name), ct, progress, mode);
             if (tally) {
-                tally->done    += ct.media_moved;
+                tally->done += ct.media_moved;
                 tally->skipped += ct.media_skipped;
             }
             return {r, {}, true};
         }
-        return {AlreadyExists, {}, false};   // Fail policy, or Combine into a non-gallery child
+        return {AlreadyExists, {}, false};  // Fail policy, or Combine into a non-gallery child
     }
-    return {Ok, {}, false};   // no collision
+    return {Ok, {}, false};  // no collision
 }
 
 // Locate a media node (image or video) by name in `gallery` (nullptr if absent).
-const IndexNode* find_image_node(const Vault& v, std::string_view gallery,
-                                 std::string_view name)
+const IndexNode* find_image_node(const Vault& v, std::string_view gallery, std::string_view name)
 {
     for (const auto* c : v.list(gallery))
         if (c->is_media() && c->name == name) return c;
@@ -234,12 +233,12 @@ const IndexNode* find_image_node(const Vault& v, std::string_view gallery,
 VaultResult prestage_image_info(const Vault& src, const IndexNode& node, StagedThumb& out)
 {
     using enum VaultResult;
-    out.format   = node.meta.format;
-    out.width    = node.meta.width;
-    out.height   = node.meta.height;
+    out.format = node.meta.format;
+    out.width = node.meta.width;
+    out.height = node.meta.height;
     out.animated = node.meta.animated;
     out.thumb_jpeg.clear();
-    if (node.meta.thumb_length == 0) return Ok;   // source has no thumbnail
+    if (node.meta.thumb_length == 0) return Ok;  // source has no thumbnail
     crypto::SecureBytes blob;
     if (VaultResult r = src.read_thumbnail(node, blob); r != Ok) return r;
     // Phase 96 (OSV-AUD-003): move straight from the decrypted SecureBytes into
@@ -251,10 +250,10 @@ VaultResult prestage_image_info(const Vault& src, const IndexNode& node, StagedT
 VaultResult prestage_video_info(const Vault& src, const IndexNode& node, StagedVideoInfo& out)
 {
     using enum VaultResult;
-    out.container   = node.vmeta.container;
-    out.codec       = node.vmeta.codec;
-    out.width       = node.vmeta.width;
-    out.height      = node.vmeta.height;
+    out.container = node.vmeta.container;
+    out.codec = node.vmeta.codec;
+    out.width = node.vmeta.width;
+    out.height = node.vmeta.height;
     out.duration_us = node.vmeta.duration_us;
     out.poster_jpeg.clear();
     if (node.vmeta.poster_length == 0) return Ok;
@@ -272,7 +271,7 @@ VaultResult prestage_video_info(const Vault& src, const IndexNode& node, StagedV
 void lower_dst_watermark(const Vault& src, Vault& dst)
 {
     const VaultSettings& s_src = vault_settings(src);
-    VaultSettings        s_dst = vault_settings(dst);
+    VaultSettings s_dst = vault_settings(dst);
     bool lowered = false;
     if (s_src.migrated_index_version < s_dst.migrated_index_version) {
         s_dst.migrated_index_version = s_src.migrated_index_version;
@@ -350,10 +349,9 @@ void finish_copies(CopyCtx& c)
 // decrypting through the reused mlock'd `plain`. Copy only — source untouched.
 // `failed_stage` tracks whether failure occurred on read (source side) or write
 // (destination add side).
-VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
-                           Vault& dst, std::string_view dst_gallery,
-                           std::string_view fname, crypto::SecureBytes& plain,
-                           TransferFailure::Stage& failed_stage)
+VaultResult copy_one_media(const Vault& src, std::string_view src_gallery, Vault& dst,
+                           std::string_view dst_gallery, std::string_view fname,
+                           crypto::SecureBytes& plain, TransferFailure::Stage& failed_stage)
 {
     using enum VaultResult;
     failed_stage = TransferFailure::Stage::Read;
@@ -397,7 +395,7 @@ void copy_one_media_ex(CopyCtx& c, std::string_view src_abs, std::string_view ds
     auto stage = TransferFailure::Stage::Read;
     if (VaultResult r = copy_one_media(c.src, src_abs, c.dst, dst_gallery, fname, c.plain, stage);
         r == AlreadyExists && stage == TransferFailure::Stage::Write) {
-        ++c.tally.skipped;   // same-named file at dst: skip, keep the source copy
+        ++c.tally.skipped;  // same-named file at dst: skip, keep the source copy
     } else if (r != Ok) {
         record_failure(c.tally, child_path(src_abs, fname), r, stage);
     } else {
@@ -442,8 +440,7 @@ void apply_gallery_extras(Vault& dst, std::string_view dst_path,
 // depth-first, parent-before-child, so a failed gallery's descendants form a CONTIGUOUS
 // run — the `skip_prefix` scan relies on this.
 void copy_subtree(CopyCtx& c, std::string_view src_gallery, const std::string& dest_root,
-                  const std::vector<GallerySnap>& snaps,
-                  std::vector<std::string>& failed_rels)
+                  const std::vector<GallerySnap>& snaps, std::vector<std::string>& failed_rels)
 {
     using enum VaultResult;
     std::string skip_prefix;
@@ -451,36 +448,31 @@ void copy_subtree(CopyCtx& c, std::string_view src_gallery, const std::string& d
     for (const auto& snap : snaps) {
         if (c.progress && c.progress->cancel.load()) return;
         if (c.commit_failed) return;
-        if (skipping &&
-            (snap.rel == skip_prefix || snap.rel.starts_with(skip_prefix + "/"))) {
+        if (skipping && (snap.rel == skip_prefix || snap.rel.starts_with(skip_prefix + "/"))) {
             // Unreachable branch: media counted failed (no per-file entries —
             // the gallery's own entry covers the branch).
             c.tally.failed += static_cast<int>(snap.images.size());
-            if (c.progress)
-                c.progress->done.fetch_add(static_cast<int>(snap.images.size()));
+            if (c.progress) c.progress->done.fetch_add(static_cast<int>(snap.images.size()));
             continue;
         }
         skipping = false;
 
-        const std::string dst_gallery = snap.rel.empty() ? dest_root
-                                                         : dest_root + "/" + snap.rel;
-        const std::string src_abs = snap.rel.empty()
-                                        ? std::string(src_gallery)
-                                        : std::string(src_gallery) + "/" + snap.rel;
+        const std::string dst_gallery = snap.rel.empty() ? dest_root : dest_root + "/" + snap.rel;
+        const std::string src_abs =
+            snap.rel.empty() ? std::string(src_gallery) : std::string(src_gallery) + "/" + snap.rel;
         // Phase 69: ensure_gallery_path (idempotent, NO per-gallery commit) —
         // the created galleries ride the next batched commit.
         if (VaultResult r = ensure_gallery_path(c.dst, dst_gallery); r != Ok) {
             record_failure(c.tally, src_abs, r, TransferFailure::Stage::Write);
             c.tally.failed += static_cast<int>(snap.images.size());
-            if (c.progress)
-                c.progress->done.fetch_add(static_cast<int>(snap.images.size()));
+            if (c.progress) c.progress->done.fetch_add(static_cast<int>(snap.images.size()));
             failed_rels.push_back(snap.rel);
-            if (snap.rel.empty()) return;   // subtree ROOT failed: nothing is reachable
+            if (snap.rel.empty()) return;  // subtree ROOT failed: nothing is reachable
             skip_prefix = snap.rel;
             skipping = true;
             continue;
         }
-        c.dirty = true;   // ensured galleries need the next commit too
+        c.dirty = true;  // ensured galleries need the next commit too
         apply_gallery_extras(c.dst, dst_gallery, snap.tags, snap.favorite);
         copy_images(c, src_abs, dst_gallery, snap.images);
     }
@@ -489,8 +481,8 @@ void copy_subtree(CopyCtx& c, std::string_view src_gallery, const std::string& d
 // A same-vault transfer forms a cycle when the destination parent is the moved
 // gallery itself or any descendant of it (moving a subtree into itself). Always
 // false across two different vaults.
-bool is_same_vault_cycle(const Vault& src, const Vault& dst,
-                         std::string_view src_gallery, std::string_view dst_parent)
+bool is_same_vault_cycle(const Vault& src, const Vault& dst, std::string_view src_gallery,
+                         std::string_view dst_parent)
 {
     if (&src != &dst) return false;
     if (dst_parent == src_gallery) return true;
@@ -501,8 +493,7 @@ bool is_same_vault_cycle(const Vault& src, const Vault& dst,
 void merge_failures(TransferTally& out, TransferTally&& sub)
 {
     for (auto& f : sub.failures) {
-        if (out.failures.size() < MAX_TRANSFER_FAILURES)
-            out.failures.push_back(std::move(f));
+        if (out.failures.size() < MAX_TRANSFER_FAILURES) out.failures.push_back(std::move(f));
     }
 }
 
@@ -519,15 +510,14 @@ void prune_moved_galleries(Vault& src, std::string_view src_gallery,
     };
     for (auto it = snaps.rbegin(); it != snaps.rend(); ++it) {
         if (in_failed_branch(it->rel)) continue;
-        const std::string abs = it->rel.empty()
-                                    ? std::string(src_gallery)
-                                    : std::string(src_gallery) + "/" + it->rel;
+        const std::string abs =
+            it->rel.empty() ? std::string(src_gallery) : std::string(src_gallery) + "/" + it->rel;
         if (src.resolve_node(abs) != nullptr && src.list(abs).empty())
             (void)src.remove_gallery(abs);
     }
 }
 
-} // namespace
+}  // namespace
 
 std::vector<std::string> all_galleries(const Vault& v)
 {
@@ -540,15 +530,15 @@ std::vector<std::string> all_galleries(const Vault& v)
 
 // Internal transfer_image with stage tracking for per-file failure recording.
 // Sets `stage_out` to indicate where failure occurred (Read side or Write side).
-VaultResult transfer_image_ex(Vault& src, std::string_view src_gallery,
-                              std::string_view filename,
-                              Vault& dst, std::string_view dst_gallery,
-                              TransferMode mode, TransferFailure::Stage& stage_out)
+VaultResult transfer_image_ex(Vault& src, std::string_view src_gallery, std::string_view filename,
+                              Vault& dst, std::string_view dst_gallery, TransferMode mode,
+                              TransferFailure::Stage& stage_out)
 {
     using enum VaultResult;
 
     crypto::SecureBytes plain;
-    if (VaultResult r = copy_one_media(src, src_gallery, dst, dst_gallery, filename, plain, stage_out);
+    if (VaultResult r =
+            copy_one_media(src, src_gallery, dst, dst_gallery, filename, plain, stage_out);
         r != Ok)
         return r;
 
@@ -567,11 +557,11 @@ VaultResult transfer_image_ex(Vault& src, std::string_view src_gallery,
     return Ok;
 }
 
-VaultResult transfer_image(Vault& src, std::string_view src_gallery,
-                           std::string_view filename,
-                           Vault& dst, std::string_view dst_gallery,
-                           TransferMode mode)
+VaultResult transfer_image(Vault& src, std::string_view src_gallery, std::string_view filename,
+                           Vault& dst, std::string_view dst_gallery, TransferMode mode)
 {
+    if (&src == &dst && mode == TransferMode::Move && vault_uses_directory_storage(src))
+        return move_node_within(src, src_gallery, filename, dst_gallery, filename);
     TransferFailure::Stage stage = TransferFailure::Stage::Read;
     return transfer_image_ex(src, src_gallery, filename, dst, dst_gallery, mode, stage);
 }
@@ -592,16 +582,16 @@ std::vector<std::string> gallery_target_parents(const Vault& v)
     return out;
 }
 
-VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
-                             Vault& dst, std::string_view dst_parent,
-                             TransferMode mode, GalleryTransferOpts opts)
+VaultResult transfer_gallery(Vault& src, std::string_view src_gallery, Vault& dst,
+                             std::string_view dst_parent, TransferMode mode,
+                             GalleryTransferOpts opts)
 {
     using enum VaultResult;
 
     OpProgress* progress = opts.progress;
     TransferTally* tally = opts.tally;
 
-    if (src_gallery.empty()) return InvalidArg;       // can't transfer the root itself
+    if (src_gallery.empty()) return InvalidArg;  // can't transfer the root itself
     // Refuse a same-vault move/copy of a gallery into itself or a descendant.
     if (is_same_vault_cycle(src, dst, src_gallery, dst_parent)) return InvalidArg;
     const std::string name = last_segment(src_gallery);
@@ -609,17 +599,22 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
     // Source must be an existing gallery.
     bool src_is_gallery = false;
     for (const auto* c : src.list(parent_path(src_gallery)))
-        if (c->is_gallery() && c->name == name) { src_is_gallery = true; break; }
+        if (c->is_gallery() && c->name == name) {
+            src_is_gallery = true;
+            break;
+        }
     if (!src_is_gallery) return NotFound;
 
     std::string dest_name = name;
-    const CollisionResolution collision = resolve_dest_collision(
-        src, src_gallery, dst, dst_parent, mode, opts, name);
+    const CollisionResolution collision =
+        resolve_dest_collision(src, src_gallery, dst, dst_parent, mode, opts, name);
     if (collision.handled) return collision.code;
     if (collision.code != Ok) return collision.code;
     if (!collision.dest_name.empty()) dest_name = collision.dest_name;
-    const std::string dest_root = dst_parent.empty() ? dest_name
-                                                     : std::string(dst_parent) + "/" + dest_name;
+    if (&src == &dst && mode == TransferMode::Move && vault_uses_directory_storage(src))
+        return move_node_within(src, parent_path(src_gallery), name, dst_parent, dest_name);
+    const std::string dest_root =
+        dst_parent.empty() ? dest_name : std::string(dst_parent) + "/" + dest_name;
 
     // Snapshot the source subtree (parent-before-child), then recreate + copy.
     std::vector<GallerySnap> snaps;
@@ -631,7 +626,8 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
     // Total media across the subtree drives the progress bar ("N / M files").
     if (progress) {
         int media = 0;
-        for (const auto& snap : snaps) media += static_cast<int>(snap.images.size());
+        for (const auto& snap : snaps)
+            media += static_cast<int>(snap.images.size());
         progress->total.store(media);
     }
 
@@ -639,8 +635,8 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
     TransferTally& t = tally ? *tally : local;
 
     crypto::SecureBytes plain;
-    CopyCtx ctx{.src = src, .dst = dst, .mode = mode, .plain = plain,
-                .progress = progress, .tally = t};
+    CopyCtx ctx{
+        .src = src, .dst = dst, .mode = mode, .plain = plain, .progress = progress, .tally = t};
     std::vector<std::string> failed_rels;
     copy_subtree(ctx, src_gallery, dest_root, snaps, failed_rels);
 
@@ -664,33 +660,44 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
 }
 
 TransferTally transfer_images(Vault& src, std::string_view src_gallery,
-                              const std::vector<std::string>& filenames,
-                              Vault& dst, std::string_view dst_gallery,
-                              TransferMode mode, TransferProgress prog)
+                              const std::vector<std::string>& filenames, Vault& dst,
+                              std::string_view dst_gallery, TransferMode mode,
+                              TransferProgress prog)
 {
     using enum VaultResult;
     OpProgress* progress = prog.progress;
-    if (progress && prog.set_total)
-        progress->total.store(static_cast<int>(filenames.size()));
+    if (progress && prog.set_total) progress->total.store(static_cast<int>(filenames.size()));
 
     TransferTally tally;
+    if (&src == &dst && mode == TransferMode::Move && vault_uses_directory_storage(src)) {
+        for (const auto& filename : filenames) {
+            if (progress && progress->cancel.load()) break;
+            if (const VaultResult result =
+                    move_node_within(src, src_gallery, filename, dst_gallery, filename);
+                result == Ok)
+                ++tally.done;
+            else
+                record_failure(tally, filename, result, TransferFailure::Stage::Write);
+            if (progress) progress->done.fetch_add(1);
+        }
+        return tally;
+    }
     crypto::SecureBytes plain;
-    CopyCtx ctx{.src = src, .dst = dst, .mode = mode, .plain = plain,
-                .progress = progress, .tally = tally};
+    CopyCtx ctx{
+        .src = src, .dst = dst, .mode = mode, .plain = plain, .progress = progress, .tally = tally};
     for (const auto& fname : filenames) {
         // Stop between files on a user cancel (clean partial) or a destination
         // commit failure (hard stop).
         if ((progress && progress->cancel.load()) || ctx.commit_failed) break;
         copy_one_media_ex(ctx, src_gallery, dst_gallery, fname);
     }
-    finish_copies(ctx);   // one dst commit + one deferred source removal batch
+    finish_copies(ctx);  // one dst commit + one deferred source removal batch
     return tally;
 }
 
-TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src_paths,
-                                 Vault& dst, std::string_view dst_parent,
-                                 TransferMode mode, OpProgress* progress,
-                                 CollisionPolicy policy)
+TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src_paths, Vault& dst,
+                                 std::string_view dst_parent, TransferMode mode,
+                                 OpProgress* progress, CollisionPolicy policy)
 {
     using enum VaultResult;
     if (progress) progress->total.store(static_cast<int>(src_paths.size()));
@@ -700,7 +707,8 @@ TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src
         if (progress && progress->cancel.load()) break;
         TransferTally sub;
         if (const VaultResult r = transfer_gallery(src, path, dst, dst_parent, mode,
-                                                   {.tally = &sub, .policy = policy}); r == Ok) {
+                                                   {.tally = &sub, .policy = policy});
+            r == Ok) {
             ++out.done;
             // Merge per-file failures from this subtree into the output.
             // per-file failures inside a structurally-Ok subtree do not change the
@@ -723,10 +731,13 @@ std::vector<std::string> colliding_galleries(const Vault& dst, std::string_view 
     for (const auto& path : src_paths) {
         const std::string name = last_segment(path);
         for (const auto* c : dst.list(dst_parent)) {
-            if (c->name == name) { out.push_back(name); break; }
+            if (c->name == name) {
+                out.push_back(name);
+                break;
+            }
         }
     }
     return out;
 }
 
-} // namespace vault
+}  // namespace vault

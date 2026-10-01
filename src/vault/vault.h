@@ -31,31 +31,35 @@
 #include "crypto/kdf.h"
 #include "crypto/secure_mem.h"
 
+#include "chunk_ref.h"
 #include "header.h"
 #include "index.h"
 #include "op_progress.h"
-#include "chunk_ref.h"
 
-namespace media { class VideoSource; }
+namespace media {
+class VideoSource;
+}
 
 namespace vault {
 
-namespace v3 { class ReadSession; }
+namespace v3 {
+class ReadSession;
+}
 
 class CommitLane;
 
 enum class VaultResult {
     Ok,
-    IoError,        // open/read/write/fsync failure
-    BadFormat,      // not a valid .osv / unparseable header or index
-    AuthFailed,     // wrong password/keyfile, or tampered/undecryptable chunk
-    Locked,         // operation needs an unlocked vault
-    NotFound,       // gallery / image path does not exist
-    AlreadyExists,  // gallery / image name already taken
-    InvalidArg,     // bad argument or leaf-invariant violation
-    CryptoError,    // RNG / KDF failure
-    Busy,           // another process holds the required vault resource
-    UnsupportedVersion, // valid vault from a newer unsupported format/schema
+    IoError,             // open/read/write/fsync failure
+    BadFormat,           // not a valid .osv / unparseable header or index
+    AuthFailed,          // wrong password/keyfile, or tampered/undecryptable chunk
+    Locked,              // operation needs an unlocked vault
+    NotFound,            // gallery / image path does not exist
+    AlreadyExists,       // gallery / image name already taken
+    InvalidArg,          // bad argument or leaf-invariant violation
+    CryptoError,         // RNG / KDF failure
+    Busy,                // another process holds the required vault resource
+    UnsupportedVersion,  // valid vault from a newer unsupported format/schema
 };
 
 // Video chunk size (1 MiB plaintext split).
@@ -75,7 +79,7 @@ enum class SearchScope { Images, Galleries, Both };
 // Result stats of Vault::prune_tags: how many tags were removed, from how
 // many distinct nodes.
 struct PruneTagsStats {
-    std::size_t tags_removed  = 0;
+    std::size_t tags_removed = 0;
     std::size_t nodes_touched = 0;
 };
 
@@ -83,11 +87,11 @@ struct PruneTagsStats {
 // its own name); `effective_tags` = the node's own tags unioned with all ancestor
 // gallery tags (cascade, computed at read time, case-insensitively de-duplicated).
 struct SearchHit {
-    std::string              path;
-    bool                     is_gallery = false;
-    std::string              name;
+    std::string path;
+    bool is_gallery = false;
+    std::string name;
     std::vector<std::string> effective_tags;
-    const IndexNode*         node = nullptr;  // valid until the next mutating call
+    const IndexNode* node = nullptr;  // valid until the next mutating call
 };
 
 // Result stats of batch media removal (duplicate finder): how many media nodes were
@@ -102,20 +106,20 @@ struct RemoveBatchStats {
 // media/video_probe.h (vault/ does not depend on media/), and the poster is
 // borrowed as a span rather than owned.
 struct VideoProbeApply {
-    VideoCodec               codec       = VideoCodec::Unknown;
-    uint32_t                 width       = 0;
-    uint32_t                 height      = 0;
-    uint64_t                 duration_us = 0;
-    std::span<const uint8_t> poster_jpeg;   // empty = leave the poster alone
+    VideoCodec codec = VideoCodec::Unknown;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint64_t duration_us = 0;
+    std::span<const uint8_t> poster_jpeg;  // empty = leave the poster alone
 };
 
-class Vault {
+class Vault { // NOSONAR cpp:S1448 -- stable public facade dispatches both storage backends
 public:
     // Auto-compaction gates (remove_image): rewrite the vault only when at
     // least this much is reclaimable AND the waste is at least a quarter of
     // the file — rewriting everything to reclaim a few KiB costs more I/O
     // than it returns.
-    static constexpr uint64_t AUTO_COMPACT_MIN_WASTE   = 256 * 1024;
+    static constexpr uint64_t AUTO_COMPACT_MIN_WASTE = 256 * 1024;
     static constexpr uint64_t AUTO_COMPACT_WASTE_RATIO = 4;  // waste >= size/4
 
     Vault();
@@ -128,11 +132,17 @@ public:
 
     // Create a brand-new vault at `path` (truncating any existing file). On
     // success `out` is returned UNLOCKED and ready to use. `keyfile` may be empty.
-    [[nodiscard]] static VaultResult create(const std::string&       path,
-                                            std::span<const uint8_t>  password,
-                                            std::span<const uint8_t>  keyfile,
-                                            const crypto::KdfParams&  params,
-                                            Vault&                    out);
+    [[nodiscard]] static VaultResult create(const std::string& path,
+                                            std::span<const uint8_t> password,
+                                            std::span<const uint8_t> keyfile,
+                                            const crypto::KdfParams& params, Vault& out);
+
+    // Phase 112 opt-in directory-vault creation. Phase 114 will make this the
+    // default; until then create() intentionally keeps producing legacy files.
+    [[nodiscard]] static VaultResult create_directory(const std::string& path,
+                                                      std::span<const uint8_t> password,
+                                                      std::span<const uint8_t> keyfile,
+                                                      const crypto::KdfParams& params, Vault& out);
 
     // Open an existing vault and parse its header. Returns a LOCKED vault.
     [[nodiscard]] static VaultResult open(const std::string& path, Vault& out);
@@ -171,35 +181,32 @@ public:
     // Vault under the cpp:S1448 method cap. StagedNode/StagedThumb are forward
     // declared before the class definition.
     friend StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
-                                  std::string_view filename,
-                                  const StagedThumb* precomputed);
+                                  std::string_view filename, const StagedThumb* precomputed);
     friend StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
-                                  std::string_view filename,
-                                  uint32_t chunk_size,
+                                  std::string_view filename, uint32_t chunk_size,
                                   const StagedVideoInfo* precomputed);
-    friend VaultResult attach_staged(Vault& v, std::string_view gallery_path,
-                                     IndexNode&& node);
+    friend VaultResult attach_staged(Vault& v, std::string_view gallery_path, IndexNode&& node);
     friend VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path);
-    friend VaultResult add_image_prestaged(Vault& v, std::string_view,
-                                           std::span<const uint8_t>, std::string_view,
-                                           const StagedThumb&, uint64_t,
+    friend VaultResult add_image_prestaged(Vault& v, std::string_view, std::span<const uint8_t>,
+                                           std::string_view, const StagedThumb&, uint64_t,
                                            const NodeExtras*);
-    friend VaultResult add_video_prestaged(Vault& v, std::string_view,
-                                           std::span<const uint8_t>, std::string_view,
-                                           const StagedVideoInfo&, uint64_t,
+    friend VaultResult add_video_prestaged(Vault& v, std::string_view, std::span<const uint8_t>,
+                                           std::string_view, const StagedVideoInfo&, uint64_t,
                                            const NodeExtras*);
-    friend VaultResult attach_image_prestaged(Vault& v, std::string_view,
-                                              std::span<const uint8_t>, std::string_view,
-                                              const StagedThumb&, uint64_t,
+    friend VaultResult attach_image_prestaged(Vault& v, std::string_view, std::span<const uint8_t>,
+                                              std::string_view, const StagedThumb&, uint64_t,
                                               const NodeExtras*);
-    friend VaultResult attach_video_prestaged(Vault& v, std::string_view,
-                                              std::span<const uint8_t>, std::string_view,
-                                              const StagedVideoInfo&, uint64_t,
+    friend VaultResult attach_video_prestaged(Vault& v, std::string_view, std::span<const uint8_t>,
+                                              std::string_view, const StagedVideoInfo&, uint64_t,
                                               const NodeExtras*);
     friend VaultResult commit_staged(Vault& v);
 
-    [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
+    [[nodiscard]] bool is_unlocked() const noexcept
+    {
+        return unlocked_;
+    }
     friend bool vault_is_read_only(const Vault& v) noexcept;
+    friend bool vault_uses_directory_storage(const Vault& v) noexcept;
 
     // Phase 99: true when this vault's index blob + master-key wrap are sealed
     // with the context-bound AEAD (header FLAG_CONTEXT_BOUND_CHUNKS). A clear
@@ -216,9 +223,9 @@ public:
     // Encrypt and store `file_data` as an image named `filename` in the gallery
     // `gallery_path` (root is ""). The target may also hold sub-galleries
     // (Phase 46). AlreadyExists if the name is taken.
-    [[nodiscard]] VaultResult add_image(std::string_view         gallery_path,
+    [[nodiscard]] VaultResult add_image(std::string_view gallery_path,
                                         std::span<const uint8_t> file_data,
-                                        std::string_view         filename);
+                                        std::string_view filename);
 
     // Decrypt the image described by `node` into mlock'd memory. AuthFailed if the
     // chunk fails authentication (tamper / corruption).
@@ -233,10 +240,10 @@ public:
     // poster stay empty until the decoder (PR4) fills them. `chunk_size` defaults to
     // VIDEO_CHUNK_SIZE; a smaller value (tests) forces the multi-chunk path. Returns
     // InvalidArg for a non-MP4/MKV container.
-    [[nodiscard]] VaultResult add_video(std::string_view         gallery_path,
+    [[nodiscard]] VaultResult add_video(std::string_view gallery_path,
                                         std::span<const uint8_t> file_data,
-                                        std::string_view         filename,
-                                        uint32_t                 chunk_size = VIDEO_CHUNK_SIZE);
+                                        std::string_view filename,
+                                        uint32_t chunk_size = VIDEO_CHUNK_SIZE);
 
     // Decrypt + concatenate all of a video node's chunks into mlock'd memory.
     [[nodiscard]] VaultResult read_video(const IndexNode& node, crypto::SecureBytes& out) const;
@@ -289,12 +296,16 @@ public:
     // gallery_sort_key/set_gallery_sort above.
     friend VaultResult rename_node(Vault& v, std::string_view gallery_path,
                                    std::string_view old_name, std::string_view new_name);
+    friend VaultResult move_node_within(Vault& v, std::string_view source_gallery,
+                                        std::string_view name, std::string_view destination_gallery,
+                                        std::string_view destination_name);
 
     // Replace a node's tag list (gallery OR image). Tags are normalised: each trimmed
     // of surrounding whitespace, empties dropped, de-duplicated case-insensitively
     // (first occurrence's casing kept). Persisted via the crash-safe index swap.
     // Locked if not unlocked; NotFound if node_path doesn't resolve.
-    [[nodiscard]] VaultResult set_tags(std::string_view node_path, const std::vector<std::string>& tags);
+    [[nodiscard]] VaultResult set_tags(std::string_view node_path,
+                                       const std::vector<std::string>& tags);
 
     // Add one tag (no-op success if already present case-insensitively). InvalidArg
     // if the tag is empty/whitespace after trimming.
@@ -333,18 +344,15 @@ public:
     // Batch media removal (duplicate finder): erase every media node named by
     // `node_paths`, then ONE commit_index() + one auto_reclaim_space(). Kept a
     // free friend to keep Vault under the cpp:S1448 method cap.
-    friend VaultResult remove_media_batch(Vault& v,
-                                          std::span<const std::string> node_paths,
+    friend VaultResult remove_media_batch(Vault& v, std::span<const std::string> node_paths,
                                           RemoveBatchStats* stats);
 
-    friend VaultResult remove_nodes_batch(Vault& v,
-                                          std::span<const std::string> node_paths,
+    friend VaultResult remove_nodes_batch(Vault& v, std::span<const std::string> node_paths,
                                           RemoveBatchStats* stats);
 
     // Batch favorite set (Phase 68 multiselect): flip every resolving path to
     // `value`, ONE commit_index(). Kept a free friend for the same S1448 reason.
-    friend VaultResult set_favorites_batch(Vault& v,
-                                           std::span<const std::string> node_paths,
+    friend VaultResult set_favorites_batch(Vault& v, std::span<const std::string> node_paths,
                                            bool value);
 
     // Batch tag add/remove (Phase 73 non-blocking tagging): apply `tag` to every
@@ -359,8 +367,7 @@ public:
     // migration pass costs one index write instead of one per node.
     friend VaultResult apply_video_probe(Vault& v, std::string_view node_path,
                                          const VideoProbeApply& probe, bool sync);
-    friend VaultResult apply_image_animated(Vault& v, std::string_view node_path,
-                                            bool animated);
+    friend VaultResult apply_image_animated(Vault& v, std::string_view node_path, bool animated);
     friend VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
                                          std::span<const uint8_t> thumb_jpeg, bool sync);
     friend VaultResult apply_video_poster(Vault& v, std::string_view node_path,
@@ -390,7 +397,10 @@ public:
     // (serialize + enqueue, async durability) instead of committing
     // synchronously. Null (the default) = synchronous commit, exactly the
     // pre-Phase-50 behavior. Main-thread only.
-    void set_commit_router(CommitLane* lane) noexcept { commit_router_ = lane; }
+    void set_commit_router(CommitLane* lane) noexcept
+    {
+        commit_router_ = lane;
+    }
 
     // Compact the vault IN PLACE (Phase 60): pack live chunks down into dead
     // space (deleted chunks + superseded index blobs), commit the index in
@@ -421,7 +431,7 @@ public:
     // path resolves to the root. Returns nullptr if any segment is missing.
     // Phase 58: const overload used by ImageViewer::on_vault_changed to re-resolve
     // collection album paths after a vault mutation.
-    [[nodiscard]] IndexNode*       resolve_node(std::string_view path);
+    [[nodiscard]] IndexNode* resolve_node(std::string_view path);
     [[nodiscard]] const IndexNode* resolve_node(std::string_view path) const;
 
     // Flip a node's favorite flag (gallery OR image), list favorites, query waste,
@@ -444,19 +454,19 @@ private:
     [[nodiscard]] bool write_header();
     // Resolve a slash-separated gallery path to a node (nullptr if missing /
     // not a gallery). Empty path resolves to the root.
-    [[nodiscard]] IndexNode*       find_gallery(std::string_view path);
+    [[nodiscard]] IndexNode* find_gallery(std::string_view path);
     [[nodiscard]] const IndexNode* find_gallery(std::string_view path) const;
 
     void reset() noexcept;  // close file, wipe key, clear state
 
-    std::string                            path_;
-    std::FILE*                             fp_ = nullptr;
+    std::string path_;
+    std::FILE* fp_ = nullptr;
     // Phase 50: dedicated read-only handle. All const read paths (read_image /
     // read_thumbnail / read_video / read_thumb_span / VideoSource streaming) use
     // this so a background stage/commit append on fp_ can never share a file
     // position with a main-thread read. Opened by create()/open(), closed by
     // reset(). Chunks are immutable once appended, so reads need no lock.
-    std::FILE*                             read_fp_ = nullptr;
+    std::FILE* read_fp_ = nullptr;
     // Phase 58: dedicated handle for BACKGROUND thumbnail reads (DecodeWorker
     // fetch stage). read_fp_ stays main-thread-only (read_image / read_video /
     // VideoSource / FileOpJob), so thumb I/O can never stall video streaming or
@@ -465,41 +475,46 @@ private:
     // thumb_fp_ under this mutex BEFORE wiping the master key, so an in-flight
     // fetch either completes against valid state or observes Locked. Never
     // taken together with write_mutex_/header_mutex_ (no nesting, no ordering).
-    std::FILE*                             thumb_fp_ = nullptr;
+    std::FILE* thumb_fp_ = nullptr;
     mutable std::mutex thumb_mutex_;
     // Phase 50: serialises ALL writes to fp_ (chunk appends from stage_*,
     // index slot writes from the commit lane / commit_index). unique_ptr keeps
     // Vault movable. Held for one whole chunk per acquisition — never released
     // mid-chunk (an index-blob append at EOF would interleave into the
     // half-written chunk).
-    std::unique_ptr<std::mutex>            write_mutex_;
+    std::unique_ptr<std::mutex> write_mutex_;
     // Phase 50: guards index-slot fields (header_.slot[*] and header_.active_slot)
     // which can race between the main thread reading/writing and the commit lane
     // thread reading in commit_plain_blob. Immutable-after-unlock fields (salt, kdf,
     // wrapped key, flags) need no guard and are never modified after create/unlock.
-    std::unique_ptr<std::mutex>            header_mutex_;
-    Header                                 header_;
-    bool                                   unlocked_ = false;
+    std::unique_ptr<std::mutex> header_mutex_;
+    Header header_;
+    bool unlocked_ = false;
     crypto::SecureBuffer<crypto::KEY_SIZE> master_key_;
     // Phase 99: the session KEK, captured at unlock/change/create so the
     // v1→v2 migration can re-seal the master-key wrap with its new AD without
     // re-deriving from the password. As secret as the master key, held only
     // while unlocked and wiped at lock/reset (Phase A boundary).
     crypto::SecureBuffer<crypto::KEY_SIZE> kek_;
-    bool                                   kek_valid_ = false;
-    IndexNode                              root_ = IndexNode::gallery("");
-    std::vector<SavedSearch>               saved_searches_;  // vault-global (Phase 18)
-    VaultSettings                          settings_;        // vault-global (Phase 49)
+    bool kek_valid_ = false;
+    IndexNode root_ = IndexNode::gallery("");
+    std::vector<SavedSearch> saved_searches_;  // vault-global (Phase 18)
+    VaultSettings settings_;                   // vault-global (Phase 49)
     // Phase 50: commit router hook. While the import queue is active, this points
     // to a CommitLane for asynchronous index commits. Null = synchronous commits.
     // Main-thread only.
-    CommitLane*                            commit_router_ = nullptr;
+    CommitLane* commit_router_ = nullptr;
     // Phase 111: non-null for an experimental v3 directory vault. The existing
     // public read facade remains stable while storage dispatch stays centralized.
-    std::unique_ptr<v3::ReadSession>       v3_;
+    std::unique_ptr<v3::ReadSession> v3_;
 };
 
 [[nodiscard]] bool vault_is_read_only(const Vault& v) noexcept;
+[[nodiscard]] bool vault_uses_directory_storage(const Vault& v) noexcept;
+[[nodiscard]] VaultResult move_node_within(Vault& v, std::string_view source_gallery,
+                                           std::string_view name,
+                                           std::string_view destination_gallery,
+                                           std::string_view destination_name);
 
 // Phase 99 (OSV-AUD-004): a stored chunk's decrypt context — the offset/length
 // span PLUS the logical identity the AEAD binds (owner node_id, per-record id,
@@ -525,8 +540,7 @@ using vault::ChunkRef;
 // errors. ONE commit_index() for the whole batch (none if nothing was removed),
 // then one auto_reclaim_space(). Locked if locked; IoError if the commit fails
 // (tree already mutated — same contract as remove_image's failed commit).
-[[nodiscard]] VaultResult remove_media_batch(Vault& v,
-                                             std::span<const std::string> node_paths,
+[[nodiscard]] VaultResult remove_media_batch(Vault& v, std::span<const std::string> node_paths,
                                              RemoveBatchStats* stats = nullptr);
 
 // Batch node removal (Phase 74 multi-select delete): erase every node named by
@@ -536,16 +550,14 @@ using vault::ChunkRef;
 // commit_index() for the whole batch (none if nothing was removed), then one
 // auto_reclaim_space(). Locked if locked; IoError if the commit fails (tree
 // already mutated — same contract as remove_media_batch).
-[[nodiscard]] VaultResult remove_nodes_batch(Vault& v,
-                                             std::span<const std::string> node_paths,
+[[nodiscard]] VaultResult remove_nodes_batch(Vault& v, std::span<const std::string> node_paths,
                                              RemoveBatchStats* stats = nullptr);
 
 // Batch favorite set (Phase 68): set every resolving path's favorite flag to
 // `value` (galleries and media alike); non-resolving paths are skipped, not
 // errors. ONE commit_index() for the whole batch — and none at all when no
 // node actually changed. Locked if locked; IoError if the commit fails.
-[[nodiscard]] VaultResult set_favorites_batch(Vault& v,
-                                              std::span<const std::string> node_paths,
+[[nodiscard]] VaultResult set_favorites_batch(Vault& v, std::span<const std::string> node_paths,
                                               bool value);
 
 // Batch tag add/remove (Phase 73): add/remove `tag` to/from every resolving path.
@@ -627,8 +639,7 @@ using vault::ChunkRef;
 // Set an image node's animated flag WITHOUT committing the index. Ok (no write)
 // when the flag is already correct or the format cannot animate; NotFound if the
 // path does not resolve to an image. Coordinator-thread only.
-[[nodiscard]] VaultResult apply_image_animated(Vault& v, std::string_view node_path,
-                                               bool animated);
+[[nodiscard]] VaultResult apply_image_animated(Vault& v, std::string_view node_path, bool animated);
 
 // Phase 75: Append a fresh thumbnail chunk and REPOINT the node's span — the
 // superseded chunk becomes dead ciphertext for compact. Unlike apply_video_probe's
@@ -637,8 +648,7 @@ using vault::ChunkRef;
 // IoError on chunk append failure; InvalidArg on an empty blob. Coordinator-thread
 // only — mutates the tree and appends to fp_. `sync` — see apply_video_probe.
 [[nodiscard]] VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
-                                            std::span<const uint8_t> thumb_jpeg,
-                                            bool sync = true);
+                                            std::span<const uint8_t> thumb_jpeg, bool sync = true);
 
 // Phase 75: Append a fresh poster chunk and REPOINT the node's span — the
 // superseded chunk becomes dead ciphertext for compact. REPLACES an existing span.

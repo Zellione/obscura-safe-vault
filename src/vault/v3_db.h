@@ -2,6 +2,7 @@
 
 #include "crypto/crypto_sizes.h"
 #include "crypto/secure_string.h"
+#include "vault/index.h"
 #include "vault/v3_crypto_spec.h"
 
 #include <filesystem>
@@ -49,6 +50,14 @@ struct NodeRecord {
 };
 
 struct ObjectRecord {
+    ObjectRecord() = default;
+    ObjectRecord(Id object, Id node, ObjectRole object_role, uint64_t encrypted, // NOSONAR cpp:S107 -- mirrors the fixed objects row
+                 uint64_t plaintext, uint32_t frame_limit, uint32_t frames,
+                 uint64_t generation) noexcept
+        : object_id(object), node_id(node), role(object_role), encrypted_length(encrypted),
+          plaintext_length(plaintext), frame_plain_limit(frame_limit), frame_count(frames),
+          creation_generation(generation)
+    {}
     Id object_id{};
     Id node_id{};
     ObjectRole role = ObjectRole::OriginalImage;
@@ -104,7 +113,7 @@ template <typename T> struct DbResult {
     T value{};
 };
 
-class Database {
+class Database { // NOSONAR cpp:S1448 -- typed repositories intentionally share one SQLCipher handle
 public:
     struct OpenResult;
 
@@ -113,42 +122,51 @@ public:
     Database(Database&& other) noexcept;
     Database& operator=(Database&& other) noexcept;
 
+    [[nodiscard]] static OpenResult create(const std::filesystem::path& path,
+                                           std::span<const uint8_t, crypto::KEY_SIZE> database_key,
+                                           const Id& root_node_id) noexcept;
     [[nodiscard]] static OpenResult
-    create(const std::filesystem::path& path,
-           std::span<const uint8_t, crypto::KEY_SIZE> database_key,
-           const Id& root_node_id) noexcept;
-    [[nodiscard]] static OpenResult
-    open(const std::filesystem::path& path,
-         std::span<const uint8_t, crypto::KEY_SIZE> database_key,
-         bool writable) noexcept;
+    create_in_root(const VaultRoot& root, std::span<const uint8_t, crypto::KEY_SIZE> database_key,
+                   const Id& root_node_id) noexcept;
+    [[nodiscard]] static OpenResult open(const std::filesystem::path& path,
+                                         std::span<const uint8_t, crypto::KEY_SIZE> database_key,
+                                         bool writable) noexcept;
     [[nodiscard]] static OpenResult
     open_read_only(const VaultRoot& root,
                    std::span<const uint8_t, crypto::KEY_SIZE> database_key) noexcept;
+    [[nodiscard]] static OpenResult
+    open_writable(const VaultRoot& root,
+                  std::span<const uint8_t, crypto::KEY_SIZE> database_key) noexcept;
 
     [[nodiscard]] DbStatus insert_node(const NodeRecord& node) noexcept;
-    [[nodiscard]] DbResult<std::vector<NodeRecord>> list_children(const Id& parent_id) const noexcept;
+    [[nodiscard]] DbResult<std::vector<NodeRecord>>
+    list_children(const Id& parent_id) const noexcept;
     [[nodiscard]] DbResult<std::optional<NodeRecord>> find_node(const Id& node_id) const noexcept;
-    [[nodiscard]] DbResult<std::vector<NodeRecord>> search_nodes(std::string_view term) const noexcept;
+    [[nodiscard]] DbResult<std::vector<NodeRecord>>
+    search_nodes(std::string_view term) const noexcept;
     [[nodiscard]] DbStatus insert_object(const ObjectRecord& object) noexcept;
     [[nodiscard]] DbResult<std::vector<ObjectRecord>> object_references() const noexcept;
     // Phase 109 mutation primitives. The object reference and generation change are
     // committed in one SQL transaction; callers must publish the immutable file first.
     [[nodiscard]] DbStatus commit_object_create(ObjectRecord object) noexcept;
-    [[nodiscard]] DbResult<std::optional<Id>>
-    commit_object_replace(ObjectRecord object) noexcept;
-    [[nodiscard]] DbResult<std::optional<Id>>
-    commit_object_delete(const Id& node_id, ObjectRole role) noexcept;
+    [[nodiscard]] DbResult<std::optional<Id>> commit_object_replace(ObjectRecord object) noexcept;
+    [[nodiscard]] DbResult<std::optional<Id>> commit_object_delete(const Id& node_id,
+                                                                   ObjectRole role) noexcept;
     [[nodiscard]] DbResult<bool> object_is_referenced(const Id& object_id) const noexcept;
     [[nodiscard]] DbStatus add_tag(int64_t tag_id, std::string_view display_name,
                                    std::string_view canonical_name) noexcept;
     [[nodiscard]] DbStatus assign_tag(const Id& node_id, int64_t tag_id) noexcept;
-    [[nodiscard]] DbResult<std::vector<crypto::SecureString>> node_tags(const Id& node_id) const noexcept;
+    [[nodiscard]] DbResult<std::vector<crypto::SecureString>>
+    node_tags(const Id& node_id) const noexcept;
     [[nodiscard]] DbStatus add_tag_category(const TagCategoryRecord& category) noexcept;
     [[nodiscard]] DbResult<std::vector<TagCategoryRecord>> tag_categories() const noexcept;
     [[nodiscard]] DbStatus set_tag_field_value(const TagFieldValueRecord& value) noexcept;
-    [[nodiscard]] DbResult<std::vector<TagFieldValueRecord>> tag_field_values(int64_t tag_id) const noexcept;
-    [[nodiscard]] DbStatus set_tag_description(int64_t tag_id, std::string_view description) noexcept;
-    [[nodiscard]] DbResult<std::optional<crypto::SecureString>> tag_description(int64_t tag_id) const noexcept;
+    [[nodiscard]] DbResult<std::vector<TagFieldValueRecord>>
+    tag_field_values(int64_t tag_id) const noexcept;
+    [[nodiscard]] DbStatus set_tag_description(int64_t tag_id,
+                                               std::string_view description) noexcept;
+    [[nodiscard]] DbResult<std::optional<crypto::SecureString>>
+    tag_description(int64_t tag_id) const noexcept;
     [[nodiscard]] DbResult<std::vector<TagDescriptionRecord>> tag_descriptions() const noexcept;
     [[nodiscard]] DbResult<std::vector<ResolvedTagFieldValueRecord>>
     resolved_tag_field_values() const noexcept;
@@ -156,8 +174,16 @@ public:
     [[nodiscard]] DbResult<SettingsRecord> settings() const noexcept;
     [[nodiscard]] DbStatus add_saved_search(const SavedSearchRecord& search) noexcept;
     [[nodiscard]] DbResult<std::vector<SavedSearchRecord>> saved_searches() const noexcept;
-    [[nodiscard]] DbStatus backup_to(const std::filesystem::path& destination,
-                                     std::span<const uint8_t, crypto::KEY_SIZE> database_key) const noexcept;
+    [[nodiscard]] DbStatus
+    backup_to(const std::filesystem::path& destination,
+              std::span<const uint8_t, crypto::KEY_SIZE> database_key) const noexcept;
+    // Atomically mirrors the logical metadata snapshot while preserving object
+    // references for live nodes. References belonging to removed nodes are
+    // dropped in the same transaction; their immutable files become GC input.
+    [[nodiscard]] DbStatus
+    sync_metadata(const IndexNode& root, const VaultSettings& settings,
+                  std::span<const SavedSearch> searches,
+                  std::span<const ObjectRecord> staged_objects = {}) noexcept;
 
 private:
     friend bool database_healthy(const Database&) noexcept;
@@ -165,8 +191,7 @@ private:
     friend DbStatus set_database_user_version_for_test(Database&, int) noexcept;
     [[nodiscard]] static OpenResult
     open_raw(const std::filesystem::path& path,
-             std::span<const uint8_t, crypto::KEY_SIZE> database_key,
-             int flags) noexcept;
+             std::span<const uint8_t, crypto::KEY_SIZE> database_key, int flags) noexcept;
     explicit Database(sqlite3* handle) noexcept : handle_(handle) {}
     sqlite3* handle_ = nullptr;
 };
@@ -174,8 +199,7 @@ private:
 [[nodiscard]] bool database_healthy(const Database& database) noexcept;
 [[nodiscard]] Id database_root_node_id(const Database& database) noexcept;
 // Test-only migration seam; production never sets versions directly.
-[[nodiscard]] DbStatus set_database_user_version_for_test(Database& database,
-                                                          int version) noexcept;
+[[nodiscard]] DbStatus set_database_user_version_for_test(Database& database, int version) noexcept;
 
 struct Database::OpenResult {
     DbStatus status = DbStatus::IoError;
