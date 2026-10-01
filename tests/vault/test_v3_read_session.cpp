@@ -108,7 +108,6 @@ TEST(v3_header_parse_rejects_reserved_flags_bounds_and_zero_identity)
 
 TEST(v3_header_unwrap_authenticates_vault_identity_and_credentials)
 {
-    constexpr std::array<uint8_t, 2> PASSWORD{'p', 'w'};
     auto raw = make_header();
     vault::v3::V3Header header;
     REQUIRE(vault::v3::parse_v3_header(raw, header) == vault::v3::HeaderStatus::Ok);

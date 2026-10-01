@@ -361,9 +361,9 @@ Database::OpenResult Database::open_read_only(
 {
     const int fd = ::openat(root.native_handle(), "vault.db",
                             O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
-    struct stat st{};
-    if (fd < 0 || ::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 ||
-        (st.st_mode & 0777) != 0600 || st.st_uid != ::geteuid()) {
+    if (struct stat st{}; fd < 0 || ::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
+                          st.st_nlink != 1 || (st.st_mode & 0777) != 0600 ||
+                          st.st_uid != ::geteuid()) {
         if (fd >= 0) ::close(fd);
         return {IoError, std::nullopt};
     }
@@ -540,11 +540,12 @@ DbResult<std::vector<ObjectRecord>> Database::object_references() const noexcept
         const auto frame_plain_limit = optional_integer<uint32_t>(statement.get(), 5);
         const auto frame_count = optional_integer<uint32_t>(statement.get(), 6);
         const auto generation = optional_integer<uint64_t>(statement.get(), 7);
-        if (!role || *role < std::to_underlying(ObjectRole::OriginalImage) ||
-            *role > std::to_underlying(ObjectRole::OriginalVideo) || !encrypted_length ||
-            *encrypted_length == 0 || !plaintext_length || !frame_plain_limit ||
-            *frame_plain_limit == 0 || *frame_plain_limit > 1048576 || !frame_count ||
-            *frame_count == 0 || *frame_count > 1048576 || !generation)
+        if (!role.has_value() || *role < std::to_underlying(ObjectRole::OriginalImage) ||
+            *role > std::to_underlying(ObjectRole::OriginalVideo) ||
+            !encrypted_length.has_value() || *encrypted_length == 0 ||
+            !plaintext_length.has_value() || !frame_plain_limit.has_value() ||
+            *frame_plain_limit == 0 || *frame_plain_limit > 1048576 || !frame_count.has_value() ||
+            *frame_count == 0 || *frame_count > 1048576 || !generation.has_value())
             return {WrongKeyOrCorrupt, {}};
         ObjectRecord object{*object_id,
                             *node_id,
@@ -555,7 +556,7 @@ DbResult<std::vector<ObjectRecord>> Database::object_references() const noexcept
                             *frame_count,
                             *generation};
         if (result.value.size() >= 3'000'000) return {WrongKeyOrCorrupt, {}};
-        result.value.push_back(object);
+        result.value.emplace_back(std::move(object));
     }
     return result;
 }
@@ -911,7 +912,7 @@ DbResult<std::vector<TagDescriptionRecord>> Database::tag_descriptions() const n
             values[static_cast<size_t>(column)] =
                 crypto::SecureString(std::string_view{text ? text : "", static_cast<size_t>(size)});
         }
-        result.value.push_back({std::move(values[0]), std::move(values[1])});
+        result.value.emplace_back(std::move(values[0]), std::move(values[1]));
     }
     return result;
 }
@@ -939,8 +940,7 @@ Database::resolved_tag_field_values() const noexcept
             values[static_cast<size_t>(column)] =
                 crypto::SecureString(std::string_view{text ? text : "", static_cast<size_t>(size)});
         }
-        result.value.push_back({std::move(values[0]), std::move(values[1]),
-                                std::move(values[2])});
+        result.value.emplace_back(std::move(values[0]), std::move(values[1]), std::move(values[2]));
     }
     return result;
 }

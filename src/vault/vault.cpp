@@ -44,6 +44,14 @@ Vault::Vault() = default;
 
 namespace {
 
+VaultResult map_v3_read_status(v3::ReadStatus status) noexcept
+{
+    using enum VaultResult;
+    if (status == v3::ReadStatus::Ok) return Ok;
+    if (status == v3::ReadStatus::AuthenticationFailed) return AuthFailed;
+    return BadFormat;
+}
+
 // Phase 99 (OSV-AUD-004): the AD that binds a non-chunk sealed record (the
 // master-key wrap in the header, the slot index blob) to this vault. Owner =
 // the immutable vault_id (NOT the salt, which change_password regenerates and
@@ -481,10 +489,9 @@ Vault::~Vault()
 
 Vault::Vault(Vault&& o) noexcept
     : path_(std::move(o.path_)), fp_(o.fp_), read_fp_(o.read_fp_), thumb_fp_(o.thumb_fp_),
-      thumb_mutex_(std::move(o.thumb_mutex_)), write_mutex_(std::move(o.write_mutex_)),
-      header_mutex_(std::move(o.header_mutex_)), header_(o.header_), unlocked_(o.unlocked_),
-      master_key_(std::move(o.master_key_)), kek_(std::move(o.kek_)),
-      kek_valid_(o.kek_valid_), root_(std::move(o.root_)),
+      write_mutex_(std::move(o.write_mutex_)), header_mutex_(std::move(o.header_mutex_)),
+      header_(o.header_), unlocked_(o.unlocked_), master_key_(std::move(o.master_key_)),
+      kek_(std::move(o.kek_)), kek_valid_(o.kek_valid_), root_(std::move(o.root_)),
       saved_searches_(std::move(o.saved_searches_)), settings_(std::move(o.settings_))
 {
     // Phase 50: A bound CommitLane holds a raw Vault* to &o. App holds the active
@@ -512,7 +519,6 @@ Vault& Vault::operator=(Vault&& o) noexcept
         fp_ = o.fp_;
         read_fp_ = o.read_fp_;
         thumb_fp_ = o.thumb_fp_;
-        thumb_mutex_ = std::move(o.thumb_mutex_);
         write_mutex_ = std::move(o.write_mutex_);
         header_mutex_ = std::move(o.header_mutex_);
         header_ = o.header_;
@@ -545,8 +551,7 @@ void Vault::lock() noexcept
 
     // Quiesce any asynchronous thumbnail/object read before closing the v3
     // database/object boundary and wiping keys. Readers take the same mutex.
-    std::unique_lock<std::mutex> thumb_lock;
-    if (thumb_mutex_) thumb_lock = std::unique_lock<std::mutex>(*thumb_mutex_);
+    const std::unique_lock thumb_lock(thumb_mutex_);
 
     if (v3_) v3_->lock();
     master_key_.wipe();
@@ -567,8 +572,8 @@ void Vault::reset() noexcept
     // Phase 58: Close thumb_fp_ under the mutex BEFORE the master key wipe.
     // This ensures an in-flight thumbnail read either completes against valid state
     // or observes unlocked_ == false. The lock() call below wipes the master key.
-    if (thumb_mutex_) {
-        const std::lock_guard lk(*thumb_mutex_);
+    {
+        const std::lock_guard lk(thumb_mutex_);
         unlocked_ = false;
         if (thumb_fp_ != nullptr) {
             std::fclose(thumb_fp_);
@@ -586,7 +591,6 @@ void Vault::reset() noexcept
         read_fp_ = nullptr;
     }
     write_mutex_.reset();
-    thumb_mutex_.reset();
     path_.clear();
     header_ = Header{};
     settings_ = VaultSettings{};
@@ -676,7 +680,6 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     out.settings_.migrated_thumb_side = static_cast<uint16_t>(image::THUMB_MAX_SIDE);
     out.write_mutex_ = std::make_unique<std::mutex>();
     out.header_mutex_ = std::make_unique<std::mutex>();
-    out.thumb_mutex_ = std::make_unique<std::mutex>();
 
     // Write the initial (empty) index + a valid header via the crash-safe path.
     if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) {
@@ -717,7 +720,6 @@ VaultResult Vault::open(const std::string& path, Vault& out)
         if (opened.status != v3::ReadStatus::Ok || !opened.session) return VaultResult::BadFormat;
         out.path_ = path;
         out.v3_ = std::move(opened.session);
-        out.thumb_mutex_ = std::make_unique<std::mutex>();
         out.unlocked_ = false;
         return VaultResult::Ok;
     }
@@ -776,7 +778,6 @@ VaultResult Vault::open(const std::string& path, Vault& out)
     out.unlocked_ = false;
     out.write_mutex_ = std::make_unique<std::mutex>();
     out.header_mutex_ = std::make_unique<std::mutex>();
-    out.thumb_mutex_ = std::make_unique<std::mutex>();
     return VaultResult::Ok;
 }
 
@@ -1047,8 +1048,7 @@ VaultResult Vault::read_image(const IndexNode& node, crypto::SecureBytes& out) c
     if (!node.is_image()) return InvalidArg;
     if (v3_) {
         const auto status = v3_->read(node, v3::ObjectRole::OriginalImage, out);
-        return status == v3::ReadStatus::Ok ? Ok
-               : status == v3::ReadStatus::AuthenticationFailed ? AuthFailed : BadFormat;
+        return map_v3_read_status(status);
     }
 
     const auto tag = chunk_tag(crypto::ChunkDomain::Data, node, node.meta.data_id);
@@ -1070,13 +1070,11 @@ VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& ou
     if (thumb_len == 0) return NotFound;
 
     if (v3_) {
-        if (!thumb_mutex_) return Locked;
-        const std::lock_guard lk(*thumb_mutex_);
+        const std::lock_guard lk(thumb_mutex_);
         if (!unlocked_) return Locked;
         const auto role = node.is_video() ? v3::ObjectRole::Poster : v3::ObjectRole::Thumbnail;
         const auto status = v3_->read(node, role, out);
-        return status == v3::ReadStatus::Ok ? Ok
-               : status == v3::ReadStatus::AuthenticationFailed ? AuthFailed : BadFormat;
+        return map_v3_read_status(status);
     }
 
     const auto tag = node.is_video()
@@ -1084,8 +1082,7 @@ VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& ou
                          : chunk_tag(crypto::ChunkDomain::Thumb, node, node.meta.thumb_id);
 
     // Phase 58: Use dedicated thumb_fp_ + mutex for thread-safe background reads.
-    if (!thumb_mutex_) return Locked;
-    const std::lock_guard lk(*thumb_mutex_);
+    const std::lock_guard lk(thumb_mutex_);
     if (!unlocked_) return Locked;
     if (ChunkStore store(thumb_fp_, master_key_.as_span(), framed_chunks(header_));
         !store.read_chunk({thumb_off, thumb_len}, tag, out)) {
@@ -1148,16 +1145,14 @@ VaultResult read_thumb_span(const Vault& v, const ChunkRef& ref, crypto::SecureB
     if (ref.length == 0) return InvalidArg;
 
     // Phase 58: Use dedicated thumb_fp_ + mutex for thread-safe background reads.
-    if (!v.thumb_mutex_) return Locked;
-    const std::lock_guard lk(*v.thumb_mutex_);
+    const std::lock_guard lk(v.thumb_mutex_);
     if (!v.unlocked_) return Locked;
 
     if (v.v3_) {
         const auto role = ref.domain == crypto::ChunkDomain::Poster
                               ? v3::ObjectRole::Poster : v3::ObjectRole::Thumbnail;
         const auto status = v.v3_->read_id(ref.node_id, role, out);
-        return status == v3::ReadStatus::Ok ? Ok
-               : status == v3::ReadStatus::AuthenticationFailed ? AuthFailed : BadFormat;
+        return map_v3_read_status(status);
     }
 
     crypto::ChunkTag tag;
@@ -1221,8 +1216,7 @@ VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) c
     if (!node.is_video()) return InvalidArg;
     if (v3_) {
         const auto status = v3_->read(node, v3::ObjectRole::OriginalVideo, out);
-        return status == v3::ReadStatus::Ok ? Ok
-               : status == v3::ReadStatus::AuthenticationFailed ? AuthFailed : BadFormat;
+        return map_v3_read_status(status);
     }
 
     if (!out.resize(node.vmeta.orig_size)) return IoError;

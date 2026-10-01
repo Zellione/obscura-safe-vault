@@ -70,8 +70,8 @@ int64_t VideoSource::read(uint64_t offset, std::span<uint8_t> dst) noexcept
 VideoSource VideoSource::open(const vault::Vault& v, const vault::IndexNode& node)
 {
     if (v.v3_) {
-        const auto info = v.v3_->object_for(node.node_id, vault::v3::ObjectRole::OriginalVideo);
-        if (info) {
+        if (const auto info =
+                v.v3_->object_for(node.node_id, vault::v3::ObjectRole::OriginalVideo)) {
             auto opened = VideoObjectSource::open(v.v3_->root_handle_,
                                                    v.v3_->master_key_.as_span(), *info);
             if (opened.source)

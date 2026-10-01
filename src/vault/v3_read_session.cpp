@@ -18,7 +18,7 @@ uint64_t cache_identity(const Id& id, uint8_t role) noexcept
 bool valid_media_values(const NodeRecord& record) noexcept
 {
     const auto value_or_unknown = [](const std::optional<int>& value, int maximum) {
-        return !value || (*value >= 0 && (*value <= maximum || *value == 0xff));
+        return !value.has_value() || (*value >= 0 && (*value <= maximum || *value == 0xff));
     };
     if (record.type == NodeType::Image)
         return value_or_unknown(record.media_format, std::to_underlying(ImageFormat::AVIF));
@@ -26,7 +26,7 @@ bool valid_media_values(const NodeRecord& record) noexcept
         return value_or_unknown(record.media_format, std::to_underlying(VideoContainer::RM)) &&
                value_or_unknown(record.codec, std::to_underlying(VideoCodec::RV40)) &&
                record.duration_ms.value_or(0) <= std::numeric_limits<uint64_t>::max() / 1000;
-    return !record.media_format && !record.codec;
+    return !record.media_format.has_value() && !record.codec.has_value();
 }
 
 ReadStatus map_db(DbStatus status) noexcept
@@ -42,11 +42,11 @@ ReadStatus map_db(DbStatus status) noexcept
 
 IndexNode node_from_record(const NodeRecord& record)
 {
-    IndexNode node = record.type == NodeType::Gallery
-                         ? IndexNode::gallery(record.display_name.view())
-                         : record.type == NodeType::Image
-                               ? IndexNode::image(record.display_name.view())
-                               : IndexNode::video(record.display_name.view());
+    IndexNode node = IndexNode::gallery(record.display_name.view());
+    if (record.type == NodeType::Image)
+        node = IndexNode::image(record.display_name.view());
+    else if (record.type == NodeType::Video)
+        node = IndexNode::video(record.display_name.view());
     node.node_id = record.node_id;
     node.favorite = record.favorite;
     if (node.is_gallery()) node.sort_key = static_cast<SortKey>(record.sort_key.value_or(0));
@@ -70,6 +70,60 @@ IndexNode node_from_record(const NodeRecord& record)
     return node;
 }
 
+void apply_object_markers(IndexNode& node, const std::vector<ObjectRecord>& objects)
+{
+    using enum ObjectRole;
+    for (const auto& object : objects) {
+        if (object.node_id != node.node_id) continue;
+        if (node.is_image() && object.role == Thumbnail) {
+            node.meta.thumb_offset = cache_identity(node.node_id, 2);
+            node.meta.thumb_length = object.encrypted_length;
+        } else if (node.is_image() && object.role == OriginalImage) {
+            node.meta.data_offset = cache_identity(node.node_id, 1);
+            node.meta.data_length = object.encrypted_length;
+        } else if (node.is_video() && object.role == Poster) {
+            node.vmeta.poster_offset = cache_identity(node.node_id, 3);
+            node.vmeta.poster_length = object.encrypted_length;
+        } else if (node.is_video() && object.role == OriginalVideo) {
+            node.vmeta.orig_size = object.plaintext_length;
+            node.vmeta.chunk_size = object.frame_plain_limit;
+            node.vmeta.chunks.resize(object.frame_count);
+        }
+    }
+    for (auto& child : node.children)
+        apply_object_markers(child, objects);
+}
+
+bool load_settings(Database& database, VaultSettings& settings) noexcept
+{
+    auto db_settings = database.settings();
+    if (db_settings.status != DbStatus::Ok || db_settings.value.default_sort > 7) return false;
+    settings.default_sort = static_cast<SortKey>(db_settings.value.default_sort);
+    settings.tiles_show_tags = db_settings.value.tiles_show_tags;
+    settings.migrated_index_version = db_settings.value.migrated_index_version;
+    settings.migrated_probe_caps = db_settings.value.migrated_probe_caps;
+    settings.migrated_thumb_side = db_settings.value.migrated_thumb_side;
+
+    auto categories = database.tag_categories();
+    if (categories.status != DbStatus::Ok) return false;
+    for (auto& source : categories.value)
+        settings.categories.emplace_back(std::move(source.display_name), source.swatch,
+                                         std::move(source.fields));
+
+    auto descriptions = database.tag_descriptions();
+    if (descriptions.status != DbStatus::Ok) return false;
+    for (auto& source : descriptions.value)
+        settings.tag_descriptions.emplace_back(std::move(source.tag),
+                                               std::move(source.description));
+
+    auto field_values = database.resolved_tag_field_values();
+    if (field_values.status != DbStatus::Ok) return false;
+    for (auto& source : field_values.value)
+        settings.tag_field_values.emplace_back(std::move(source.tag), std::move(source.field),
+                                               std::move(source.value));
+    return true;
+}
+
 } // namespace
 
 ReadSession::OpenResult ReadSession::open(const std::filesystem::path& path)
@@ -82,7 +136,7 @@ ReadSession::OpenResult ReadSession::open(const std::filesystem::path& path)
     const auto parsed = parse_v3_header(raw, header);
     if (parsed == HeaderStatus::UnsupportedVersion) return {ReadStatus::UnsupportedVersion, {}};
     if (parsed != HeaderStatus::Ok) return {ReadStatus::BadFormat, {}};
-    auto session = std::unique_ptr<ReadSession>(new ReadSession);
+    auto session = std::make_unique<ReadSession>();
     session->root_handle_ = std::move(*root);
     session->header_ = header;
     return {ReadStatus::Ok, std::move(session)};
@@ -127,7 +181,8 @@ bool ReadSession::build_children(IndexNode& parent, const Id& parent_id,
     if (children.status != DbStatus::Ok) return false;
     for (const auto& record : children.value) {
         if (++count > 1'000'000 || !is_safe_node_name(record.display_name.view())) return false;
-        if ((record.sort_key && *record.sort_key > std::to_underlying(SortKey::Insertion)) ||
+        if ((record.sort_key.has_value() &&
+             *record.sort_key > std::to_underlying(SortKey::Insertion)) ||
             !valid_media_values(record))
             return false;
         IndexNode child = node_from_record(record);
@@ -136,7 +191,7 @@ bool ReadSession::build_children(IndexNode& parent, const Id& parent_id,
         child.tags = std::move(tags.value);
         if (child.is_gallery() && !build_children(child, record.node_id, depth + 1, count))
             return false;
-        parent.children.push_back(std::move(child));
+        parent.children.emplace_back(std::move(child));
     }
     return true;
 }
@@ -145,16 +200,15 @@ bool ReadSession::materialize() noexcept
 {
     const Id root_id = database_root_node_id(*database_);
     auto root_record = database_->find_node(root_id);
-    if (root_record.status != DbStatus::Ok || !root_record.value ||
-        root_record.value->type != NodeType::Gallery || root_record.value->parent_id)
+    if (root_record.status != DbStatus::Ok || !root_record.value.has_value() ||
+        root_record.value->type != NodeType::Gallery || root_record.value->parent_id.has_value())
         return false;
     root_ = node_from_record(*root_record.value);
     root_.name = "";
     auto root_tags = database_->node_tags(root_id);
     if (root_tags.status != DbStatus::Ok) return false;
     root_.tags = std::move(root_tags.value);
-    size_t count = 1;
-    if (!build_children(root_, root_id, 0, count)) return false;
+    if (size_t count = 1; !build_children(root_, root_id, 0, count)) return false;
     auto refs = database_->object_references();
     if (refs.status != DbStatus::Ok) return false;
     if (refs.value.size() > 3'000'000) return false;
@@ -164,62 +218,12 @@ bool ReadSession::materialize() noexcept
             return false;
     }
     objects_ = std::move(refs.value);
-    const auto apply_object_markers = [&](auto&& self, IndexNode& node) -> void {
-        for (const auto& object : objects_) {
-            if (object.node_id != node.node_id) continue;
-            if (node.is_image() && object.role == ObjectRole::Thumbnail)
-            {
-                node.meta.thumb_offset = cache_identity(node.node_id, 2);
-                node.meta.thumb_length = object.encrypted_length;
-            }
-            if (node.is_image() && object.role == ObjectRole::OriginalImage) {
-                node.meta.data_offset = cache_identity(node.node_id, 1);
-                node.meta.data_length = object.encrypted_length;
-            }
-            if (node.is_video() && object.role == ObjectRole::Poster)
-            {
-                node.vmeta.poster_offset = cache_identity(node.node_id, 3);
-                node.vmeta.poster_length = object.encrypted_length;
-            }
-            if (node.is_video() && object.role == ObjectRole::OriginalVideo) {
-                node.vmeta.orig_size = object.plaintext_length;
-                node.vmeta.chunk_size = object.frame_plain_limit;
-                node.vmeta.chunks.resize(object.frame_count);
-            }
-        }
-        for (auto& child : node.children) self(self, child);
-    };
-    apply_object_markers(apply_object_markers, root_);
-    auto db_settings = database_->settings();
-    if (db_settings.status != DbStatus::Ok || db_settings.value.default_sort > 7) return false;
-    settings_.default_sort = static_cast<SortKey>(db_settings.value.default_sort);
-    settings_.tiles_show_tags = db_settings.value.tiles_show_tags;
-    settings_.migrated_index_version = db_settings.value.migrated_index_version;
-    settings_.migrated_probe_caps = db_settings.value.migrated_probe_caps;
-    settings_.migrated_thumb_side = db_settings.value.migrated_thumb_side;
-    auto categories = database_->tag_categories();
-    if (categories.status != DbStatus::Ok) return false;
-    for (auto& source : categories.value) {
-        TagCategory category;
-        category.name = std::move(source.display_name);
-        category.swatch = source.swatch;
-        category.fields = std::move(source.fields);
-        settings_.categories.push_back(std::move(category));
-    }
-    auto descriptions = database_->tag_descriptions();
-    if (descriptions.status != DbStatus::Ok) return false;
-    for (auto& source : descriptions.value)
-        settings_.tag_descriptions.push_back(
-            {std::move(source.tag), std::move(source.description)});
-    auto field_values = database_->resolved_tag_field_values();
-    if (field_values.status != DbStatus::Ok) return false;
-    for (auto& source : field_values.value)
-        settings_.tag_field_values.push_back(
-            {std::move(source.tag), std::move(source.field), std::move(source.value)});
+    apply_object_markers(root_, objects_);
+    if (!load_settings(*database_, settings_)) return false;
     auto searches = database_->saved_searches();
     if (searches.status != DbStatus::Ok) return false;
     for (auto& source : searches.value)
-        saved_searches_.push_back({std::move(source.display_name), std::move(source.query)});
+        saved_searches_.emplace_back(std::move(source.display_name), std::move(source.query));
     return true;
 }
 
@@ -245,14 +249,14 @@ ReadStatus ReadSession::read_id(const Id& node_id, ObjectRole role,
 {
     if (!unlocked_) return ReadStatus::IoError;
     const auto info = object_for(node_id, role);
-    if (!info) return ReadStatus::BadFormat;
+    if (!info.has_value()) return ReadStatus::BadFormat;
     auto reader = ObjectReader::open(root_handle_, master_key_.as_span(), *info);
     if (reader.status == ObjectStatus::AuthenticationFailed) return ReadStatus::AuthenticationFailed;
     if (reader.status != ObjectStatus::Ok || !reader.reader) return ReadStatus::BadFormat;
     const auto status = reader.reader->read_all(out);
-    return status == ObjectStatus::Ok ? ReadStatus::Ok
-           : status == ObjectStatus::AuthenticationFailed ? ReadStatus::AuthenticationFailed
-                                                          : ReadStatus::BadFormat;
+    if (status == ObjectStatus::Ok) return ReadStatus::Ok;
+    if (status == ObjectStatus::AuthenticationFailed) return ReadStatus::AuthenticationFailed;
+    return ReadStatus::BadFormat;
 }
 
 void ReadSession::lock() noexcept

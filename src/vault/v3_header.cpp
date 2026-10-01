@@ -43,33 +43,35 @@ bool nonzero(const Id& id) noexcept
 HeaderStatus parse_v3_header(std::span<const uint8_t, V3_HEADER_SIZE> raw,
                              V3Header& out) noexcept
 {
-    constexpr std::array<uint8_t, 8> MAGIC{'O','S','V','3','D','I','R',0};
-    if (!std::ranges::equal(MAGIC, raw.first<8>())) return HeaderStatus::Invalid;
-    if (get16(raw, 8) != FORMAT_VERSION) return HeaderStatus::UnsupportedVersion;
-    if (get16(raw, 10) != V3_HEADER_SIZE) return HeaderStatus::Invalid;
+    using enum HeaderStatus;
+    if (constexpr std::array<uint8_t, 8> MAGIC{'O', 'S', 'V', '3', 'D', 'I', 'R', 0};
+        !std::ranges::equal(MAGIC, raw.first<8>()))
+        return Invalid;
+    if (get16(raw, 8) != FORMAT_VERSION) return UnsupportedVersion;
+    if (get16(raw, 10) != V3_HEADER_SIZE) return Invalid;
     const uint32_t flags = get32(raw, 12);
-    if (flags != 0) return HeaderStatus::UnsupportedVersion;
-    if (raw[16] != 0 || raw[45] > 1) return HeaderStatus::Invalid;
+    if (flags != 0) return UnsupportedVersion;
+    if (raw[16] != 0 || raw[45] > 1) return Invalid;
     const crypto::KdfParams kdf{get32(raw, 17), get32(raw, 21), get32(raw, 25)};
     if (kdf.t_cost == 0 || kdf.t_cost > crypto::MAX_KDF_T_COST || kdf.m_cost_kib < 8 ||
         kdf.m_cost_kib > crypto::MAX_KDF_M_COST_KIB || kdf.parallelism == 0 ||
         kdf.parallelism > crypto::MAX_KDF_PARALLELISM)
-        return HeaderStatus::Invalid;
+        return Invalid;
     if (std::ranges::any_of(raw.subspan(134), [](uint8_t byte) { return byte != 0; }))
-        return HeaderStatus::Invalid;
+        return Invalid;
     V3Header parsed;
     parsed.flags = flags;
     parsed.kdf = kdf;
     parsed.keyfile_required = raw[45] != 0;
-    std::copy_n(raw.begin() + 29, parsed.salt.size(), parsed.salt.begin());
-    std::copy_n(raw.begin() + 46, parsed.nonce.size(), parsed.nonce.begin());
-    std::copy_n(raw.begin() + 70, parsed.wrapped_master_key.size(),
-                parsed.wrapped_master_key.begin());
-    std::copy_n(raw.begin() + 102, parsed.tag.size(), parsed.tag.begin());
-    std::copy_n(raw.begin() + 118, parsed.vault_id.size(), parsed.vault_id.begin());
-    if (!nonzero(parsed.vault_id)) return HeaderStatus::Invalid;
+    std::ranges::copy(raw.subspan(29, parsed.salt.size()), parsed.salt.begin());
+    std::ranges::copy(raw.subspan(46, parsed.nonce.size()), parsed.nonce.begin());
+    std::ranges::copy(raw.subspan(70, parsed.wrapped_master_key.size()),
+                      parsed.wrapped_master_key.begin());
+    std::ranges::copy(raw.subspan(102, parsed.tag.size()), parsed.tag.begin());
+    std::ranges::copy(raw.subspan(118, parsed.vault_id.size()), parsed.vault_id.begin());
+    if (!nonzero(parsed.vault_id)) return Invalid;
     out = parsed;
-    return HeaderStatus::Ok;
+    return Ok;
 }
 
 std::array<uint8_t, V3_MASTER_WRAP_AD_SIZE> master_wrap_ad(const V3Header& header) noexcept
@@ -89,19 +91,19 @@ HeaderStatus unwrap_v3_master_key(const V3Header& header,
                                   std::span<const uint8_t> keyfile,
                                   crypto::SecureBuffer<crypto::KEY_SIZE>& master_key) noexcept
 {
-    if (header.keyfile_required && keyfile.empty()) return HeaderStatus::AuthenticationFailed;
+    using enum HeaderStatus;
+    if (header.keyfile_required && keyfile.empty()) return AuthenticationFailed;
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
-    if (!crypto::derive_key(password, keyfile, header.salt, header.kdf, kek))
-        return HeaderStatus::CryptoError;
+    if (!crypto::derive_key(password, keyfile, header.salt, header.kdf, kek)) return CryptoError;
     std::array<uint8_t, crypto::KEY_SIZE + crypto::TAG_SIZE> sealed{};
     std::copy(header.wrapped_master_key.begin(), header.wrapped_master_key.end(), sealed.begin());
     std::copy(header.tag.begin(), header.tag.end(), sealed.begin() + crypto::KEY_SIZE);
-    const auto ad = master_wrap_ad(header);
-    if (!crypto::open_to(kek.as_span(), header.nonce, sealed, master_key.span(), ad)) {
+    if (const auto ad = master_wrap_ad(header);
+        !crypto::open_to(kek.as_span(), header.nonce, sealed, master_key.span(), ad)) {
         master_key.wipe();
-        return HeaderStatus::AuthenticationFailed;
+        return AuthenticationFailed;
     }
-    return HeaderStatus::Ok;
+    return Ok;
 }
 
 } // namespace vault::v3

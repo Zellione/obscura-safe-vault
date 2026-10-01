@@ -466,7 +466,7 @@ private:
     // fetch either completes against valid state or observes Locked. Never
     // taken together with write_mutex_/header_mutex_ (no nesting, no ordering).
     std::FILE*                             thumb_fp_ = nullptr;
-    std::unique_ptr<std::mutex>            thumb_mutex_;
+    mutable std::mutex thumb_mutex_;
     // Phase 50: serialises ALL writes to fp_ (chunk appends from stage_*,
     // index slot writes from the commit lane / commit_index). unique_ptr keeps
     // Vault movable. Held for one whole chunk per acquisition — never released
