@@ -113,6 +113,11 @@ public:
     [[nodiscard]] std::optional<std::vector<ObjectEntry>> list_objects() const noexcept;
     // Control files have fixed application-owned names; callers never pass user metadata.
     [[nodiscard]] bool read_header(std::span<uint8_t> destination) const noexcept;
+    [[nodiscard]] bool write_header(std::span<const uint8_t> bytes) const noexcept;
+    [[nodiscard]] bool replace_header(std::span<const uint8_t> bytes) const noexcept;
+    // Creation-only rollback. Refuses to remove a path whose inode no longer
+    // matches the descriptor retained by this instance.
+    [[nodiscard]] bool rollback_creation() noexcept;
     [[nodiscard]] bool unlink_staging(std::string_view name) const noexcept;
     [[nodiscard]] std::optional<StagingCleanup>
     cleanup_staging(const WriterLock& writer_lock, int64_t older_than_seconds) const noexcept;

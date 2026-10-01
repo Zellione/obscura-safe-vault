@@ -1,6 +1,6 @@
 # Directory-vault mutations and feature parity (Phase 112)
 
-**Status:** not started
+**Status:** complete
 
 ## Goal
 
@@ -30,3 +30,24 @@ Enable every normal vault mutation against v3 through the transaction coordinato
 ## Acceptance criterion
 
 V3 supports all current user-visible mutations with logical parity, fresh cryptographic identities, crash-consistent publication, secure cancellation/lock behavior, and green Debug/Release/no-AV/ASAN/TSan gates.
+
+## Delivered
+
+- Added opt-in directory-vault creation (`Vault::create_directory`) with exclusive layout
+  creation, durable header/database initialization, verification materialization, and
+  descriptor-identity-checked rollback. Phase 114 remains the deliberate default-format
+  cutover; legacy `Vault::create` is unchanged in this phase.
+- Routed gallery/media CRUD, batch mutations, imports, tags/favorites, tag metadata,
+  searches, settings, migration watermarks, and derived thumbnail/poster replacements
+  through one SQL transaction. Immutable objects publish before their node/role reference;
+  replacements become live in the same commit and abandoned staged objects remain safe GC
+  candidates instead of poisoning later commits.
+- V3 within-vault moves preserve node/object identities and update only metadata. Cross-vault
+  copy/move/combine continues through locked secure buffers and destination staging, minting
+  fresh destination node and object identities. Export keeps the existing explicit-consent,
+  selection-only, atomic no-follow sink.
+- Password/keyfile changes rewrap only the master key and durably replace `vault.header`
+  through staging, file sync, rename, and directory sync; database and objects are untouched.
+- Added backend contract, cold-reopen, unattached-object retry, creation rollback, header
+  authentication, mutation, transfer, and password-change coverage. PDF import remains an
+  explicit parity no-op because no PDF importer exists in either backend.

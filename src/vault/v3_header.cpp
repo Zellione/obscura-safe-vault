@@ -1,6 +1,7 @@
 #include "vault/v3_header.h"
 
 #include "crypto/aead.h"
+#include "crypto/random.h"
 
 #include <algorithm>
 #include <cstring>
@@ -18,7 +19,8 @@ uint16_t get16(std::span<const uint8_t> bytes, size_t off) noexcept
 uint32_t get32(std::span<const uint8_t> bytes, size_t off) noexcept
 {
     uint32_t value = 0;
-    for (unsigned i = 0; i < 4; ++i) value |= static_cast<uint32_t>(bytes[off + i]) << (i * 8);
+    for (unsigned i = 0; i < 4; ++i)
+        value |= static_cast<uint32_t>(bytes[off + i]) << (i * 8);
     return value;
 }
 
@@ -30,7 +32,8 @@ void put16(std::span<uint8_t> bytes, size_t off, uint16_t value) noexcept
 
 void put32(std::span<uint8_t> bytes, size_t off, uint32_t value) noexcept
 {
-    for (unsigned i = 0; i < 4; ++i) bytes[off + i] = static_cast<uint8_t>(value >> (i * 8));
+    for (unsigned i = 0; i < 4; ++i)
+        bytes[off + i] = static_cast<uint8_t>(value >> (i * 8));
 }
 
 bool nonzero(const Id& id) noexcept
@@ -38,10 +41,9 @@ bool nonzero(const Id& id) noexcept
     return std::ranges::any_of(id, [](uint8_t byte) { return byte != 0; });
 }
 
-} // namespace
+}  // namespace
 
-HeaderStatus parse_v3_header(std::span<const uint8_t, V3_HEADER_SIZE> raw,
-                             V3Header& out) noexcept
+HeaderStatus parse_v3_header(std::span<const uint8_t, V3_HEADER_SIZE> raw, V3Header& out) noexcept
 {
     using enum HeaderStatus;
     if (constexpr std::array<uint8_t, 8> MAGIC{'O', 'S', 'V', '3', 'D', 'I', 'R', 0};
@@ -74,6 +76,76 @@ HeaderStatus parse_v3_header(std::span<const uint8_t, V3_HEADER_SIZE> raw,
     return Ok;
 }
 
+std::array<uint8_t, V3_HEADER_SIZE> serialize_v3_header(const V3Header& header) noexcept
+{
+    std::array<uint8_t, V3_HEADER_SIZE> raw{};
+    constexpr std::array<uint8_t, 8> MAGIC{'O', 'S', 'V', '3', 'D', 'I', 'R', 0};
+    std::ranges::copy(MAGIC, raw.begin());
+    put16(raw, 8, FORMAT_VERSION);
+    put16(raw, 10, V3_HEADER_SIZE);
+    put32(raw, 12, header.flags);
+    raw[16] = 0;  // Argon2id
+    put32(raw, 17, header.kdf.t_cost);
+    put32(raw, 21, header.kdf.m_cost_kib);
+    put32(raw, 25, header.kdf.parallelism);
+    std::ranges::copy(header.salt, raw.begin() + 29);
+    raw[45] = header.keyfile_required ? 1 : 0;
+    std::ranges::copy(header.nonce, raw.begin() + 46);
+    std::ranges::copy(header.wrapped_master_key, raw.begin() + 70);
+    std::ranges::copy(header.tag, raw.begin() + 102);
+    std::ranges::copy(header.vault_id, raw.begin() + 118);
+    return raw;
+}
+
+HeaderStatus create_v3_header(std::span<const uint8_t> password, std::span<const uint8_t> keyfile,
+                              const crypto::KdfParams& kdf, V3Header& header,
+                              crypto::SecureBuffer<crypto::KEY_SIZE>& master_key) noexcept
+{
+    using enum HeaderStatus;
+    V3Header created;
+    created.kdf = kdf;
+    created.keyfile_required = !keyfile.empty();
+    if (!crypto::fill_random(created.salt) || !crypto::fill_random(created.nonce) ||
+        !crypto::fill_random(created.vault_id) || !crypto::fill_random(master_key.span()))
+        return CryptoError;
+    crypto::SecureBuffer<crypto::KEY_SIZE> kek;
+    if (!crypto::derive_key(password, keyfile, created.salt, kdf, kek)) {
+        master_key.wipe();
+        return CryptoError;
+    }
+    std::vector<uint8_t> sealed;
+    if (const auto ad = master_wrap_ad(created);
+        !crypto::seal(kek.as_span(), created.nonce, master_key.as_span(), sealed, ad)) {
+        master_key.wipe();
+        return CryptoError;
+    }
+    std::ranges::copy_n(sealed.begin(), crypto::KEY_SIZE, created.wrapped_master_key.begin());
+    std::ranges::copy_n(sealed.begin() + crypto::KEY_SIZE, crypto::TAG_SIZE, created.tag.begin());
+    header = created;
+    return Ok;
+}
+
+HeaderStatus rewrap_v3_header(const V3Header& current,
+                              std::span<const uint8_t, crypto::KEY_SIZE> master_key,
+                              std::span<const uint8_t> password, std::span<const uint8_t> keyfile,
+                              V3Header& replacement) noexcept
+{
+    using enum HeaderStatus;
+    V3Header next = current;
+    next.keyfile_required = !keyfile.empty();
+    if (!crypto::fill_random(next.salt) || !crypto::fill_random(next.nonce)) return CryptoError;
+    crypto::SecureBuffer<crypto::KEY_SIZE> kek;
+    if (!crypto::derive_key(password, keyfile, next.salt, next.kdf, kek)) return CryptoError;
+    std::vector<uint8_t> sealed;
+    if (const auto ad = master_wrap_ad(next);
+        !crypto::seal(kek.as_span(), next.nonce, master_key, sealed, ad))
+        return CryptoError;
+    std::ranges::copy_n(sealed.begin(), crypto::KEY_SIZE, next.wrapped_master_key.begin());
+    std::ranges::copy_n(sealed.begin() + crypto::KEY_SIZE, crypto::TAG_SIZE, next.tag.begin());
+    replacement = next;
+    return Ok;
+}
+
 std::array<uint8_t, V3_MASTER_WRAP_AD_SIZE> master_wrap_ad(const V3Header& header) noexcept
 {
     std::array<uint8_t, V3_MASTER_WRAP_AD_SIZE> ad{};
@@ -86,8 +158,7 @@ std::array<uint8_t, V3_MASTER_WRAP_AD_SIZE> master_wrap_ad(const V3Header& heade
     return ad;
 }
 
-HeaderStatus unwrap_v3_master_key(const V3Header& header,
-                                  std::span<const uint8_t> password,
+HeaderStatus unwrap_v3_master_key(const V3Header& header, std::span<const uint8_t> password,
                                   std::span<const uint8_t> keyfile,
                                   crypto::SecureBuffer<crypto::KEY_SIZE>& master_key) noexcept
 {
@@ -106,4 +177,4 @@ HeaderStatus unwrap_v3_master_key(const V3Header& header,
     return Ok;
 }
 
-} // namespace vault::v3
+}  // namespace vault::v3

@@ -3,12 +3,14 @@
 #include "crypto/aead.h"
 #include "crypto/kdf.h"
 #include "crypto/random.h"
-#include "vault/v3_header.h"
+#include "media/video_source.h"
+#include "vault/transfer.h"
 #include "vault/v3_db.h"
 #include "vault/v3_fs.h"
+#include "vault/v3_header.h"
 #include "vault/v3_object_store.h"
+#include "vault/v3_read_session.h"
 #include "vault/vault.h"
-#include "media/video_source.h"
 
 #include <array>
 #include <cstring>
@@ -26,7 +28,8 @@ void put16(std::span<uint8_t> out, size_t off, uint16_t value)
 
 void put32(std::span<uint8_t> out, size_t off, uint32_t value)
 {
-    for (unsigned i = 0; i < 4; ++i) out[off + i] = static_cast<uint8_t>(value >> (i * 8));
+    for (unsigned i = 0; i < 4; ++i)
+        out[off + i] = static_cast<uint8_t>(value >> (i * 8));
 }
 
 std::array<uint8_t, vault::v3::V3_HEADER_SIZE> make_header()
@@ -44,7 +47,8 @@ std::array<uint8_t, vault::v3::V3_HEADER_SIZE> make_header()
         raw[29 + i] = static_cast<uint8_t>(0x20 + i);
         raw[118 + i] = static_cast<uint8_t>(0x80 + i);
     }
-    for (size_t i = 0; i < 24; ++i) raw[46 + i] = static_cast<uint8_t>(0x40 + i);
+    for (size_t i = 0; i < 24; ++i)
+        raw[46 + i] = static_cast<uint8_t>(0x40 + i);
     return raw;
 }
 
@@ -57,15 +61,18 @@ struct TempRoot {
         path = ::mkdtemp(pattern.data());
         std::filesystem::remove(path);
     }
-    ~TempRoot() { std::filesystem::remove_all(path); }
+    ~TempRoot()
+    {
+        std::filesystem::remove_all(path);
+    }
 };
 
-constexpr vault::v3::Id ROOT_ID{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1};
-constexpr vault::v3::Id IMAGE_ID{2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2};
-constexpr vault::v3::Id VIDEO_ID{3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3};
-constexpr std::array<uint8_t, crypto::KEY_SIZE> MASTER{
-    0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
-    16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31};
+constexpr vault::v3::Id ROOT_ID{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+constexpr vault::v3::Id IMAGE_ID{2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2};
+constexpr vault::v3::Id VIDEO_ID{3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3};
+constexpr std::array<uint8_t, crypto::KEY_SIZE> MASTER{0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10,
+                                                       11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+                                                       22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
 constexpr std::array<uint8_t, 2> PASSWORD{'p', 'w'};
 
 bool write_fixture_header(const std::filesystem::path& path)
@@ -81,11 +88,12 @@ bool write_fixture_header(const std::filesystem::path& path)
     std::copy_n(sealed.begin(), crypto::KEY_SIZE, raw.begin() + 70);
     std::copy_n(sealed.begin() + crypto::KEY_SIZE, crypto::TAG_SIZE, raw.begin() + 102);
     std::ofstream output(path / "vault.header", std::ios::binary | std::ios::trunc);
-    output.write(reinterpret_cast<const char*>(raw.data()), static_cast<std::streamsize>(raw.size()));
+    output.write(reinterpret_cast<const char*>(raw.data()),
+                 static_cast<std::streamsize>(raw.size()));
     return output.good();
 }
 
-} // namespace
+}  // namespace
 
 TEST(v3_header_parse_rejects_reserved_flags_bounds_and_zero_identity)
 {
@@ -115,7 +123,8 @@ TEST(v3_header_unwrap_authenticates_vault_identity_and_credentials)
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
     REQUIRE(crypto::derive_key(PASSWORD, {}, header.salt, header.kdf, kek));
     std::array<uint8_t, crypto::KEY_SIZE> master{};
-    for (size_t i = 0; i < master.size(); ++i) master[i] = static_cast<uint8_t>(i + 1);
+    for (size_t i = 0; i < master.size(); ++i)
+        master[i] = static_cast<uint8_t>(i + 1);
     const auto ad = vault::v3::master_wrap_ad(header);
     std::vector<uint8_t> sealed;
     REQUIRE(crypto::seal(kek.as_span(), header.nonce, master, sealed, ad));
@@ -132,7 +141,26 @@ TEST(v3_header_unwrap_authenticates_vault_identity_and_credentials)
           vault::v3::HeaderStatus::AuthenticationFailed);
 }
 
-TEST(v3_vault_facade_lists_searches_reads_and_rejects_mutation)
+TEST(v3_header_create_serializes_and_reopens_with_only_the_right_credentials)
+{
+    vault::v3::V3Header created;
+    crypto::SecureBuffer<crypto::KEY_SIZE> master;
+    const crypto::KdfParams params{1, 8, 1};
+    REQUIRE(vault::v3::create_v3_header(PASSWORD, {}, params, created, master) ==
+            vault::v3::HeaderStatus::Ok);
+    const auto raw = vault::v3::serialize_v3_header(created);
+    vault::v3::V3Header parsed;
+    REQUIRE(vault::v3::parse_v3_header(raw, parsed) == vault::v3::HeaderStatus::Ok);
+    crypto::SecureBuffer<crypto::KEY_SIZE> reopened;
+    REQUIRE(vault::v3::unwrap_v3_master_key(parsed, PASSWORD, {}, reopened) ==
+            vault::v3::HeaderStatus::Ok);
+    CHECK(std::ranges::equal(master.as_span(), reopened.as_span()));
+    constexpr std::array<uint8_t, 3> WRONG{'b', 'a', 'd'};
+    CHECK(vault::v3::unwrap_v3_master_key(parsed, WRONG, {}, reopened) ==
+          vault::v3::HeaderStatus::AuthenticationFailed);
+}
+
+TEST(v3_vault_facade_lists_searches_reads_and_rejects_object_rewrites)
 {
     TempRoot temp;
     auto root = vault::v3::VaultRoot::create(temp.path);
@@ -160,22 +188,24 @@ TEST(v3_vault_facade_lists_searches_reads_and_rejects_mutation)
     REQUIRE(created.database->add_tag(1, "place:Berlin", "place:berlin") ==
             vault::v3::DbStatus::Ok);
     REQUIRE(created.database->assign_tag(IMAGE_ID, 1) == vault::v3::DbStatus::Ok);
-    const std::array<uint8_t, 5> bytes{1,2,3,4,5};
+    const std::array<uint8_t, 5> bytes{1, 2, 3, 4, 5};
     vault::v3::ObjectWriteRequest request{header.vault_id, IMAGE_ID,
-        vault::v3::ObjectRole::OriginalImage, 0, 64};
+                                          vault::v3::ObjectRole::OriginalImage, 0, 64};
     const auto written = vault::v3::write_object(*root, MASTER, request, bytes);
     REQUIRE(written.status == vault::v3::ObjectStatus::Ok);
-    REQUIRE(created.database->insert_object({written.info.object_id, IMAGE_ID,
-        vault::v3::ObjectRole::OriginalImage, written.info.encrypted_length,
-        written.info.plaintext_length, written.info.frame_plain_limit,
-        written.info.frame_count, 0}) == vault::v3::DbStatus::Ok);
+    REQUIRE(created.database->insert_object(
+                {written.info.object_id, IMAGE_ID, vault::v3::ObjectRole::OriginalImage,
+                 written.info.encrypted_length, written.info.plaintext_length,
+                 written.info.frame_plain_limit, written.info.frame_count, 0}) ==
+            vault::v3::DbStatus::Ok);
     request.role = vault::v3::ObjectRole::Thumbnail;
     const auto thumb_written = vault::v3::write_object(*root, MASTER, request, bytes);
     REQUIRE(thumb_written.status == vault::v3::ObjectStatus::Ok);
-    REQUIRE(created.database->insert_object({thumb_written.info.object_id, IMAGE_ID,
-        vault::v3::ObjectRole::Thumbnail, thumb_written.info.encrypted_length,
-        thumb_written.info.plaintext_length, thumb_written.info.frame_plain_limit,
-        thumb_written.info.frame_count, 0}) == vault::v3::DbStatus::Ok);
+    REQUIRE(created.database->insert_object(
+                {thumb_written.info.object_id, IMAGE_ID, vault::v3::ObjectRole::Thumbnail,
+                 thumb_written.info.encrypted_length, thumb_written.info.plaintext_length,
+                 thumb_written.info.frame_plain_limit, thumb_written.info.frame_count, 0}) ==
+            vault::v3::DbStatus::Ok);
     vault::v3::NodeRecord video;
     video.node_id = VIDEO_ID;
     video.parent_id = ROOT_ID;
@@ -193,16 +223,17 @@ TEST(v3_vault_facade_lists_searches_reads_and_rejects_mutation)
             return true;
         });
     REQUIRE(video_written.status == vault::v3::ObjectStatus::Ok);
-    REQUIRE(created.database->insert_object({video_written.info.object_id, VIDEO_ID,
-        vault::v3::ObjectRole::OriginalVideo, video_written.info.encrypted_length,
-        video_written.info.plaintext_length, video_written.info.frame_plain_limit,
-        video_written.info.frame_count, 0}) == vault::v3::DbStatus::Ok);
+    REQUIRE(created.database->insert_object(
+                {video_written.info.object_id, VIDEO_ID, vault::v3::ObjectRole::OriginalVideo,
+                 video_written.info.encrypted_length, video_written.info.plaintext_length,
+                 video_written.info.frame_plain_limit, video_written.info.frame_count, 0}) ==
+            vault::v3::DbStatus::Ok);
     created.database.reset();
     root.reset();
 
     vault::Vault opened;
     REQUIRE(vault::Vault::open(temp.path.string(), opened) == vault::VaultResult::Ok);
-    CHECK(vault_is_read_only(opened));
+    CHECK_FALSE(vault_is_read_only(opened));
     REQUIRE(opened.unlock(PASSWORD, {}) == vault::VaultResult::Ok);
     const auto listing = opened.list("");
     REQUIRE(listing.size() == 2U);
@@ -220,25 +251,169 @@ TEST(v3_vault_facade_lists_searches_reads_and_rejects_mutation)
     std::array<uint8_t, 5> streamed{};
     CHECK_EQ(source.read(0, streamed), 5);
     CHECK_BYTES_EQ(streamed, bytes);
-    CHECK(opened.create_gallery("must-not-write") == vault::VaultResult::InvalidArg);
+    CHECK(opened.create_gallery("metadata-write") == vault::VaultResult::Ok);
     CHECK(vault::uses_context_chunks(opened));
-    CHECK(vault::apply_image_animated(opened, "photo.jpg", true) ==
-          vault::VaultResult::InvalidArg);
-    CHECK(vault::apply_image_thumb(opened, "photo.jpg", bytes) ==
-          vault::VaultResult::InvalidArg);
-    CHECK(vault::apply_video_poster(opened, "clip.mp4", bytes) ==
-          vault::VaultResult::InvalidArg);
-    CHECK(vault::apply_video_probe(opened, "clip.mp4", {}) ==
-          vault::VaultResult::InvalidArg);
-    CHECK(vault::apply_context_rewrite(opened, "photo.jpg") ==
-          vault::VaultResult::InvalidArg);
+    CHECK(vault::apply_image_animated(opened, "photo.jpg", true) == vault::VaultResult::Ok);
+    CHECK(vault::apply_image_thumb(opened, "photo.jpg", bytes) == vault::VaultResult::Ok);
+    CHECK(vault::apply_video_poster(opened, "clip.mp4", bytes) == vault::VaultResult::Ok);
+    CHECK(vault::apply_video_probe(opened, "clip.mp4", {}) == vault::VaultResult::Ok);
+    CHECK(vault::apply_context_rewrite(opened, "photo.jpg") == vault::VaultResult::InvalidArg);
     CHECK(vault::finalize_context_migration(opened) == vault::VaultResult::InvalidArg);
-    CHECK(vault::commit_migration(opened, vault::vault_settings(opened)) ==
-          vault::VaultResult::InvalidArg);
+    CHECK(vault::commit_migration(opened, vault::vault_settings(opened)) == vault::VaultResult::Ok);
     vault::Vault competing;
     REQUIRE(vault::Vault::open(temp.path.string(), competing) == vault::VaultResult::Ok);
     CHECK(competing.unlock(PASSWORD, {}) == vault::VaultResult::Busy);
     opened.lock();
     CHECK_FALSE(opened.is_unlocked());
     CHECK(competing.unlock(PASSWORD, {}) == vault::VaultResult::Ok);
+}
+
+TEST(v3_vault_facade_creates_directory_without_changing_legacy_create)
+{
+    TempRoot temp;
+    vault::Vault created;
+    const crypto::KdfParams params{1, 8, 1};
+    REQUIRE(vault::Vault::create_directory(temp.path.string(), PASSWORD, {}, params, created) ==
+            vault::VaultResult::Ok);
+    CHECK(created.is_unlocked());
+    CHECK_FALSE(vault::vault_is_read_only(created));
+    CHECK(std::filesystem::is_directory(temp.path));
+    REQUIRE(created.create_gallery("album/nested") == vault::VaultResult::Ok);
+    const std::array<uint8_t, 5> original{9, 8, 7, 6, 5};
+    REQUIRE(created.add_image("album", original, "raw.bin") == vault::VaultResult::Ok);
+    REQUIRE(created.create_gallery("destination") == vault::VaultResult::Ok);
+    REQUIRE(vault::transfer_image(created, "album", "raw.bin", created, "destination",
+                                  vault::TransferMode::Move) == vault::VaultResult::Ok);
+    REQUIRE(created.add_tag("album", "place:Berlin") == vault::VaultResult::Ok);
+    REQUIRE(vault::toggle_favorite_node(created, "album") == vault::VaultResult::Ok);
+    REQUIRE(vault::rename_node(created, "album", "nested", "renamed") == vault::VaultResult::Ok);
+    auto settings = vault::vault_settings(created);
+    settings.tiles_show_tags = false;
+    REQUIRE(vault::set_vault_settings(created, std::move(settings)) == vault::VaultResult::Ok);
+    constexpr std::array<uint8_t, 3> NEW_PASSWORD{'n', 'e', 'w'};
+    vault::v3::inject_fs_fault(vault::v3::FsFault::Rename);
+    CHECK_EQ(static_cast<int>(created.change_password(PASSWORD, {}, NEW_PASSWORD, {})),
+             static_cast<int>(vault::VaultResult::IoError));
+    vault::v3::clear_fs_faults();
+    REQUIRE(created.change_password(PASSWORD, {}, NEW_PASSWORD, {}) == vault::VaultResult::Ok);
+    created.lock();
+
+    vault::Vault reopened;
+    REQUIRE(vault::Vault::open(temp.path.string(), reopened) == vault::VaultResult::Ok);
+    CHECK(reopened.unlock(PASSWORD, {}) == vault::VaultResult::AuthFailed);
+    REQUIRE(reopened.unlock(NEW_PASSWORD, {}) == vault::VaultResult::Ok);
+    const auto top = reopened.list("");
+    REQUIRE(top.size() == 2U);
+    CHECK(top[0]->name == "album");
+    CHECK(top[0]->favorite);
+    REQUIRE(top[0]->tags.size() == 1U);
+    CHECK(top[0]->tags[0] == "place:Berlin");
+    const auto nested = reopened.list("album");
+    REQUIRE(nested.size() == 1U);
+    CHECK(nested[0]->name == "renamed");
+    const auto destination = reopened.list("destination");
+    REQUIRE(destination.size() == 1U);
+    CHECK(destination[0]->name == "raw.bin");
+    crypto::SecureBytes roundtrip;
+    CHECK_EQ(static_cast<int>(reopened.read_image(*destination[0], roundtrip)),
+             static_cast<int>(vault::VaultResult::Ok));
+    CHECK_BYTES_EQ(roundtrip.as_span(), original);
+    CHECK_FALSE(vault::vault_settings(reopened).tiles_show_tags);
+}
+
+TEST(v3_directory_create_failure_rolls_back_only_its_new_root)
+{
+    TempRoot temp;
+    vault::v3::inject_fs_fault(vault::v3::FsFault::Write);
+    vault::Vault output;
+    const crypto::KdfParams params{1, 8, 1};
+    CHECK(vault::Vault::create_directory(temp.path.string(), PASSWORD, {}, params, output) ==
+          vault::VaultResult::IoError);
+    vault::v3::clear_fs_faults();
+    CHECK_FALSE(std::filesystem::exists(temp.path));
+}
+
+TEST(v3_unattached_staged_object_becomes_garbage_without_blocking_later_commits)
+{
+    TempRoot temp;
+    const crypto::KdfParams params{1, 8, 1};
+    auto created = vault::v3::ReadSession::create(temp.path, PASSWORD, {}, params);
+    REQUIRE(created.status == vault::v3::ReadStatus::Ok);
+    REQUIRE(created.session != nullptr);
+    vault::v3::Id abandoned{};
+    abandoned[0] = 0xa5;
+    constexpr std::array<uint8_t, 3> bytes{1, 2, 3};
+    REQUIRE(created.session->stage_object(abandoned, vault::v3::ObjectRole::OriginalImage,
+                                          static_cast<uint8_t>(vault::ImageFormat::Unknown),
+                                          bytes) == vault::v3::ReadStatus::Ok);
+    REQUIRE(created.session->commit_metadata(created.session->root(), created.session->settings(),
+                                             {}) == vault::v3::ReadStatus::Ok);
+    crypto::SecureBytes abandoned_plain;
+    CHECK(created.session->read_id(abandoned, vault::v3::ObjectRole::OriginalImage,
+                                   abandoned_plain) == vault::v3::ReadStatus::BadFormat);
+
+    auto root = created.session->root();
+    auto live = vault::IndexNode::image("live.bin");
+    live.node_id[0] = 0x5a;
+    live.meta.format = vault::ImageFormat::Unknown;
+    REQUIRE(created.session->stage_object(live.node_id, vault::v3::ObjectRole::OriginalImage,
+                                          static_cast<uint8_t>(live.meta.format),
+                                          bytes) == vault::v3::ReadStatus::Ok);
+    root.children.push_back(live);
+    REQUIRE(created.session->commit_metadata(root, created.session->settings(), {}) ==
+            vault::v3::ReadStatus::Ok);
+    crypto::SecureBytes roundtrip;
+    REQUIRE(created.session->read(root.children[0], vault::v3::ObjectRole::OriginalImage,
+                                  roundtrip) == vault::v3::ReadStatus::Ok);
+    CHECK_BYTES_EQ(roundtrip.as_span(), bytes);
+}
+
+TEST(v3_and_legacy_apply_the_same_user_visible_mutation_contract)
+{
+    TempRoot legacy_path;
+    TempRoot directory_path;
+    const crypto::KdfParams params{1, 8, 1};
+    vault::Vault legacy;
+    vault::Vault directory;
+    REQUIRE(vault::Vault::create(legacy_path.path.string(), PASSWORD, {}, params, legacy) ==
+            vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create_directory(directory_path.path.string(), PASSWORD, {}, params,
+                                           directory) == vault::VaultResult::Ok);
+    constexpr std::array<uint8_t, 5> bytes{7, 1, 4, 2, 9};
+    const auto mutate = [&](vault::Vault& value) {
+        REQUIRE(value.create_gallery("trips/2026") == vault::VaultResult::Ok);
+        REQUIRE(value.add_image("trips/2026", bytes, "photo.bin") == vault::VaultResult::Ok);
+        REQUIRE(value.set_tags("trips/2026/photo.bin", {"place:Berlin", "night"}) ==
+                vault::VaultResult::Ok);
+        REQUIRE(vault::toggle_favorite_node(value, "trips/2026/photo.bin") ==
+                vault::VaultResult::Ok);
+        REQUIRE(vault::rename_node(value, "trips/2026", "photo.bin", "renamed.bin") ==
+                vault::VaultResult::Ok);
+        auto settings = vault::vault_settings(value);
+        settings.tiles_show_tags = false;
+        REQUIRE(vault::set_vault_settings(value, std::move(settings)) == vault::VaultResult::Ok);
+    };
+    mutate(legacy);
+    mutate(directory);
+    legacy.lock();
+    directory.lock();
+    REQUIRE(legacy.unlock(PASSWORD, {}) == vault::VaultResult::Ok);
+    REQUIRE(directory.unlock(PASSWORD, {}) == vault::VaultResult::Ok);
+    const auto legacy_nodes = legacy.list("trips/2026");
+    const auto directory_nodes = directory.list("trips/2026");
+    REQUIRE(legacy_nodes.size() == 1U);
+    REQUIRE(directory_nodes.size() == 1U);
+    CHECK(legacy_nodes[0]->name == directory_nodes[0]->name);
+    CHECK(legacy_nodes[0]->favorite == directory_nodes[0]->favorite);
+    REQUIRE(legacy_nodes[0]->tags.size() == directory_nodes[0]->tags.size());
+    for (const auto& tag : legacy_nodes[0]->tags)
+        CHECK(std::ranges::any_of(directory_nodes[0]->tags,
+                                  [&](const auto& candidate) { return candidate == tag; }));
+    crypto::SecureBytes legacy_plain;
+    crypto::SecureBytes directory_plain;
+    REQUIRE(legacy.read_image(*legacy_nodes[0], legacy_plain) == vault::VaultResult::Ok);
+    REQUIRE(directory.read_image(*directory_nodes[0], directory_plain) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(legacy_plain.as_span(), directory_plain.as_span());
+    CHECK(vault::vault_settings(legacy).tiles_show_tags ==
+          vault::vault_settings(directory).tiles_show_tags);
 }

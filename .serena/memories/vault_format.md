@@ -1,5 +1,24 @@
 # Vault container format (`.osv`)
 
+## V3 directory vault
+
+V3 is a directory with owner-only `vault.header`, `vault.db`, `objects/`, and `staging/`
+entries. The 256-byte plaintext header identifies `OSV3DIR`, fixes format version 3 and KDF
+parameters, and carries the salt, XChaCha20-Poly1305 nonce/tag, vault ID, and wrapped random
+master key. SQLCipher uses a domain-derived database key; each immutable `.osvo` uses a
+domain-derived per-object key and authenticated vault/object/node/role/format/framing identity.
+
+Phase 112 write ordering is publish-before-reference: publish and sync immutable object files,
+then atomically replace their `(node_id, role)` references together with the metadata snapshot
+and generation in one `BEGIN IMMEDIATE` transaction. A crash before commit leaves only garbage;
+a crash after commit leaves the new complete state. Replacement makes the new object live before
+the old file is eligible for Phase 113 GC. Password/keyfile changes stage and sync a complete new
+header, atomically rename it over `vault.header`, then sync the directory; DB/object ciphertext is
+unchanged. Same-vault moves update database parent/order/name only and preserve cryptographic
+identity; cross-vault copies decrypt into secure memory and mint fresh destination identities.
+
+The legacy single-file format below remains the default creation format until Phase 114.
+
 ```
 [ Header — plaintext, fixed-size ]
   magic     "OSVAULT\0"  (8 bytes)
