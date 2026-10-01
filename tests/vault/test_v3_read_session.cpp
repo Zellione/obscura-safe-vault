@@ -333,6 +333,24 @@ TEST(v3_directory_create_failure_rolls_back_only_its_new_root)
     CHECK_FALSE(std::filesystem::exists(temp.path));
 }
 
+TEST(v3_directory_create_refuses_existing_paths_and_locked_password_rotation_works)
+{
+    TempRoot temp;
+    std::filesystem::create_directory(temp.path);
+    vault::Vault output;
+    const crypto::KdfParams params{1, 8, 1};
+    CHECK(vault::Vault::create_directory(temp.path.string(), PASSWORD, {}, params, output) ==
+          vault::VaultResult::AlreadyExists);
+    std::filesystem::remove(temp.path);
+    REQUIRE(vault::Vault::create_directory(temp.path.string(), PASSWORD, {}, params, output) ==
+            vault::VaultResult::Ok);
+    output.lock();
+    constexpr std::array<uint8_t, 7> replacement{'c', 'h', 'a', 'n', 'g', 'e', 'd'};
+    REQUIRE(output.change_password(PASSWORD, {}, replacement, {}) == vault::VaultResult::Ok);
+    CHECK(output.unlock(PASSWORD, {}) == vault::VaultResult::AuthFailed);
+    CHECK(output.unlock(replacement, {}) == vault::VaultResult::Ok);
+}
+
 TEST(v3_unattached_staged_object_becomes_garbage_without_blocking_later_commits)
 {
     TempRoot temp;

@@ -1303,7 +1303,7 @@ VaultResult apply_video_probe(Vault& v, std::string_view node_path, const VideoP
         if (v.v3_) {
             v3::ObjectInfo info;
             if (v.v3_->stage_object(n->node_id, v3::ObjectRole::Poster,
-                                    static_cast<uint8_t>(n->vmeta.container), probe.poster_jpeg,
+                                    std::to_underlying(n->vmeta.container), probe.poster_jpeg,
                                     &info) != v3::ReadStatus::Ok)
                 return IoError;
             n->vmeta.poster_offset = 1;
@@ -1339,7 +1339,7 @@ VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
     if (v.v3_) {
         v3::ObjectInfo info;
         if (v.v3_->stage_object(n->node_id, v3::ObjectRole::Thumbnail,
-                                static_cast<uint8_t>(n->meta.format), thumb_jpeg,
+                                std::to_underlying(n->meta.format), thumb_jpeg,
                                 &info) != v3::ReadStatus::Ok)
             return IoError;
         n->meta.thumb_offset = 1;
@@ -1373,7 +1373,7 @@ VaultResult apply_video_poster(Vault& v, std::string_view node_path,
     if (v.v3_) {
         v3::ObjectInfo info;
         if (v.v3_->stage_object(n->node_id, v3::ObjectRole::Poster,
-                                static_cast<uint8_t>(n->vmeta.container), poster_jpeg,
+                                std::to_underlying(n->vmeta.container), poster_jpeg,
                                 &info) != v3::ReadStatus::Ok)
             return IoError;
         n->vmeta.poster_offset = 1;
@@ -1604,7 +1604,7 @@ void test_only_downgrade_to_legacy(Vault& v)  // NOSONAR cpp:S3776
     };
 
     // Re-encode a video node's records to legacy and wipe its identity.
-    auto downgrade_video = [&](IndexNode& c) {
+    auto downgrade_video = [&](IndexNode& c) { // NOSONAR cpp:S1188
         VideoMeta& m = c.vmeta;
         std::vector<VideoChunk> legacy;
         for (const VideoChunk& ck : m.chunks) {
@@ -1957,10 +1957,10 @@ VaultResult move_node_within(Vault& v, std::string_view source_gallery, std::str
     const auto item = std::ranges::find_if(
         source->children, [&](const IndexNode& node) { return node.name == name; });
     if (item == source->children.end()) return NotFound;
-    const std::string source_path = source_gallery.empty()
-                                        ? std::string(name)
-                                        : std::string(source_gallery) + "/" + std::string(name);
-    if (item->is_gallery() &&
+    if (const std::string source_path = source_gallery.empty()
+                                            ? std::string(name)
+                                            : std::string(source_gallery) + "/" + std::string(name);
+        item->is_gallery() &&
         (destination_gallery == source_path || destination_gallery.starts_with(source_path + "/")))
         return InvalidArg;
     IndexNode moved = *item;

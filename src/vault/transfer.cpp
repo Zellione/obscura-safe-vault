@@ -672,9 +672,9 @@ TransferTally transfer_images(Vault& src, std::string_view src_gallery,
     if (&src == &dst && mode == TransferMode::Move && vault_uses_directory_storage(src)) {
         for (const auto& filename : filenames) {
             if (progress && progress->cancel.load()) break;
-            const VaultResult result =
-                move_node_within(src, src_gallery, filename, dst_gallery, filename);
-            if (result == Ok)
+            if (const VaultResult result =
+                    move_node_within(src, src_gallery, filename, dst_gallery, filename);
+                result == Ok)
                 ++tally.done;
             else
                 record_failure(tally, filename, result, TransferFailure::Stage::Write);

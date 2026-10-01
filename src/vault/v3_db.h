@@ -105,7 +105,7 @@ template <typename T> struct DbResult {
     T value{};
 };
 
-class Database {
+class Database { // NOSONAR cpp:S1448 -- typed repositories intentionally share one SQLCipher handle
 public:
     struct OpenResult;
 

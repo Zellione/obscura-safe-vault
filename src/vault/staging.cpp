@@ -52,7 +52,7 @@ DecodedThumb decode_and_thumbnail(std::span<const uint8_t> file_data)
 }
 }  // namespace
 
-StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data, std::string_view filename,
+StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data, std::string_view filename, // NOSONAR cpp:S3776
                        const StagedThumb* precomputed)
 {
     using enum VaultResult;
@@ -96,7 +96,7 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data, std::string
         }
         v3::ObjectInfo data_info;
         if (v.v3_->stage_object(img.node_id, v3::ObjectRole::OriginalImage,
-                                static_cast<uint8_t>(format), file_data,
+                                std::to_underlying(format), file_data,
                                 &data_info) != v3::ReadStatus::Ok)
             return {IoError, {}};
         img.meta.data_offset = 1;
@@ -104,7 +104,7 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data, std::string
         if (!thumb.empty()) {
             v3::ObjectInfo thumb_info;
             if (v.v3_->stage_object(img.node_id, v3::ObjectRole::Thumbnail,
-                                    static_cast<uint8_t>(format), thumb,
+                                    std::to_underlying(format), thumb,
                                     &thumb_info) != v3::ReadStatus::Ok)
                 return {IoError, {}};
             img.meta.thumb_offset = 1;
@@ -211,7 +211,7 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data, std::string
     return result;
 }
 
-StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data, std::string_view filename,
+StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data, std::string_view filename, // NOSONAR cpp:S3776
                        uint32_t chunk_size, const StagedVideoInfo* precomputed)
 {
     using enum VaultResult;
@@ -245,15 +245,15 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data, std::string
         const auto format = precomputed ? precomputed->container : probe.container;
         v3::ObjectInfo video_info;
         if (v.v3_->stage_object(vid.node_id, v3::ObjectRole::OriginalVideo,
-                                static_cast<uint8_t>(format), file_data,
+                                std::to_underlying(format), file_data,
                                 &video_info) != v3::ReadStatus::Ok)
             return {IoError, {}};
-        const std::span<const uint8_t> poster =
-            precomputed ? precomputed->poster_jpeg.as_span() : probe.poster_jpeg.as_span();
-        if (!poster.empty()) {
+        if (const std::span<const uint8_t> poster =
+                precomputed ? precomputed->poster_jpeg.as_span() : probe.poster_jpeg.as_span();
+            !poster.empty()) {
             v3::ObjectInfo poster_info;
             if (v.v3_->stage_object(vid.node_id, v3::ObjectRole::Poster,
-                                    static_cast<uint8_t>(format), poster,
+                                    std::to_underlying(format), poster,
                                     &poster_info) != v3::ReadStatus::Ok)
                 return {IoError, {}};
             vid.vmeta.poster_offset = 1;

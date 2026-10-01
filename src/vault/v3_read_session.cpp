@@ -155,8 +155,8 @@ ReadSession::OpenResult ReadSession::create(const std::filesystem::path& path,
                                             std::span<const uint8_t> keyfile,
                                             const crypto::KdfParams& kdf)
 {
-    std::error_code exists_error;
-    if (std::filesystem::exists(path, exists_error)) return {ReadStatus::AlreadyExists, {}};
+    if (std::error_code exists_error; std::filesystem::exists(path, exists_error))
+        return {ReadStatus::AlreadyExists, {}};
     auto root = VaultRoot::create(path);
     if (!root) return {ReadStatus::IoError, {}};
     auto session = std::make_unique<ReadSession>();
@@ -173,8 +173,9 @@ ReadSession::OpenResult ReadSession::create(const std::filesystem::path& path,
     if (create_v3_header(password, keyfile, kdf, session->header_, session->master_key_) !=
         HeaderStatus::Ok)
         return fail_create(ReadStatus::IoError);
-    const auto raw = serialize_v3_header(session->header_);
-    if (!session->root_handle_.write_header(raw)) return fail_create(ReadStatus::IoError);
+    if (const auto raw = serialize_v3_header(session->header_);
+        !session->root_handle_.write_header(raw))
+        return fail_create(ReadStatus::IoError);
     Id root_id{};
     if (!crypto::fill_random(root_id)) return fail_create(ReadStatus::IoError);
     auto db_key = derive_database_key(session->master_key_.as_span(), session->header_.vault_id);
@@ -294,8 +295,8 @@ std::optional<ObjectInfo> ReadSession::object_for(const Id& node_id, ObjectRole 
     };
     find_owner(root_);
     if (!owner) return std::nullopt;
-    const uint8_t media_format = owner->is_image() ? static_cast<uint8_t>(owner->meta.format)
-                                                   : static_cast<uint8_t>(owner->vmeta.container);
+    const uint8_t media_format = owner->is_image() ? std::to_underlying(owner->meta.format)
+                                                   : std::to_underlying(owner->vmeta.container);
     return ObjectInfo{
         it->object_id,  header_.vault_id,     it->node_id,          it->role,
         media_format,   it->plaintext_length, it->encrypted_length, it->frame_plain_limit,
@@ -329,8 +330,9 @@ ReadStatus ReadSession::commit_metadata(const IndexNode& root, const VaultSettin
 {
     const std::lock_guard lock(state_mutex_);
     if (!unlocked_ || !database_ || !session_lock_) return ReadStatus::IoError;
-    const auto status = database_->sync_metadata(root, settings, searches, staged_objects_);
-    if (status != DbStatus::Ok) return map_db(status);
+    if (const auto status = database_->sync_metadata(root, settings, searches, staged_objects_);
+        status != DbStatus::Ok)
+        return map_db(status);
     staged_objects_.clear();
     root_ = root;
     settings_ = settings;
@@ -353,10 +355,10 @@ ReadStatus ReadSession::stage_object(const Id& node_id, ObjectRole role, uint8_t
     const auto written = write_object(root_handle_, master_key_.as_span(), request, plaintext);
     if (written.status != ObjectStatus::Ok) return ReadStatus::IoError;
     try {
-        staged_objects_.push_back(
-            {written.info.object_id, node_id, role, written.info.encrypted_length,
-             written.info.plaintext_length, written.info.frame_plain_limit,
-             written.info.frame_count, 0});
+        staged_objects_.emplace_back(ObjectRecord{
+            written.info.object_id, node_id, role, written.info.encrypted_length,
+            written.info.plaintext_length, written.info.frame_plain_limit,
+            written.info.frame_count, 0});
     } catch (...) {
         // The published immutable object stays unreferenced and is safe for later GC.
         return ReadStatus::IoError;

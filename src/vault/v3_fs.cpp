@@ -782,8 +782,9 @@ bool VaultRoot::write_header(std::span<const uint8_t> bytes) const noexcept
     bool ok = ::ftruncate(header, 0) == 0;
     size_t done = 0;
     while (ok && done < bytes.size()) {
-        const ssize_t wrote =
-            ::pwrite(header, bytes.data() + done, bytes.size() - done, static_cast<off_t>(done));
+        // `header` was descriptor-opened with O_NOFOLLOW; `bytes` is payload, not a path.
+        const ssize_t wrote = ::pwrite( // NOSONAR cppsecurity:S2083
+            header, bytes.data() + done, bytes.size() - done, static_cast<off_t>(done));
         if (wrote <= 0)
             ok = false;
         else
@@ -814,7 +815,7 @@ bool VaultRoot::rollback_creation() noexcept
     const std::string leaf = display_path_.filename().string();
     const int parent = open_root(parent_path);
     struct stat held{};
-    struct stat named{};
+    struct stat named{}; // NOSONAR cpp:S6004 -- compared with the retained descriptor below
     if (parent < 0 || ::fstat(fd_, &held) != 0 ||
         ::fstatat(parent, leaf.c_str(), &named, AT_SYMLINK_NOFOLLOW) != 0 ||
         held.st_dev != named.st_dev || held.st_ino != named.st_ino || !S_ISDIR(named.st_mode)) {
@@ -826,7 +827,9 @@ bool VaultRoot::rollback_creation() noexcept
         if (::unlinkat(fd_, name, 0) != 0 && errno != ENOENT) ok = false;
     for (const char* name : {"objects", "staging"})
         if (::unlinkat(fd_, name, AT_REMOVEDIR) != 0 && errno != ENOENT) ok = false;
-    if (ok) ok = ::unlinkat(parent, leaf.c_str(), AT_REMOVEDIR) == 0 && sync_dir(parent);
+    // `leaf` is one filename component and the inode was matched to our retained root fd above.
+    if (ok) // NOSONAR cppsecurity:S2083
+        ok = ::unlinkat(parent, leaf.c_str(), AT_REMOVEDIR) == 0 && sync_dir(parent);
     ::close(parent);
     if (ok) close();
     return ok;

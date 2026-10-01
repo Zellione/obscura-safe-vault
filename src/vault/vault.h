@@ -113,7 +113,7 @@ struct VideoProbeApply {
     std::span<const uint8_t> poster_jpeg;  // empty = leave the poster alone
 };
 
-class Vault {
+class Vault { // NOSONAR cpp:S1448 -- stable public facade dispatches both storage backends
 public:
     // Auto-compaction gates (remove_image): rewrite the vault only when at
     // least this much is reclaimable AND the waste is at least a quarter of
