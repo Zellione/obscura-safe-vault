@@ -815,8 +815,7 @@ bool VaultRoot::rollback_creation() noexcept
     const std::string leaf = display_path_.filename().string();
     const int parent = open_root(parent_path);
     struct stat held{};
-    struct stat named{}; // NOSONAR cpp:S6004 -- compared with the retained descriptor below
-    if (parent < 0 || ::fstat(fd_, &held) != 0 ||
+    if (struct stat named{}; parent < 0 || ::fstat(fd_, &held) != 0 ||
         ::fstatat(parent, leaf.c_str(), &named, AT_SYMLINK_NOFOLLOW) != 0 ||
         held.st_dev != named.st_dev || held.st_ino != named.st_ino || !S_ISDIR(named.st_mode)) {
         if (parent >= 0) ::close(parent);
@@ -828,8 +827,9 @@ bool VaultRoot::rollback_creation() noexcept
     for (const char* name : {"objects", "staging"})
         if (::unlinkat(fd_, name, AT_REMOVEDIR) != 0 && errno != ENOENT) ok = false;
     // `leaf` is one filename component and the inode was matched to our retained root fd above.
-    if (ok) // NOSONAR cppsecurity:S2083
-        ok = ::unlinkat(parent, leaf.c_str(), AT_REMOVEDIR) == 0 && sync_dir(parent);
+    if (ok)
+        ok = ::unlinkat( // NOSONAR cppsecurity:S2083 -- validated component and inode
+                 parent, leaf.c_str(), AT_REMOVEDIR) == 0 && sync_dir(parent);
     ::close(parent);
     if (ok) close();
     return ok;

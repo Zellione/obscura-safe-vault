@@ -355,10 +355,10 @@ ReadStatus ReadSession::stage_object(const Id& node_id, ObjectRole role, uint8_t
     const auto written = write_object(root_handle_, master_key_.as_span(), request, plaintext);
     if (written.status != ObjectStatus::Ok) return ReadStatus::IoError;
     try {
-        staged_objects_.emplace_back(ObjectRecord{
+        staged_objects_.emplace_back(
             written.info.object_id, node_id, role, written.info.encrypted_length,
             written.info.plaintext_length, written.info.frame_plain_limit,
-            written.info.frame_count, 0});
+            written.info.frame_count, 0);
     } catch (...) {
         // The published immutable object stays unreferenced and is safe for later GC.
         return ReadStatus::IoError;

@@ -360,10 +360,11 @@ Database::create_in_root(const VaultRoot& root,
     }
     Statement meta{db,
                    "INSERT INTO vault_meta(singleton,schema_version,root_node_id) VALUES(1,1,?)"};
-    Statement root_row{ // NOSONAR cpp:S6004 -- shared by all short-circuit checks below
-        db, "INSERT INTO nodes(node_id,parent_id,node_type,display_name,sibling_order,sort_key) "
+    if (Statement root_row{
+            db,
+            "INSERT INTO nodes(node_id,parent_id,node_type,display_name,sibling_order,sort_key) "
             "VALUES(?,NULL,0,'/',0,7)"};
-    if (!meta.get() || !root_row.get() ||
+        !meta.get() || !root_row.get() ||
         sqlite3_bind_blob(meta.get(), 1, root_node_id.data(), static_cast<int>(root_node_id.size()),
                           SQLITE_TRANSIENT) != SQLITE_OK ||
         sqlite3_bind_blob(root_row.get(), 1, root_node_id.data(),

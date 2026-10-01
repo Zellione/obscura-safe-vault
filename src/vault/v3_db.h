@@ -50,6 +50,14 @@ struct NodeRecord {
 };
 
 struct ObjectRecord {
+    ObjectRecord() = default;
+    ObjectRecord(Id object, Id node, ObjectRole object_role, uint64_t encrypted,
+                 uint64_t plaintext, uint32_t frame_limit, uint32_t frames,
+                 uint64_t generation) noexcept
+        : object_id(object), node_id(node), role(object_role), encrypted_length(encrypted),
+          plaintext_length(plaintext), frame_plain_limit(frame_limit), frame_count(frames),
+          creation_generation(generation)
+    {}
     Id object_id{};
     Id node_id{};
     ObjectRole role = ObjectRole::OriginalImage;
