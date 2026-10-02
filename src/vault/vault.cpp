@@ -2585,14 +2585,19 @@ VaultResult vault_reclaim(Vault& v)
     uint64_t fsize = 0;
     if (!fileutil::file_size(v.fp_, fsize)) return IoError;
 
-    // Collect every LIVE span in the data region: the active index blob plus each
-    // media chunk. The header [0, HEADER_SIZE) is live by construction (the scan
-    // starts at HEADER_SIZE); the INACTIVE index slot is dead and thus reclaimed.
+    // Collect every LIVE span in the data region: both authenticated index slots
+    // plus each media chunk.  The inactive slot is the cold-open fallback when
+    // the active commit is torn or damaged; punching it would silently remove
+    // that recovery path while leaving its header pointer intact.  The header
+    // [0, HEADER_SIZE) is live by construction (the scan starts at HEADER_SIZE).
     std::vector<std::pair<uint64_t, uint64_t>> live;  // (offset, on-disk length)
     {
         std::lock_guard hlk(*v.header_mutex_);
-        if (const IndexSlot& s = v.header_.slot[v.header_.active_slot]; s.length > 0) {
-            live.emplace_back(s.offset, s.length);
+        for (const IndexSlot& s : v.header_.slot) {
+            if (s.length > 0 && s.offset >= HEADER_SIZE && s.offset <= fsize &&
+                s.length <= fsize - s.offset) {
+                live.emplace_back(s.offset, s.length);
+            }
         }
     }
     for_each_media(v.root_, [&live](const IndexNode& n) { collect_media_spans(n, live); });

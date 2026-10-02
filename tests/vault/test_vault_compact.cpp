@@ -12,6 +12,7 @@
 #include "crypto/random.h"
 #include "image/fixtures.h"
 #include "vault/file_util.h"
+#include "vault/header.h"
 #include "vault/op_progress.h"
 #include "vault/vault.h"
 
@@ -45,8 +46,15 @@ struct TempVault {
         std::error_code ec;
         fs::remove(path, ec);
     }
-    ~TempVault() { std::error_code ec; fs::remove(path, ec); }
-    std::string str() const { return path.string(); }
+    ~TempVault()
+    {
+        std::error_code ec;
+        fs::remove(path, ec);
+    }
+    std::string str() const
+    {
+        return path.string();
+    }
 };
 
 }  // namespace
@@ -54,7 +62,8 @@ struct TempVault {
 static std::vector<uint8_t> pattern(size_t n, uint8_t seed)
 {
     std::vector<uint8_t> v(n);
-    for (size_t i = 0; i < n; ++i) v[i] = static_cast<uint8_t>(i * 37 + seed);
+    for (size_t i = 0; i < n; ++i)
+        v[i] = static_cast<uint8_t>(i * 37 + seed);
     return v;
 }
 
@@ -86,6 +95,29 @@ static uint64_t allocated_on_disk(const fs::path& p)
     return static_cast<uint64_t>(st.st_blocks) * 512U;
 }
 
+static bool read_vault_header(const fs::path& path, vault::Header& out)
+{
+    std::FILE* fp = std::fopen(path.string().c_str(), "rb");
+    if (fp == nullptr) return false;
+    std::array<uint8_t, vault::HEADER_SIZE> raw{};
+    const bool ok =
+        std::fread(raw.data(), 1, raw.size(), fp) == raw.size() && vault::Header::parse(raw, out);
+    std::fclose(fp);
+    return ok;
+}
+
+static bool flip_file_byte(const fs::path& path, uint64_t offset)
+{
+    std::FILE* fp = std::fopen(path.string().c_str(), "r+b");
+    if (fp == nullptr) return false;
+    bool ok = std::fseek(fp, static_cast<long>(offset), SEEK_SET) == 0;
+    const int byte = ok ? std::fgetc(fp) : EOF;
+    ok = ok && byte != EOF && std::fseek(fp, static_cast<long>(offset), SEEK_SET) == 0 &&
+         std::fputc(byte ^ 1, fp) != EOF && std::fflush(fp) == 0;
+    std::fclose(fp);
+    return ok;
+}
+
 // Whether the temp filesystem actually supports hole punching, so physical
 // (block-accounting) assertions are only made where a hole can be punched.
 static bool punch_supported()
@@ -109,8 +141,7 @@ TEST(wasted_bytes_tracks_orphaned_chunks)
 {
     TempVault tv("waste");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
     CHECK_EQ(vault::vault_wasted_bytes(v), 0u);  // fresh vault: header + live index only
 
     const size_t img_size = 100 * 1024;
@@ -129,12 +160,11 @@ TEST(compact_reclaims_space_and_preserves_remaining_images)
     const auto keep = random_payload(80 * 1024);
 
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
     // Dead chunks total ~200 KiB — below the auto-compact threshold, so the
     // waste is still there for the explicit compact() below to reclaim.
     REQUIRE(v.add_image("", random_payload(100 * 1024), "gone1.bin") == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", keep, "keep.bin")                    == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", keep, "keep.bin") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("", random_payload(100 * 1024), "gone2.bin") == vault::VaultResult::Ok);
     REQUIRE(v.remove_image("", "gone1.bin") == vault::VaultResult::Ok);
     REQUIRE(v.remove_image("", "gone2.bin") == vault::VaultResult::Ok);
@@ -165,12 +195,12 @@ TEST(compact_preserves_structure_thumbnails_and_survives_reopen)
 
     {
         vault::Vault v;
-        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-                == vault::VaultResult::Ok);
-        REQUIRE(v.create_gallery("trips/2026")                    == vault::VaultResult::Ok);
-        REQUIRE(v.add_image("trips/2026", png, "pic.png")         == vault::VaultResult::Ok);
-        REQUIRE(v.add_image("trips/2026", random_payload(5000), "raw.bin")
-                == vault::VaultResult::Ok);
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) ==
+                vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("trips/2026") == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("trips/2026", png, "pic.png") == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("trips/2026", random_payload(5000), "raw.bin") ==
+                vault::VaultResult::Ok);
         REQUIRE(v.remove_image("trips/2026", "raw.bin") == vault::VaultResult::Ok);
         REQUIRE(v.compact() == vault::VaultResult::Ok);
     }
@@ -200,8 +230,7 @@ TEST(remove_image_auto_reclaims_past_waste_threshold)
 {
     TempVault tv("autoreclaim");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
 
     const size_t big = vault::Vault::AUTO_COMPACT_MIN_WASTE * 4;  // safely past both gates
     REQUIRE(v.add_image("", random_payload(big), "gone.bin") == vault::VaultResult::Ok);
@@ -233,8 +262,7 @@ TEST(remove_image_below_threshold_keeps_orphan)
 {
     TempVault tv("nocompact");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
 
     REQUIRE(v.add_image("", random_payload(4096), "gone.bin") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("", random_payload(4096), "keep.bin") == vault::VaultResult::Ok);
@@ -251,8 +279,8 @@ TEST(compact_requires_unlocked_vault)
     TempVault tv("locked");
     {
         vault::Vault v;
-        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-                == vault::VaultResult::Ok);
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) ==
+                vault::VaultResult::Ok);
     }
     vault::Vault v2;
     REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
@@ -279,13 +307,13 @@ TEST(compact_preserves_video_chunks)
 
     {
         vault::Vault v;
-        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-                == vault::VaultResult::Ok);
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) ==
+                vault::VaultResult::Ok);
 
         // Add a video to a gallery with small chunks to force multi-chunk storage.
         REQUIRE(v.create_gallery("clips") == vault::VaultResult::Ok);
-        REQUIRE(v.add_video("clips", video_bytes, "v.mp4", /*chunk_size=*/4096)
-                == vault::VaultResult::Ok);
+        REQUIRE(v.add_video("clips", video_bytes, "v.mp4", /*chunk_size=*/4096) ==
+                vault::VaultResult::Ok);
 
         // Compact the vault.
         REQUIRE(v.compact() == vault::VaultResult::Ok);
@@ -336,14 +364,14 @@ TEST(compact_preserves_both_image_and_video_when_deleting_image)
 
     {
         vault::Vault v;
-        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-                == vault::VaultResult::Ok);
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) ==
+                vault::VaultResult::Ok);
 
         REQUIRE(v.create_gallery("mixed") == vault::VaultResult::Ok);
         // Add a large image, a video, then delete the image to trigger auto-compact.
         REQUIRE(v.add_image("mixed", image, "big.bin") == vault::VaultResult::Ok);
-        REQUIRE(v.add_video("mixed", video_bytes, "v.mp4", /*chunk_size=*/4096)
-                == vault::VaultResult::Ok);
+        REQUIRE(v.add_video("mixed", video_bytes, "v.mp4", /*chunk_size=*/4096) ==
+                vault::VaultResult::Ok);
 
         // This delete's waste exceeds the threshold, so it auto-reclaims. The
         // point of this test is that the *video* chunks survive that reclamation
@@ -380,8 +408,7 @@ TEST(compact_progress_reaches_total)
 {
     TempVault tv("progress_track");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
 
     // Add 3 images to create measurable progress.
     REQUIRE(v.add_image("", pattern(100 * 1024, 1), "a.bin") == vault::VaultResult::Ok);
@@ -409,8 +436,7 @@ TEST(compact_cancel_before_start_is_noop)
 {
     TempVault tv("cancel_noop");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
 
     REQUIRE(v.add_image("", pattern(100 * 1024, 1), "a.bin") == vault::VaultResult::Ok);
     REQUIRE(v.remove_image("", "a.bin") == vault::VaultResult::Ok);
@@ -434,8 +460,7 @@ TEST(compact_progress_nullptr_succeeds)
 {
     TempVault tv("progress_null");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
 
     REQUIRE(v.add_image("", pattern(100 * 1024, 1), "a.bin") == vault::VaultResult::Ok);
     REQUIRE(v.remove_image("", "a.bin") == vault::VaultResult::Ok);
@@ -457,12 +482,12 @@ TEST(reclaim_preserves_remaining_images_and_survives_reopen)
 
     {
         vault::Vault v;
-        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-                == vault::VaultResult::Ok);
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) ==
+                vault::VaultResult::Ok);
         // keep is wedged BETWEEN two doomed images so reclaim must punch holes
         // on both sides without disturbing the live chunk in the middle.
         REQUIRE(v.add_image("", random_payload(100 * 1024), "gone1.bin") == vault::VaultResult::Ok);
-        REQUIRE(v.add_image("", keep, "keep.bin")                        == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", keep, "keep.bin") == vault::VaultResult::Ok);
         REQUIRE(v.add_image("", random_payload(100 * 1024), "gone2.bin") == vault::VaultResult::Ok);
         REQUIRE(v.remove_image("", "gone1.bin") == vault::VaultResult::Ok);
         REQUIRE(v.remove_image("", "gone2.bin") == vault::VaultResult::Ok);
@@ -493,16 +518,50 @@ TEST(reclaim_preserves_remaining_images_and_survives_reopen)
     CHECK_EQ(v2.list("").size(), 2u);
 }
 
+TEST(reclaim_preserves_inactive_index_as_authenticated_fallback)
+{
+    if (!punch_supported()) return;
+
+    TempVault tv("reclaim_index_fallback");
+    const auto first = random_payload(40 * 1024);
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) ==
+                vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", first, "first.bin") == vault::VaultResult::Ok);
+        // A second commit makes the preceding index (which contains first.bin)
+        // inactive but still usable as the crash/corruption fallback.
+        REQUIRE(v.add_image("", random_payload(40 * 1024), "second.bin") == vault::VaultResult::Ok);
+        REQUIRE(vault::vault_reclaim(v) == vault::VaultResult::Ok);
+    }
+
+    // Damage only the active ciphertext. Unlock must authenticate and use the
+    // retained inactive slot instead of losing the whole vault.
+    vault::Header h;
+    REQUIRE(read_vault_header(tv.path, h));
+    REQUIRE(h.slot[1 - h.active_slot].length > 0);
+    REQUIRE(flip_file_byte(tv.path, h.slot[h.active_slot].offset));
+
+    vault::Vault reopened;
+    REQUIRE(vault::Vault::open(tv.str(), reopened) == vault::VaultResult::Ok);
+    REQUIRE(reopened.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    const auto kids = reopened.list("");
+    REQUIRE(kids.size() == 1);
+    CHECK_EQ(kids[0]->name, std::string("first.bin"));
+    crypto::SecureBytes out;
+    REQUIRE(reopened.read_image(*kids[0], out) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(first));
+}
+
 TEST(reclaim_releases_disk_blocks_without_shrinking_the_file)
 {
     if (!punch_supported()) return;  // no hole-punch on this fs: nothing to assert
 
     TempVault tv("reclaim_blocks");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
     REQUIRE(v.add_image("", random_payload(512 * 1024), "gone.bin") == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", random_payload(32 * 1024),  "keep.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", random_payload(32 * 1024), "keep.bin") == vault::VaultResult::Ok);
 
     // Physical baseline while both images are densely allocated.
     const uint64_t alloc_dense = allocated_on_disk(tv.path);
@@ -512,7 +571,8 @@ TEST(reclaim_releases_disk_blocks_without_shrinking_the_file)
     // logical size AFTER it so we can prove reclaim() leaves that length alone.
     const uint64_t logical_pre = size_on_disk(tv.path);
 
-    REQUIRE(vault::vault_reclaim(v) == vault::VaultResult::Ok);  // idempotent even if the delete auto-reclaimed
+    REQUIRE(vault::vault_reclaim(v) ==
+            vault::VaultResult::Ok);  // idempotent even if the delete auto-reclaimed
 
     // Physical allocation has dropped by roughly the orphaned 512 KiB chunk...
     CHECK_TRUE(allocated_on_disk(tv.path) + 256 * 1024 <= alloc_dense);
@@ -537,12 +597,10 @@ TEST(compact_in_place_never_creates_a_second_file)
 {
     TempVault tv("inplace_nofile");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
     for (int i = 0; i < 8; ++i) {
-        REQUIRE(v.add_image("", random_payload(64 * 1024),
-                            "img" + std::to_string(i) + ".bin")
-                == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", random_payload(64 * 1024), "img" + std::to_string(i) + ".bin") ==
+                vault::VaultResult::Ok);
     }
     REQUIRE(v.remove_image("", "img0.bin") == vault::VaultResult::Ok);
     REQUIRE(v.remove_image("", "img3.bin") == vault::VaultResult::Ok);
@@ -580,16 +638,15 @@ TEST(compact_stuck_hole_leaves_bounded_residual_and_intact_data)
 {
     TempVault tv("stuckhole");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
     // small (4 KiB, will be deleted) then three big 256 KiB images: the 4 KiB
     // hole fits no big unit, so it survives packing as logical residual.
     REQUIRE(v.add_image("", random_payload(4 * 1024), "small.bin") == vault::VaultResult::Ok);
     std::vector<std::vector<uint8_t>> big;
     for (int i = 0; i < 3; ++i) {
         big.push_back(random_payload(256 * 1024));
-        REQUIRE(v.add_image("", big.back(), "big" + std::to_string(i) + ".bin")
-                == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", big.back(), "big" + std::to_string(i) + ".bin") ==
+                vault::VaultResult::Ok);
     }
     REQUIRE(v.remove_image("", "small.bin") == vault::VaultResult::Ok);
 
@@ -624,15 +681,14 @@ TEST(compact_survives_sync_failure_at_every_step)
         std::vector<std::vector<uint8_t>> keep;
         {
             vault::Vault v;
-            REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-                    == vault::VaultResult::Ok);
-            REQUIRE(v.add_image("", random_payload(64 * 1024), "gone.bin")
-                    == vault::VaultResult::Ok);
+            REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) ==
+                    vault::VaultResult::Ok);
+            REQUIRE(v.add_image("", random_payload(64 * 1024), "gone.bin") ==
+                    vault::VaultResult::Ok);
             for (int i = 0; i < 3; ++i) {
                 keep.push_back(random_payload(48 * 1024));
-                REQUIRE(v.add_image("", keep.back(),
-                                    "keep" + std::to_string(i) + ".bin")
-                        == vault::VaultResult::Ok);
+                REQUIRE(v.add_image("", keep.back(), "keep" + std::to_string(i) + ".bin") ==
+                        vault::VaultResult::Ok);
             }
             REQUIRE(v.remove_image("", "gone.bin") == vault::VaultResult::Ok);
 
@@ -663,8 +719,7 @@ TEST(compact_cancel_keeps_partial_progress_and_rerun_converges)
 {
     TempVault tv("cancel_keep");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
     REQUIRE(v.add_image("", random_payload(200 * 1024), "gone.bin") == vault::VaultResult::Ok);
     const auto keep = random_payload(100 * 1024);
     REQUIRE(v.add_image("", keep, "keep.bin") == vault::VaultResult::Ok);
@@ -678,7 +733,10 @@ TEST(compact_cancel_keeps_partial_progress_and_rerun_converges)
     std::thread t([&] { r = v.compact(&prog); });
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (std::chrono::steady_clock::now() < deadline) {
-        if (prog.done.load() >= 1) { prog.cancel.store(true); break; }
+        if (prog.done.load() >= 1) {
+            prog.cancel.store(true);
+            break;
+        }
         std::this_thread::yield();
     }
     t.join();
@@ -705,8 +763,7 @@ TEST(compact_preserves_framed_vault_content)
 {
     TempVault tv("framed");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
     const auto compressible = pattern(300 * 1024, 7);  // deflates well
     REQUIRE(v.add_image("", random_payload(100 * 1024), "gone.bin") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("", compressible, "keep.bin") == vault::VaultResult::Ok);

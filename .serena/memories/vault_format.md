@@ -214,7 +214,9 @@ commits, final blob placed low, dead tail truncated; shrinks logical size with
 O(1) extra disk, crash-safe because no move ever overwrites a byte the
 last-committed index references) or, on Linux, by `reclaim()`
 which punches holes over the dead spans in place — offset-stable, no temp copy,
-no disk spike, so the file just goes sparse (logical size unchanged). See
+no disk spike, so the file just goes sparse (logical size unchanged). Reclaim
+treats both index slots as live because the inactive authenticated slot is the
+cold-open recovery copy if the active slot is torn or damaged. See
 `mem:module/vault` "Reclamation".
 
 ## See also

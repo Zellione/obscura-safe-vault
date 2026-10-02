@@ -161,18 +161,21 @@ Two ways to reclaim orphaned chunk space (deleted chunks + the superseded index 
   fault-injection (`rename_file`/`inject_rename_failure`), `wipe_and_remove`/
   `wipe_file_contents`, `sync_dir_of`, and the `.compact`/`.old` 3-step rename dance.
 - `Vault::reclaim()` (Linux) — punches holes over the DEAD spans in place (dead = complement of
-  the live-span set: active index blob + every image data/thumb + video chunks/poster).
+  the live-span set: **both authenticated index slots** + every image data/thumb + video
+  chunks/poster). The inactive slot must be retained: cold unlock uses it as the fallback when
+  the active ciphertext is torn or damaged; reclaim must never silently punch that recovery copy.
   Offset-stable (no index rewrite, no reopen, pointers stay valid), no temp copy → NO disk spike.
   Crash-safe by construction (only dead bytes touched). Freed blocks return to the FS; the file
   stays SPARSE, so logical size and `wasted_bytes()` (a LOGICAL measure) are unchanged — physical
   disk drops but the waste indicator still shows the holes. `Locked` if locked; `Ok` (no-op) where
   hole-punch is unsupported. Serialized against the CommitLane: `flush()` the lane, hold
-  `write_mutex_` across scan+punch, snapshot the active slot under `header_mutex_`. Span collection
+  `write_mutex_` across scan+punch, snapshot both slots under `header_mutex_`. Span collection
   lives in the free helper `collect_media_spans` (keeps reclaim() under the cpp:S3776 complexity cap).
 - `Vault::auto_reclaim_space()` — the shared best-effort gate (thresholds `AUTO_COMPACT_MIN_WASTE`
   + `AUTO_COMPACT_WASTE_RATIO`) called by `remove_image`/`remove_gallery`: `reclaim()` on Linux,
   else `compact()`. Tests: `tests/vault/test_vault_compact.cpp` (reclaim preserves media + survives
-  reopen, frees blocks without shrinking logical size, `Locked` when locked; physical assertions
+  reopen, retains the inactive slot as an authenticated fallback after active-slot damage, frees
+  blocks without shrinking logical size, `Locked` when locked; physical assertions
   guarded by a runtime hole-punch probe) and `test_file_util.cpp` (punch_hole zeroes + frees blocks; truncate_file). Phase 60 adds:
   in-place watcher (no sibling temp file, peak size bounded to one commit's overhead), stuck-hole
   residual bound (<=32 KiB), sync-failure sweep (inject n=0..11 → cold reopen valid + rerun
