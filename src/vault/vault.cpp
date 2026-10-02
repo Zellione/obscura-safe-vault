@@ -820,51 +820,51 @@ VaultResult Vault::open(const std::string& path, Vault& out)
 
 namespace {
 
+struct LoadedIndex {
+    IndexNode root;
+    std::vector<SavedSearch> searches;
+    VaultSettings settings;
+};
+
 // Attempt to load and deserialize the index from a vault slot.
-[[nodiscard]] bool try_load_slot(std::FILE* fp, const Header& header,
-                                 std::span<const uint8_t, crypto::KEY_SIZE> master_key,
-                                 uint8_t slot_idx, bool context_bound, IndexNode& root_out,
-                                 std::vector<SavedSearch>& searches_out,
-                                 VaultSettings& settings_out)
+[[nodiscard]] std::optional<LoadedIndex>
+try_load_slot(std::FILE* fp, const Header& header,
+              std::span<const uint8_t, crypto::KEY_SIZE> master_key, uint8_t slot_idx,
+              bool context_bound)
 {
     const IndexSlot& s = header.slot[slot_idx];
     if (s.length == 0) {
-        return false;
+        return std::nullopt;
     }
     std::vector<uint8_t> on_disk;  // ciphertext — need not be page-locked
     if (ChunkStore store(fp, master_key, framed_chunks(header));
         !store.read_raw(s.offset, s.length, on_disk)) {
-        return false;
+        return std::nullopt;
     }
     // Decrypt straight into mlock'd SecureBytes (invariant #1): the decoded
     // index blob is the whole tree's plaintext metadata, wiped on scope exit
     // (Phase 91) instead of a never-wiped plain heap vector.
-    if (on_disk.size() < crypto::TAG_SIZE) return false;
+    if (on_disk.size() < crypto::TAG_SIZE) return std::nullopt;
     crypto::SecureBytes blob;
-    if (!blob.resize(on_disk.size() - crypto::TAG_SIZE)) return false;
+    if (!blob.resize(on_disk.size() - crypto::TAG_SIZE)) return std::nullopt;
     if (std::array<uint8_t, crypto::AD_SIZE> idx_ad{}; !crypto::open_to(
             master_key, s.nonce, on_disk, blob.span(),
             context_bound ? header_record_ad(crypto::ChunkDomain::Index, header, idx_ad)
                           : std::span<const uint8_t>{})) {
-        return false;
+        return std::nullopt;
     }
     if (framed_chunks(header)) {
         crypto::SecureBytes plain;
         if (!chunk_codec::decode_frame(blob.as_span(), plain)) {
-            return false;
+            return std::nullopt;
         }
         blob = std::move(plain);
     }
-    IndexNode tmp;
-    std::vector<SavedSearch> tmp_searches;
-    VaultSettings tmp_settings;
-    if (!deserialize_index(blob.as_span(), tmp, tmp_searches, tmp_settings)) {
-        return false;
+    LoadedIndex loaded;
+    if (!deserialize_index(blob.as_span(), loaded.root, loaded.searches, loaded.settings)) {
+        return std::nullopt;
     }
-    root_out = std::move(tmp);
-    searches_out = std::move(tmp_searches);
-    settings_out = std::move(tmp_settings);
-    return true;
+    return loaded;
 }
 
 }  // namespace
@@ -924,16 +924,21 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
     bool loaded_legacy_index = false;
     auto load_slot = [&](uint8_t slot) {
         const bool declared = index_slot_context_bound(header_, slot);
-        if (try_load_slot(fp_, header_, master_key_.as_span(), slot, declared, root_,
-                          saved_searches_, settings_)) {
+        auto publish = [this](LoadedIndex&& loaded) {
+            root_ = std::move(loaded.root);
+            saved_searches_ = std::move(loaded.searches);
+            settings_ = std::move(loaded.settings);
+        };
+        if (auto loaded = try_load_slot(fp_, header_, master_key_.as_span(), slot, declared)) {
+            publish(std::move(*loaded));
             loaded_legacy_index = !declared;
             return true;
         }
         // Phase 99 recovery: headers written before per-slot modes cannot say
         // whether a fallback blob predates the context migration. Trying the
         // other authenticated mode is safe: Poly1305 must still verify.
-        if (try_load_slot(fp_, header_, master_key_.as_span(), slot, !declared, root_,
-                          saved_searches_, settings_)) {
+        if (auto loaded = try_load_slot(fp_, header_, master_key_.as_span(), slot, !declared)) {
+            publish(std::move(*loaded));
             header_.slot[slot].context_bound = !declared;
             loaded_legacy_index = declared;
             platform::log_error("Vault",
