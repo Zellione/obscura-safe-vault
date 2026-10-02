@@ -522,3 +522,10 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   zero, and sets the flag; the one `commit_index()` writes an AD-sealed blob and the
   slot-swap persists flag+wrap+slot atomically (crash between swap phases → the
   existing slot-fallback; cancel commits rewrites but skips finalize → re-offered).
+  Header flag bit 3 adds per-index-slot AD mode bytes at reserved offsets 224/225.
+  Slot swaps stamp the new slot while preserving the older slot's actual mode,
+  keeping a legacy fallback authentic across finalization. Pre-bit-3 Phase-99
+  headers recover by trying the alternate slot AD mode only after normal loading
+  fails (Poly1305 must still verify). Recovering a legacy index under a context-
+  bound header makes `uses_context_chunks` false for that session so migration is
+  offered again instead of treating the older tree as fully upgraded.
