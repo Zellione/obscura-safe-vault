@@ -826,6 +826,11 @@ struct LoadedIndex {
     VaultSettings settings;
 };
 
+struct LoadedSlot {
+    LoadedIndex index;
+    bool legacy = false;
+};
+
 // Attempt to load and deserialize the index from a vault slot.
 [[nodiscard]] std::optional<LoadedIndex>
 try_load_slot(std::FILE* fp, const Header& header,
@@ -865,6 +870,26 @@ try_load_slot(std::FILE* fp, const Header& header,
         return std::nullopt;
     }
     return loaded;
+}
+
+[[nodiscard]] std::optional<LoadedSlot>
+load_slot_with_recovery(std::FILE* fp, Header& header,
+                        std::span<const uint8_t, crypto::KEY_SIZE> master_key, uint8_t slot)
+{
+    const bool declared = index_slot_context_bound(header, slot);
+    if (auto loaded = try_load_slot(fp, header, master_key, slot, declared)) {
+        return LoadedSlot{std::move(*loaded), !declared};
+    }
+    // Phase 99 recovery: headers written before per-slot modes cannot say
+    // whether a fallback blob predates the context migration. Trying the
+    // other authenticated mode is safe: Poly1305 must still verify.
+    if (auto loaded = try_load_slot(fp, header, master_key, slot, !declared)) {
+        header.slot[slot].context_bound = !declared;
+        platform::log_error("Vault",
+                            "index slot recovered using its alternate authentication mode");
+        return LoadedSlot{std::move(*loaded), declared};
+    }
+    return std::nullopt;
 }
 
 }  // namespace
@@ -921,34 +946,10 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
     // Load the index from the active slot, falling back to the other slot if the
     // active one is unreadable (crash during a swap left it truncated/corrupt).
     const uint8_t active = header_.active_slot == 0 ? 0 : 1;
-    bool loaded_legacy_index = false;
-    auto load_slot = [&](uint8_t slot) {
-        const bool declared = index_slot_context_bound(header_, slot);
-        auto publish = [this](LoadedIndex&& loaded) {
-            root_ = std::move(loaded.root);
-            saved_searches_ = std::move(loaded.searches);
-            settings_ = std::move(loaded.settings);
-        };
-        if (auto loaded = try_load_slot(fp_, header_, master_key_.as_span(), slot, declared)) {
-            publish(std::move(*loaded));
-            loaded_legacy_index = !declared;
-            return true;
-        }
-        // Phase 99 recovery: headers written before per-slot modes cannot say
-        // whether a fallback blob predates the context migration. Trying the
-        // other authenticated mode is safe: Poly1305 must still verify.
-        if (auto loaded = try_load_slot(fp_, header_, master_key_.as_span(), slot, !declared)) {
-            publish(std::move(*loaded));
-            header_.slot[slot].context_bound = !declared;
-            loaded_legacy_index = declared;
-            platform::log_error("Vault",
-                                "index slot recovered using its alternate authentication mode");
-            return true;
-        }
-        return false;
-    };
-    if (!load_slot(active)) {
-        if (!load_slot(active == 0 ? 1 : 0)) {
+    auto loaded = load_slot_with_recovery(fp_, header_, master_key_.as_span(), active);
+    if (!loaded) {
+        loaded = load_slot_with_recovery(fp_, header_, master_key_.as_span(), active == 0 ? 1 : 0);
+        if (!loaded) {
             master_key_.wipe();
             return BadFormat;
         }
@@ -959,7 +960,10 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
                             "active index slot unreadable — recovered from the previous slot");
     }
 
-    recovered_legacy_index_ = loaded_legacy_index && context_bound_chunks(header_);
+    root_ = std::move(loaded->index.root);
+    saved_searches_ = std::move(loaded->index.searches);
+    settings_ = std::move(loaded->index.settings);
+    recovered_legacy_index_ = loaded->legacy && context_bound_chunks(header_);
 
     unlocked_ = true;
     // Phase 99: keep the session KEK (mlock'd) so the v1→v2 migration can
