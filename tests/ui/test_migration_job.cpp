@@ -13,6 +13,7 @@
 #include "image/thumbnail.h"
 #include "media/video_probe.h"
 #include "ui/migration_job.h"
+#include "vault/commit_lane.h"
 #include "vault/file_util.h"
 #include "vault/migration.h"
 #include "vault/staging.h"
@@ -29,7 +30,7 @@ namespace vault {
 // Forward declarations for cross-translation-unit use.
 void test_only_force_video_codec_unknown(Vault& v, std::string_view node_path);
 void test_only_force_image_animated_unknown(Vault& v, std::string_view node_path);
-}
+}  // namespace vault
 
 namespace fs = std::filesystem;
 
@@ -43,7 +44,8 @@ static std::span<const uint8_t> job_bytes(const std::string& s)
 static std::vector<uint8_t> job_pattern(size_t n, uint8_t seed)
 {
     std::vector<uint8_t> v(n);
-    for (size_t i = 0; i < n; ++i) v[i] = static_cast<uint8_t>(i * 37 + seed);
+    for (size_t i = 0; i < n; ++i)
+        v[i] = static_cast<uint8_t>(i * 37 + seed);
     return v;
 }
 
@@ -55,7 +57,7 @@ static std::vector<uint8_t> job_pattern(size_t n, uint8_t seed)
 static std::vector<uint8_t> job_incompressible(size_t n, uint64_t seed)
 {
     std::vector<uint8_t> v(n);
-    uint64_t             x = seed;
+    uint64_t x = seed;
     for (size_t i = 0; i < n; ++i) {
         x += 0x9E3779B97F4A7C15ULL;
         uint64_t z = x;
@@ -92,7 +94,10 @@ struct JobTempVault {
         std::error_code ec;
         fs::remove(path, ec);
     }
-    [[nodiscard]] std::string str() const { return path.string(); }
+    [[nodiscard]] std::string str() const
+    {
+        return path.string();
+    }
 };
 
 // Drive the job to completion the way the UI does: poll, then collect once.
@@ -105,7 +110,7 @@ ui::MigrationOutcome run_to_completion(ui::MigrationJob& job)
     if (auto out = job.take_outcome()) return *out;
     return {};
 }
-} // namespace
+}  // namespace
 
 // The progress modal's label must never claim "Preparing…" once the job has
 // actually reached a later phase — that's what made a finished-or-nearly-finished
@@ -113,7 +118,8 @@ ui::MigrationOutcome run_to_completion(ui::MigrationJob& job)
 // switch's default and re-show "Preparing…" right next to a maxed-out N/N count.
 TEST(migration_progress_text_done_does_not_read_as_preparing)
 {
-    const ui::MigrationProgressText t = ui::migration_progress_text(ui::MigrationPhase::Done, 40, 40);
+    const ui::MigrationProgressText t =
+        ui::migration_progress_text(ui::MigrationPhase::Done, 40, 40);
     CHECK(t.title != "Preparing…");
 }
 
@@ -138,8 +144,8 @@ TEST(migration_job_on_clean_vault_stamps_watermark_and_does_nothing_else)
 {
     JobTempVault tv("clean");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
     REQUIRE(v.add_image("", job_pattern(1000, 1), "a.png") == vault::VaultResult::Ok);
 
     ui::MigrationJob job;
@@ -159,8 +165,8 @@ TEST(migration_job_watermark_survives_reopen)
     JobTempVault tv("persist");
     {
         vault::Vault v;
-        REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-                == vault::VaultResult::Ok);
+        REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+                vault::VaultResult::Ok);
         ui::MigrationJob job;
         REQUIRE(job.start(v));
         const ui::MigrationOutcome out = run_to_completion(job);
@@ -178,12 +184,12 @@ TEST(migration_job_double_start_is_rejected)
 {
     JobTempVault tv("double");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     ui::MigrationJob job;
     REQUIRE(job.start(v));
-    CHECK(!job.start(v));            // already in flight
+    CHECK(!job.start(v));  // already in flight
     (void)run_to_completion(job);
 }
 
@@ -191,8 +197,8 @@ TEST(migration_job_fixes_animated_image)
 {
     JobTempVault tv("anim_img");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     // Add animated WebP
     auto anim_webp = fixtures::load_anim_webp();
@@ -239,8 +245,8 @@ TEST(migration_job_fixes_video_codec)
 #ifdef OSV_VENDORED_AV
     JobTempVault tv("video_codec");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     // Load real MP4 fixture
     auto mp4_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
@@ -281,8 +287,8 @@ TEST(migration_job_take_outcome_returns_exactly_once)
 {
     JobTempVault tv("outcome_once");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     ui::MigrationJob job;
     REQUIRE(job.start(v));
@@ -308,8 +314,8 @@ TEST(migration_job_cancel_prevents_watermark)
 {
     JobTempVault tv("cancel_stamp");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     // Add animated WebP images so there's work to iterate over
     auto anim_webp = fixtures::load_anim_webp();
@@ -341,8 +347,8 @@ TEST(migration_job_flips_animated_webp_and_leaves_static_webp_alone)
 {
     JobTempVault tv("anim_static_webp");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     // Load both animated and static WebP fixtures
     const auto anim_webp = fixtures::load_anim_webp();
@@ -386,8 +392,8 @@ TEST(migration_job_not_reoffered_after_completion)
 {
     JobTempVault tv("not_reoffered");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     // Add an image that needs repair (animated WebP forced to unknown)
     auto anim_webp = fixtures::load_anim_webp();
@@ -414,8 +420,8 @@ TEST(migration_job_pool_handles_many_items_without_loss)
 {
     JobTempVault tv("pool");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     const std::vector<uint8_t> anim = fixtures::load_anim_webp();
     constexpr int kCount = 64;
@@ -436,11 +442,12 @@ TEST(migration_job_pool_handles_many_items_without_loss)
 
     CHECK(out.ok);
     CHECK_EQ(out.total, kCount);
-    CHECK_EQ(out.images_fixed, kCount);   // every item applied, none dropped
+    CHECK_EQ(out.images_fixed, kCount);  // every item applied, none dropped
     CHECK_EQ(out.failed, 0);
-    CHECK_EQ(job.done(), kCount);         // progress reached the denominator
+    CHECK_EQ(job.done(), kCount);  // progress reached the denominator
 
-    for (const vault::IndexNode* n : v.list("")) CHECK(n->meta.animated);
+    for (const vault::IndexNode* n : v.list(""))
+        CHECK(n->meta.animated);
 }
 
 // Phase 79: App::shutdown (window close during an upgrade) must be able to stop
@@ -452,8 +459,8 @@ TEST(migration_job_abort_and_join_stops_job_without_polling)
 {
     JobTempVault tv("abort_join");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     const std::vector<uint8_t> anim = fixtures::load_anim_webp();
     constexpr int kCount = 32;
@@ -480,7 +487,7 @@ TEST(migration_job_abort_and_join_stops_job_without_polling)
 TEST(migration_job_abort_and_join_without_start_is_noop)
 {
     ui::MigrationJob job;
-    job.abort_and_join();   // must not crash or hang on a never-started job
+    job.abort_and_join();  // must not crash or hang on a never-started job
     CHECK(!job.active());
     CHECK(!job.take_outcome());
 }
@@ -489,8 +496,8 @@ TEST(migration_job_skips_compaction_when_nothing_is_wasted)
 {
     JobTempVault tv("nocompact");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
     // Empty vault has nothing to compact initially
     REQUIRE(v.list("").size() == 0u);
     REQUIRE(vault::vault_wasted_bytes(v) == 0u);
@@ -518,8 +525,8 @@ TEST(migration_job_cancel_skips_compaction)
 {
     JobTempVault tv("cancelcompact");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     ui::MigrationJob job;
     REQUIRE(job.start(v));
@@ -533,8 +540,8 @@ TEST(migration_job_compaction_reclaims_orphaned_chunks)
 {
     JobTempVault tv("compact_reclaim");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     // Add two images: one to keep, one to delete. Deleting the second must leave
     // more than AUTO_COMPACT_MIN_WASTE (256 KiB) orphaned, so the migration job's
@@ -557,7 +564,7 @@ TEST(migration_job_compaction_reclaims_orphaned_chunks)
     //    waste well under size/4, so the auto gate declines on every platform and the
     //    orphan survives to be reclaimed by the job. MigrationJob's own compaction
     //    gate is the floor alone, with no ratio term, so it still runs.
-    const auto keep_bytes   = job_incompressible(24u << 20, 1);
+    const auto keep_bytes = job_incompressible(24u << 20, 1);
     const auto delete_bytes = job_incompressible(2u << 20, 2);
     REQUIRE(v.add_image("", keep_bytes, "keep.png") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("", delete_bytes, "delete.png") == vault::VaultResult::Ok);
@@ -606,8 +613,8 @@ TEST(migration_job_regenerates_image_thumbs_at_512)
     // regenerate at 512px.
     JobTempVault tv("regen_thumbs");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     // Add a normal image (which will have a 512px thumb)
     auto webp_data = fixtures::load_webp();
@@ -645,8 +652,8 @@ TEST(migration_job_cancel_does_not_stamp_thumb_watermark)
     // Phase 75: cancel() before completion -> migrated_thumb_side stays unchanged
     JobTempVault tv("cancel_no_stamp");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     // Add an image
     auto webp_data = fixtures::load_webp();
@@ -680,8 +687,8 @@ TEST(migration_job_regenerates_poster_of_resolved_video)
 #ifdef OSV_VENDORED_AV
     JobTempVault tv("resolve_poster");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     // Load real MP4 fixture
     auto mp4_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
@@ -735,8 +742,8 @@ TEST(migration_job_sniffs_animated_for_no_thumb_image_in_thumb_pass)
     // images with existing thumbs)
     JobTempVault tv("sniff_no_thumb");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     // Load animated WebP
     auto anim_webp = fixtures::load_anim_webp();
@@ -788,8 +795,8 @@ TEST(migration_job_thumb_arm_skips_when_fresh)
     // Phase 75: migrated vault with no pending work -> collect() finds no items
     JobTempVault tv("skip_fresh");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     // Add an animated WebP
     auto anim_webp = fixtures::load_anim_webp();
@@ -828,8 +835,8 @@ TEST(migration_job_thumb_regen_batches_syncs_not_one_per_item)
     // not one per item.
     JobTempVault tv("sync_batch");
     vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+            vault::VaultResult::Ok);
 
     auto webp_data = fixtures::load_webp();
     constexpr int kCount = 40;
@@ -857,3 +864,54 @@ TEST(migration_job_thumb_regen_batches_syncs_not_one_per_item)
     CHECK(syncs < static_cast<uint64_t>(kCount));
 }
 
+TEST(migration_then_duplicate_delete_and_compact_survives_cold_reopen)
+{
+    JobTempVault tv("migrate_dedupe_compact");
+    const auto payload = job_incompressible(1u << 20, 0xD3D0u);
+    constexpr int kCount = 12;
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v) ==
+                vault::VaultResult::Ok);
+        for (int i = 0; i < kCount; ++i) {
+            REQUIRE(v.add_image("", payload, "dup" + std::to_string(i) + ".bin") ==
+                    vault::VaultResult::Ok);
+        }
+        vault::test_only_downgrade_to_legacy(v);
+
+        // Match production: the app keeps a CommitLane bound across migration,
+        // duplicate deletion, and the explicit Shift+C space-recovery job.
+        vault::CommitLane lane;
+        lane.start(v);
+        v.set_commit_router(&lane);
+
+        ui::MigrationJob migration;
+        REQUIRE(migration.start(v));
+        const ui::MigrationOutcome migrated = run_to_completion(migration);
+        REQUIRE(migrated.ok);
+        CHECK(vault::uses_context_chunks(v));
+
+        std::vector<std::string> doomed;
+        for (int i = 1; i < kCount; ++i)
+            doomed.push_back("dup" + std::to_string(i) + ".bin");
+        vault::RemoveBatchStats removed;
+        REQUIRE(vault::remove_media_batch(v, doomed, &removed) == vault::VaultResult::Ok);
+        CHECK_EQ(removed.removed, static_cast<size_t>(kCount - 1));
+        REQUIRE(v.compact() == vault::VaultResult::Ok);
+
+        v.set_commit_router(nullptr);
+        lane.stop();
+        v.lock();
+    }
+
+    vault::Vault reopened;
+    REQUIRE(vault::Vault::open(tv.str(), reopened) == vault::VaultResult::Ok);
+    REQUIRE(reopened.unlock(job_bytes("pw"), {}) == vault::VaultResult::Ok);
+    CHECK(vault::uses_context_chunks(reopened));
+    const auto nodes = reopened.list("");
+    REQUIRE(nodes.size() == 1u);
+    crypto::SecureBytes out;
+    REQUIRE(reopened.read_image(*nodes[0], out) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(payload));
+}

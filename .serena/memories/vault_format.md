@@ -42,6 +42,8 @@ The legacy single-file format below remains the default creation format until Ph
   vault_id     u8[16]   (Phase 99 — immutable per-vault identity, in the former
                          reserved region at byte 208; owner of the Index/MkWrap
                          AEAD AD. Never changes on change_password.)
+  slot_a_mode  u8       (byte 224; 0=legacy/no AD, 1=context-bound AD)
+  slot_b_mode  u8       (byte 225; meaningful when header flag bit 3 is set)
   [reserved padding to fixed header_size]
 
 [ Data region — append-only ]
@@ -57,6 +59,15 @@ master-key wrap are sealed with context-bound AD, and (once migrated) every
 media chunk is too. New vaults set it at `create`; legacy vaults get it set by
 the v1→v2 migration, in the same commit that re-seals the master-key wrap
 (Phase 99 PR 2).
+
+Header flag bit 3 `FLAG_INDEX_SLOT_MODES` makes the two bytes at 224/225
+authoritative. Each crash-recovery slot records its own index-blob AD mode, so
+the legacy fallback remains readable while bit 2 transitions the master-key
+wrap and newly written records to context-bound AEAD. Headers written before
+this bit existed retain the Phase-99 global-mode interpretation, but unlock
+also probes the alternate index AD mode after normal authenticated loading
+fails; a success is logged and treated as an incomplete migration so the
+recovered legacy tree is upgraded again.
 
 Canonical AD bytes (fixed-width little-endian, deterministic cross-platform;
 built by `crypto::build_chunk_ad(crypto::ChunkTag)`), 38 bytes total:
@@ -203,7 +214,9 @@ commits, final blob placed low, dead tail truncated; shrinks logical size with
 O(1) extra disk, crash-safe because no move ever overwrites a byte the
 last-committed index references) or, on Linux, by `reclaim()`
 which punches holes over the dead spans in place — offset-stable, no temp copy,
-no disk spike, so the file just goes sparse (logical size unchanged). See
+no disk spike, so the file just goes sparse (logical size unchanged). Reclaim
+treats both index slots as live because the inactive authenticated slot is the
+cold-open recovery copy if the active slot is torn or damaged. See
 `mem:module/vault` "Reclamation".
 
 ## See also

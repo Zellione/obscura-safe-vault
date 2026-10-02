@@ -13,8 +13,8 @@
 #include <cstdint>
 #include <span>
 
-#include "crypto/crypto.h"   // KEY_SIZE, NONCE_SIZE, TAG_SIZE, SALT_SIZE
-#include "crypto/kdf.h"      // KdfParams
+#include "crypto/crypto.h"  // KEY_SIZE, NONCE_SIZE, TAG_SIZE, SALT_SIZE
+#include "crypto/kdf.h"     // KdfParams
 
 namespace vault {
 
@@ -40,27 +40,32 @@ inline constexpr uint32_t FLAG_DOMAIN_SEPARATED_KDF = 1u << 1;
 // chunk migration has rewritten every live record (per-record
 // `context_bound` fuses the gap / migration window).
 inline constexpr uint32_t FLAG_CONTEXT_BOUND_CHUNKS = 1u << 2;
+// Bit 3: each index slot records whether that particular blob was sealed with
+// context-bound AD. This keeps the older slot usable while a legacy vault
+// crosses the global context-bound migration boundary.
+inline constexpr uint32_t FLAG_INDEX_SLOT_MODES = 1u << 3;
 
 // One half of the crash-safe double-buffered index pointer. `offset`/`length`
 // locate the encrypted index blob (ciphertext|tag) in the data region; `nonce`
 // is the XChaCha20 nonce it was sealed with. Storing the nonce here means
 // flipping `active_slot` atomically commits the location *and* its nonce.
 struct IndexSlot {
-    uint64_t                                offset = 0;
-    uint64_t                                length = 0;  // bytes of ciphertext|tag
+    uint64_t offset = 0;
+    uint64_t length = 0;  // bytes of ciphertext|tag
     std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
+    bool context_bound = false;
 };
 
 struct Header {
-    uint16_t          version     = FORMAT_VERSION;
-    uint16_t          header_size = HEADER_SIZE;
-    uint32_t          flags       = 0;
+    uint16_t version = FORMAT_VERSION;
+    uint16_t header_size = HEADER_SIZE;
+    uint32_t flags = 0;
 
     // KDF block
-    uint8_t           kdf_algo = 0;  // 0 = Argon2id
-    crypto::KdfParams kdf      = crypto::DEFAULT_KDF_PARAMS;
+    uint8_t kdf_algo = 0;  // 0 = Argon2id
+    crypto::KdfParams kdf = crypto::DEFAULT_KDF_PARAMS;
     std::array<uint8_t, crypto::SALT_SIZE> salt{};
-    uint8_t           keyfile_required = 0;
+    uint8_t keyfile_required = 0;
 
     // Phase 99 (OSV-AUD-004): an immutable per-vault identity bound into the
     // index-blob and master-key-wrap AEAD associated data (owner field).
@@ -77,12 +82,12 @@ struct Header {
     // Master-key wrap (XChaCha20-Poly1305, detached): wrapped_master_key|mk_tag
     // sealed under the KEK with mk_nonce.
     std::array<uint8_t, crypto::NONCE_SIZE> mk_nonce{};
-    std::array<uint8_t, crypto::KEY_SIZE>   wrapped_master_key{};
-    std::array<uint8_t, crypto::TAG_SIZE>   mk_tag{};
+    std::array<uint8_t, crypto::KEY_SIZE> wrapped_master_key{};
+    std::array<uint8_t, crypto::TAG_SIZE> mk_tag{};
 
     // Double-buffered index pointer. slot[0] = A, slot[1] = B.
     std::array<IndexSlot, 2> slot{};
-    uint8_t   active_slot = 0;  // 0 = A, 1 = B
+    uint8_t active_slot = 0;  // 0 = A, 1 = B
 
     // Serialise into a HEADER_SIZE buffer: magic, fields at fixed offsets, then
     // zero padding to the end.
@@ -114,4 +119,14 @@ struct Header {
     return (h.flags & FLAG_CONTEXT_BOUND_CHUNKS) != 0;
 }
 
-} // namespace vault
+[[nodiscard]] constexpr bool has_index_slot_modes(const Header& h) noexcept
+{
+    return (h.flags & FLAG_INDEX_SLOT_MODES) != 0;
+}
+
+[[nodiscard]] constexpr bool index_slot_context_bound(const Header& h, uint8_t slot) noexcept
+{
+    return has_index_slot_modes(h) ? h.slot[slot].context_bound : context_bound_chunks(h);
+}
+
+}  // namespace vault

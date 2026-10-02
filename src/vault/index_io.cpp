@@ -18,15 +18,15 @@ namespace {
 // NOT change on change_password); a zero record id; domain Index. Gated on the
 // header flag so legacy vaults stay contextless until the migration flips the
 // flag at the very end.
-std::span<const uint8_t> index_blob_ad(const Header& h,
+std::span<const uint8_t> index_blob_ad(const Header& h, bool context_bound,
                                        std::array<uint8_t, crypto::AD_SIZE>& scratch) noexcept
 {
-    if (!context_bound_chunks(h)) return {};
+    if (!context_bound) return {};
     crypto::ChunkTag t;
-    t.domain        = crypto::ChunkDomain::Index;
-    t.owner         = h.vault_id;
+    t.domain = crypto::ChunkDomain::Index;
+    t.owner = h.vault_id;
     t.context_bound = true;
-    scratch         = crypto::build_chunk_ad(t);
+    scratch = crypto::build_chunk_ad(t);
     return scratch;
 }
 
@@ -38,8 +38,10 @@ VaultResult swap_slots(IndexIoContext& ctx, uint64_t offset, uint64_t sealed_len
     using enum VaultResult;
     auto do_swap = [&]() {
         const uint8_t inactive = ctx.header_.active_slot == 0 ? 1 : 0;
-        ctx.header_.slot[inactive] =
-            IndexSlot{.offset = offset, .length = sealed_len, .nonce = nonce};
+        ctx.header_.slot[inactive] = IndexSlot{.offset = offset,
+                                               .length = sealed_len,
+                                               .nonce = nonce,
+                                               .context_bound = context_bound_chunks(ctx.header_)};
         // Phase B: persist slot allocation.
         if (!write_header(ctx.fp_, ctx.header_)) return IoError;
         ctx.header_.active_slot = inactive;
@@ -86,7 +88,8 @@ VaultResult commit_plain_blob(IndexIoContext& ctx, std::span<const uint8_t> plai
     std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
     if (!crypto::fill_random(nonce)) return CryptoError;
     std::array<uint8_t, crypto::AD_SIZE> ad_scratch{};
-    const std::span<const uint8_t> ad = index_blob_ad(ctx.header_, ad_scratch);
+    const std::span<const uint8_t> ad =
+        index_blob_ad(ctx.header_, context_bound_chunks(ctx.header_), ad_scratch);
     std::vector<uint8_t> sealed;
     if (!crypto::seal(ctx.master_key_.as_span(), nonce, plain, sealed, ad)) return CryptoError;
 
@@ -117,7 +120,8 @@ VaultResult commit_plain_blob_at(IndexIoContext& ctx, std::span<const uint8_t> p
     std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
     if (!crypto::fill_random(nonce)) return CryptoError;
     std::array<uint8_t, crypto::AD_SIZE> ad_scratch{};
-    const std::span<const uint8_t> ad = index_blob_ad(ctx.header_, ad_scratch);
+    const std::span<const uint8_t> ad =
+        index_blob_ad(ctx.header_, context_bound_chunks(ctx.header_), ad_scratch);
     std::vector<uint8_t> sealed;
     if (!crypto::seal(ctx.master_key_.as_span(), nonce, plain, sealed, ad)) return CryptoError;
 

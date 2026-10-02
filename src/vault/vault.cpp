@@ -505,7 +505,8 @@ Vault::Vault(Vault&& o) noexcept
     : path_(std::move(o.path_)), fp_(o.fp_), read_fp_(o.read_fp_), thumb_fp_(o.thumb_fp_),
       write_mutex_(std::move(o.write_mutex_)), header_mutex_(std::move(o.header_mutex_)),
       header_(o.header_), unlocked_(o.unlocked_), master_key_(std::move(o.master_key_)),
-      kek_(std::move(o.kek_)), kek_valid_(o.kek_valid_), root_(std::move(o.root_)),
+      kek_(std::move(o.kek_)), kek_valid_(o.kek_valid_),
+      recovered_legacy_index_(o.recovered_legacy_index_), root_(std::move(o.root_)),
       saved_searches_(std::move(o.saved_searches_)), settings_(std::move(o.settings_))
 {
     // Phase 50: A bound CommitLane holds a raw Vault* to &o. App holds the active
@@ -518,6 +519,7 @@ Vault::Vault(Vault&& o) noexcept
     o.thumb_fp_ = nullptr;
     o.unlocked_ = false;
     o.kek_valid_ = false;
+    o.recovered_legacy_index_ = false;
 }
 
 Vault& Vault::operator=(Vault&& o) noexcept
@@ -540,6 +542,7 @@ Vault& Vault::operator=(Vault&& o) noexcept
         master_key_ = std::move(o.master_key_);
         kek_ = std::move(o.kek_);
         kek_valid_ = o.kek_valid_;
+        recovered_legacy_index_ = o.recovered_legacy_index_;
         root_ = std::move(o.root_);
         saved_searches_ = std::move(o.saved_searches_);
         settings_ = std::move(o.settings_);
@@ -549,6 +552,7 @@ Vault& Vault::operator=(Vault&& o) noexcept
         o.thumb_fp_ = nullptr;
         o.unlocked_ = false;
         o.kek_valid_ = false;
+        o.recovered_legacy_index_ = false;
     }
     return *this;
 }
@@ -571,6 +575,7 @@ void Vault::lock() noexcept
     master_key_.wipe();
     kek_.wipe();
     kek_valid_ = false;
+    recovered_legacy_index_ = false;
     unlocked_ = false;
     root_ = IndexNode::gallery("");
     saved_searches_.clear();
@@ -634,7 +639,8 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     h.kdf = params;
     h.kdf_algo = 0;  // Argon2id
     h.keyfile_required = keyfile.empty() ? 0 : 1;
-    h.flags |= FLAG_FRAMED_CHUNKS | FLAG_DOMAIN_SEPARATED_KDF | FLAG_CONTEXT_BOUND_CHUNKS;
+    h.flags |= FLAG_FRAMED_CHUNKS | FLAG_DOMAIN_SEPARATED_KDF | FLAG_CONTEXT_BOUND_CHUNKS |
+               FLAG_INDEX_SLOT_MODES;
 
     crypto::SecureBuffer<crypto::KEY_SIZE> master;
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
@@ -814,50 +820,76 @@ VaultResult Vault::open(const std::string& path, Vault& out)
 
 namespace {
 
+struct LoadedIndex {
+    IndexNode root;
+    std::vector<SavedSearch> searches;
+    VaultSettings settings;
+};
+
+struct LoadedSlot {
+    LoadedIndex index;
+    bool legacy = false;
+};
+
 // Attempt to load and deserialize the index from a vault slot.
-[[nodiscard]] bool try_load_slot(std::FILE* fp, const Header& header,
-                                 std::span<const uint8_t, crypto::KEY_SIZE> master_key,
-                                 uint8_t slot_idx, IndexNode& root_out,
-                                 std::vector<SavedSearch>& searches_out,
-                                 VaultSettings& settings_out)
+[[nodiscard]] std::optional<LoadedIndex>
+try_load_slot(std::FILE* fp, const Header& header,
+              std::span<const uint8_t, crypto::KEY_SIZE> master_key, uint8_t slot_idx,
+              bool context_bound)
 {
     const IndexSlot& s = header.slot[slot_idx];
     if (s.length == 0) {
-        return false;
+        return std::nullopt;
     }
     std::vector<uint8_t> on_disk;  // ciphertext — need not be page-locked
     if (ChunkStore store(fp, master_key, framed_chunks(header));
         !store.read_raw(s.offset, s.length, on_disk)) {
-        return false;
+        return std::nullopt;
     }
     // Decrypt straight into mlock'd SecureBytes (invariant #1): the decoded
     // index blob is the whole tree's plaintext metadata, wiped on scope exit
     // (Phase 91) instead of a never-wiped plain heap vector.
-    if (on_disk.size() < crypto::TAG_SIZE) return false;
+    if (on_disk.size() < crypto::TAG_SIZE) return std::nullopt;
     crypto::SecureBytes blob;
-    if (!blob.resize(on_disk.size() - crypto::TAG_SIZE)) return false;
-    if (std::array<uint8_t, crypto::AD_SIZE> idx_ad{};
-        !crypto::open_to(master_key, s.nonce, on_disk, blob.span(),
-                         header_record_ad(crypto::ChunkDomain::Index, header, idx_ad))) {
-        return false;
+    if (!blob.resize(on_disk.size() - crypto::TAG_SIZE)) return std::nullopt;
+    if (std::array<uint8_t, crypto::AD_SIZE> idx_ad{}; !crypto::open_to(
+            master_key, s.nonce, on_disk, blob.span(),
+            context_bound ? header_record_ad(crypto::ChunkDomain::Index, header, idx_ad)
+                          : std::span<const uint8_t>{})) {
+        return std::nullopt;
     }
     if (framed_chunks(header)) {
         crypto::SecureBytes plain;
         if (!chunk_codec::decode_frame(blob.as_span(), plain)) {
-            return false;
+            return std::nullopt;
         }
         blob = std::move(plain);
     }
-    IndexNode tmp;
-    std::vector<SavedSearch> tmp_searches;
-    VaultSettings tmp_settings;
-    if (!deserialize_index(blob.as_span(), tmp, tmp_searches, tmp_settings)) {
-        return false;
+    LoadedIndex loaded;
+    if (!deserialize_index(blob.as_span(), loaded.root, loaded.searches, loaded.settings)) {
+        return std::nullopt;
     }
-    root_out = std::move(tmp);
-    searches_out = std::move(tmp_searches);
-    settings_out = std::move(tmp_settings);
-    return true;
+    return loaded;
+}
+
+[[nodiscard]] std::optional<LoadedSlot>
+load_slot_with_recovery(std::FILE* fp, Header& header,
+                        std::span<const uint8_t, crypto::KEY_SIZE> master_key, uint8_t slot)
+{
+    const bool declared = index_slot_context_bound(header, slot);
+    if (auto loaded = try_load_slot(fp, header, master_key, slot, declared)) {
+        return LoadedSlot{std::move(*loaded), !declared};
+    }
+    // Phase 99 recovery: headers written before per-slot modes cannot say
+    // whether a fallback blob predates the context migration. Trying the
+    // other authenticated mode is safe: Poly1305 must still verify.
+    if (auto loaded = try_load_slot(fp, header, master_key, slot, !declared)) {
+        header.slot[slot].context_bound = !declared;
+        platform::log_error("Vault",
+                            "index slot recovered using its alternate authentication mode");
+        return LoadedSlot{std::move(*loaded), declared};
+    }
+    return std::nullopt;
 }
 
 }  // namespace
@@ -913,10 +945,11 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
 
     // Load the index from the active slot, falling back to the other slot if the
     // active one is unreadable (crash during a swap left it truncated/corrupt).
-    if (const uint8_t active = header_.active_slot == 0 ? 0 : 1; !try_load_slot(
-            fp_, header_, master_key_.as_span(), active, root_, saved_searches_, settings_)) {
-        if (!try_load_slot(fp_, header_, master_key_.as_span(), active == 0 ? 1 : 0, root_,
-                           saved_searches_, settings_)) {
+    const uint8_t active = header_.active_slot == 0 ? 0 : 1;
+    auto loaded = load_slot_with_recovery(fp_, header_, master_key_.as_span(), active);
+    if (!loaded) {
+        loaded = load_slot_with_recovery(fp_, header_, master_key_.as_span(), active == 0 ? 1 : 0);
+        if (!loaded) {
             master_key_.wipe();
             return BadFormat;
         }
@@ -926,6 +959,11 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
         platform::log_error("Vault",
                             "active index slot unreadable — recovered from the previous slot");
     }
+
+    root_ = std::move(loaded->index.root);
+    saved_searches_ = std::move(loaded->index.searches);
+    settings_ = std::move(loaded->index.settings);
+    recovered_legacy_index_ = loaded->legacy && context_bound_chunks(header_);
 
     unlocked_ = true;
     // Phase 99: keep the session KEK (mlock'd) so the v1→v2 migration can
@@ -1517,7 +1555,16 @@ VaultResult finalize_context_migration(Vault& v)
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
     if (v.v3_) return InvalidArg;
-    if (context_bound_chunks(v.header_)) return Ok;
+    if (context_bound_chunks(v.header_)) {
+        // A recovered legacy fallback lives under an already context-bound
+        // master-key wrap. Its records were just rewritten by the resumed
+        // migration, so only the per-slot transition metadata remains.
+        if (v.recovered_legacy_index_) {
+            v.header_.flags |= FLAG_INDEX_SLOT_MODES;
+            v.recovered_legacy_index_ = false;
+        }
+        return Ok;
+    }
     if (!v.kek_valid_) return CryptoError;
 
     // The AD owner is the immutable vault_id; legacy headers carry all-zero
@@ -1545,14 +1592,21 @@ VaultResult finalize_context_migration(Vault& v)
     std::memcpy(v.header_.mk_tag.data(), wrapped.data() + crypto::KEY_SIZE, crypto::TAG_SIZE);
     v.header_.mk_nonce = nonce;
 
-    v.header_.flags |= FLAG_CONTEXT_BOUND_CHUNKS;
+    // Preserve the authentication mode of both existing slots before the
+    // first context-bound commit replaces one of them.
+    if (!has_index_slot_modes(v.header_)) {
+        v.header_.slot[0].context_bound = false;
+        v.header_.slot[1].context_bound = false;
+    }
+    v.header_.flags |= FLAG_CONTEXT_BOUND_CHUNKS | FLAG_INDEX_SLOT_MODES;
+    v.recovered_legacy_index_ = false;
     return Ok;
 }
 
 bool uses_context_chunks(const Vault& v) noexcept
 {
     if (v.v3_) return true;
-    return context_bound_chunks(v.header_);
+    return context_bound_chunks(v.header_) && !v.recovered_legacy_index_;
 }
 
 // Test seam — converts a freshly-created v2 vault into a genuine legacy one.
@@ -1604,7 +1658,7 @@ void test_only_downgrade_to_legacy(Vault& v)  // NOSONAR cpp:S3776
     };
 
     // Re-encode a video node's records to legacy and wipe its identity.
-    auto downgrade_video = [&](IndexNode& c) { // NOSONAR cpp:S1188
+    auto downgrade_video = [&](IndexNode& c) {  // NOSONAR cpp:S1188
         VideoMeta& m = c.vmeta;
         std::vector<VideoChunk> legacy;
         for (const VideoChunk& ck : m.chunks) {
@@ -1643,6 +1697,9 @@ void test_only_downgrade_to_legacy(Vault& v)  // NOSONAR cpp:S3776
     // Legacy header: clear the flag, re-wrap the master key WITHOUT AD, then
     // re-seal the index WITHOUT AD and persist the legacy header via the swap.
     v.header_.flags &= ~FLAG_CONTEXT_BOUND_CHUNKS;
+    v.header_.flags &= ~FLAG_INDEX_SLOT_MODES;
+    v.header_.slot[0].context_bound = false;
+    v.header_.slot[1].context_bound = false;
     if (v.kek_valid_) {
         std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
         std::array<uint8_t, crypto::AD_SIZE> scratch{};
@@ -2537,14 +2594,19 @@ VaultResult vault_reclaim(Vault& v)
     uint64_t fsize = 0;
     if (!fileutil::file_size(v.fp_, fsize)) return IoError;
 
-    // Collect every LIVE span in the data region: the active index blob plus each
-    // media chunk. The header [0, HEADER_SIZE) is live by construction (the scan
-    // starts at HEADER_SIZE); the INACTIVE index slot is dead and thus reclaimed.
+    // Collect every LIVE span in the data region: both authenticated index slots
+    // plus each media chunk.  The inactive slot is the cold-open fallback when
+    // the active commit is torn or damaged; punching it would silently remove
+    // that recovery path while leaving its header pointer intact.  The header
+    // [0, HEADER_SIZE) is live by construction (the scan starts at HEADER_SIZE).
     std::vector<std::pair<uint64_t, uint64_t>> live;  // (offset, on-disk length)
     {
         std::lock_guard hlk(*v.header_mutex_);
-        if (const IndexSlot& s = v.header_.slot[v.header_.active_slot]; s.length > 0) {
-            live.emplace_back(s.offset, s.length);
+        for (const IndexSlot& s : v.header_.slot) {
+            if (s.length > 0 && s.offset >= HEADER_SIZE && s.offset <= fsize &&
+                s.length <= fsize - s.offset) {
+                live.emplace_back(s.offset, s.length);
+            }
         }
     }
     for_each_media(v.root_, [&live](const IndexNode& n) { collect_media_spans(n, live); });

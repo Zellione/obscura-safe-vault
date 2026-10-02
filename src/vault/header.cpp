@@ -11,48 +11,50 @@ namespace vault {
 // after slot A's nonce (which ends at 158). We follow the documented offsets
 // verbatim so the on-disk layout matches the authoritative spec.
 namespace off {
-inline constexpr size_t MAGIC_OFF          = 0;    // 8
-inline constexpr size_t VERSION            = 8;    // 2
-inline constexpr size_t HEADER_SIZE_F      = 10;   // 2
-inline constexpr size_t FLAGS              = 12;   // 4
-inline constexpr size_t KDF_ALGO           = 16;   // 1
-inline constexpr size_t T_COST             = 17;   // 4
-inline constexpr size_t M_COST_KIB         = 21;   // 4
-inline constexpr size_t PARALLELISM        = 25;   // 4
-inline constexpr size_t SALT               = 29;   // 16
-inline constexpr size_t KEYFILE_REQUIRED   = 45;   // 1
-inline constexpr size_t MK_NONCE           = 46;   // 24
-inline constexpr size_t WRAPPED_MASTER_KEY = 70;   // 32
-inline constexpr size_t MK_TAG             = 102;  // 16
-inline constexpr size_t SLOT_A_OFFSET      = 118;  // 8
-inline constexpr size_t SLOT_A_LENGTH      = 126;  // 8
-inline constexpr size_t SLOT_A_NONCE       = 134;  // 24  (ends at 158; 158..165 reserved)
-inline constexpr size_t SLOT_B_OFFSET      = 166;  // 8
-inline constexpr size_t SLOT_B_LENGTH      = 174;  // 8
-inline constexpr size_t SLOT_B_NONCE       = 182;  // 24
-inline constexpr size_t ACTIVE_SLOT        = 206;  // 1
-inline constexpr size_t VAULT_ID           = 208;  // 16 (Phase 99 — reserved region)
-} // namespace off
+inline constexpr size_t MAGIC_OFF = 0;            // 8
+inline constexpr size_t VERSION = 8;              // 2
+inline constexpr size_t HEADER_SIZE_F = 10;       // 2
+inline constexpr size_t FLAGS = 12;               // 4
+inline constexpr size_t KDF_ALGO = 16;            // 1
+inline constexpr size_t T_COST = 17;              // 4
+inline constexpr size_t M_COST_KIB = 21;          // 4
+inline constexpr size_t PARALLELISM = 25;         // 4
+inline constexpr size_t SALT = 29;                // 16
+inline constexpr size_t KEYFILE_REQUIRED = 45;    // 1
+inline constexpr size_t MK_NONCE = 46;            // 24
+inline constexpr size_t WRAPPED_MASTER_KEY = 70;  // 32
+inline constexpr size_t MK_TAG = 102;             // 16
+inline constexpr size_t SLOT_A_OFFSET = 118;      // 8
+inline constexpr size_t SLOT_A_LENGTH = 126;      // 8
+inline constexpr size_t SLOT_A_NONCE = 134;       // 24  (ends at 158; 158..165 reserved)
+inline constexpr size_t SLOT_B_OFFSET = 166;      // 8
+inline constexpr size_t SLOT_B_LENGTH = 174;      // 8
+inline constexpr size_t SLOT_B_NONCE = 182;       // 24
+inline constexpr size_t ACTIVE_SLOT = 206;        // 1
+inline constexpr size_t VAULT_ID = 208;           // 16 (Phase 99 — reserved region)
+inline constexpr size_t SLOT_A_MODE = 224;        // 1 (0=legacy AD, 1=context-bound AD)
+inline constexpr size_t SLOT_B_MODE = 225;        // 1
+}  // namespace off
 
 void Header::serialize(std::span<uint8_t, HEADER_SIZE> out) const noexcept
 {
     std::memset(out.data(), 0, out.size());  // zero padding + reserved gaps
 
     std::memcpy(out.data() + off::MAGIC_OFF, MAGIC.data(), MAGIC.size());
-    put_u16_at(out, off::VERSION,       version);
+    put_u16_at(out, off::VERSION, version);
     put_u16_at(out, off::HEADER_SIZE_F, static_cast<uint16_t>(HEADER_SIZE));
-    put_u32_at(out, off::FLAGS,         flags);
+    put_u32_at(out, off::FLAGS, flags);
 
     out[off::KDF_ALGO] = kdf_algo;
-    put_u32_at(out, off::T_COST,      kdf.t_cost);
-    put_u32_at(out, off::M_COST_KIB,  kdf.m_cost_kib);
+    put_u32_at(out, off::T_COST, kdf.t_cost);
+    put_u32_at(out, off::M_COST_KIB, kdf.m_cost_kib);
     put_u32_at(out, off::PARALLELISM, kdf.parallelism);
     put_bytes_at(out, off::SALT, salt);
     out[off::KEYFILE_REQUIRED] = keyfile_required;
 
-    put_bytes_at(out, off::MK_NONCE,           mk_nonce);
+    put_bytes_at(out, off::MK_NONCE, mk_nonce);
     put_bytes_at(out, off::WRAPPED_MASTER_KEY, wrapped_master_key);
-    put_bytes_at(out, off::MK_TAG,             mk_tag);
+    put_bytes_at(out, off::MK_TAG, mk_tag);
 
     put_u64_at(out, off::SLOT_A_OFFSET, slot[0].offset);
     put_u64_at(out, off::SLOT_A_LENGTH, slot[0].length);
@@ -64,6 +66,10 @@ void Header::serialize(std::span<uint8_t, HEADER_SIZE> out) const noexcept
     out[off::ACTIVE_SLOT] = active_slot;
 
     put_bytes_at(out, off::VAULT_ID, vault_id);
+    if (has_index_slot_modes(*this)) {
+        out[off::SLOT_A_MODE] = slot[0].context_bound ? 1 : 0;
+        out[off::SLOT_B_MODE] = slot[1].context_bound ? 1 : 0;
+    }
 }
 
 namespace {
@@ -75,12 +81,12 @@ namespace {
 bool kdf_params_sane(uint8_t algo, const crypto::KdfParams& p) noexcept
 {
     return algo == 0 &&  // Argon2id is the only defined KDF
-           p.t_cost >= 1 && p.t_cost <= crypto::MAX_KDF_T_COST &&
-           p.parallelism >= 1 && p.parallelism <= crypto::MAX_KDF_PARALLELISM &&
-           p.m_cost_kib >= 8 * p.parallelism && p.m_cost_kib <= crypto::MAX_KDF_M_COST_KIB;
+           p.t_cost >= 1 && p.t_cost <= crypto::MAX_KDF_T_COST && p.parallelism >= 1 &&
+           p.parallelism <= crypto::MAX_KDF_PARALLELISM && p.m_cost_kib >= 8 * p.parallelism &&
+           p.m_cost_kib <= crypto::MAX_KDF_M_COST_KIB;
 }
 
-} // namespace
+}  // namespace
 
 bool Header::parse(std::span<const uint8_t> raw, Header& out) noexcept
 {
@@ -91,11 +97,11 @@ bool Header::parse(std::span<const uint8_t> raw, Header& out) noexcept
     if (out.version != FORMAT_VERSION) return false;
 
     out.header_size = get_u16_at(raw, off::HEADER_SIZE_F);
-    out.flags       = get_u32_at(raw, off::FLAGS);
+    out.flags = get_u32_at(raw, off::FLAGS);
 
-    out.kdf_algo        = raw[off::KDF_ALGO];
-    out.kdf.t_cost      = get_u32_at(raw, off::T_COST);
-    out.kdf.m_cost_kib  = get_u32_at(raw, off::M_COST_KIB);
+    out.kdf_algo = raw[off::KDF_ALGO];
+    out.kdf.t_cost = get_u32_at(raw, off::T_COST);
+    out.kdf.m_cost_kib = get_u32_at(raw, off::M_COST_KIB);
     out.kdf.parallelism = get_u32_at(raw, off::PARALLELISM);
     if (!kdf_params_sane(out.kdf_algo, out.kdf)) return false;
     std::memcpy(out.salt.data(), raw.data() + off::SALT, out.salt.size());
@@ -108,19 +114,25 @@ bool Header::parse(std::span<const uint8_t> raw, Header& out) noexcept
 
     out.slot[0].offset = get_u64_at(raw, off::SLOT_A_OFFSET);
     out.slot[0].length = get_u64_at(raw, off::SLOT_A_LENGTH);
-    std::memcpy(out.slot[0].nonce.data(), raw.data() + off::SLOT_A_NONCE,
-                out.slot[0].nonce.size());
+    std::memcpy(out.slot[0].nonce.data(), raw.data() + off::SLOT_A_NONCE, out.slot[0].nonce.size());
     out.slot[1].offset = get_u64_at(raw, off::SLOT_B_OFFSET);
     out.slot[1].length = get_u64_at(raw, off::SLOT_B_LENGTH);
-    std::memcpy(out.slot[1].nonce.data(), raw.data() + off::SLOT_B_NONCE,
-                out.slot[1].nonce.size());
+    std::memcpy(out.slot[1].nonce.data(), raw.data() + off::SLOT_B_NONCE, out.slot[1].nonce.size());
 
     // active_slot indexes the 2-entry slot array; anything else is hostile.
     out.active_slot = raw[off::ACTIVE_SLOT];
     if (out.active_slot > 1) return false;
 
     std::memcpy(out.vault_id.data(), raw.data() + off::VAULT_ID, crypto::SALT_SIZE);
+    if (has_index_slot_modes(out)) {
+        if (raw[off::SLOT_A_MODE] > 1 || raw[off::SLOT_B_MODE] > 1) return false;
+        out.slot[0].context_bound = raw[off::SLOT_A_MODE] != 0;
+        out.slot[1].context_bound = raw[off::SLOT_B_MODE] != 0;
+    } else {
+        out.slot[0].context_bound = context_bound_chunks(out);
+        out.slot[1].context_bound = context_bound_chunks(out);
+    }
     return true;
 }
 
-} // namespace vault
+}  // namespace vault

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "crypto/random.h"
+#include "vault/header.h"
 #include "vault/migration.h"
 #include "vault/vault.h"
 
@@ -30,7 +31,8 @@ static std::span<const uint8_t> bytes(const std::string& s)
 static std::vector<uint8_t> pattern(size_t n, uint8_t seed)
 {
     std::vector<uint8_t> v(n);
-    for (size_t i = 0; i < n; ++i) v[i] = static_cast<uint8_t>(i * 37 + seed);
+    for (size_t i = 0; i < n; ++i)
+        v[i] = static_cast<uint8_t>(i * 37 + seed);
     return v;
 }
 
@@ -65,7 +67,10 @@ struct TempVault {
         std::error_code ec;
         fs::remove(path, ec);
     }
-    [[nodiscard]] std::string str() const { return path.string(); }
+    [[nodiscard]] std::string str() const
+    {
+        return path.string();
+    }
 };
 
 // A v2 vault with one image (and its thumbnail), then downgraded to a genuine
@@ -78,6 +83,28 @@ bool build_legacy(vault::Vault& out, const std::string& path, const std::vector<
     if (out.add_image("g", img, "pic.bin") != vault::VaultResult::Ok) return false;
     vault::test_only_downgrade_to_legacy(out);
     return !vault::uses_context_chunks(out);
+}
+
+bool read_header(const std::string& path, vault::Header& out)
+{
+    std::FILE* fp = std::fopen(path.c_str(), "rb");
+    if (!fp) return false;
+    std::array<uint8_t, vault::HEADER_SIZE> raw{};
+    const bool ok = std::fread(raw.data(), 1, raw.size(), fp) == raw.size();
+    std::fclose(fp);
+    return ok && vault::Header::parse(raw, out);
+}
+
+bool write_header(const std::string& path, const vault::Header& header)
+{
+    std::array<uint8_t, vault::HEADER_SIZE> raw{};
+    header.serialize(raw);
+    std::FILE* fp = std::fopen(path.c_str(), "r+b");
+    if (!fp) return false;
+    const bool ok =
+        std::fwrite(raw.data(), 1, raw.size(), fp) == raw.size() && std::fflush(fp) == 0;
+    std::fclose(fp);
+    return ok;
 }
 }  // namespace
 
@@ -125,8 +152,8 @@ TEST(context_rewrite_and_finalize_migrate_the_vault_and_reopen)
     // Finalize + one commit (what commit_migration does).
     REQUIRE(vault::finalize_context_migration(v) == vault::VaultResult::Ok);
     CHECK(vault::uses_context_chunks(v));
-    REQUIRE(vault::commit_migration(v, vault::stamp_migrated(vault::vault_settings(v), 1, 512))
-            == vault::VaultResult::Ok);
+    REQUIRE(vault::commit_migration(v, vault::stamp_migrated(vault::vault_settings(v), 1, 512)) ==
+            vault::VaultResult::Ok);
 
     // Content still decrypts identically under the new records.
     crypto::SecureBytes out;
@@ -142,14 +169,91 @@ TEST(context_rewrite_and_finalize_migrate_the_vault_and_reopen)
     CHECK_EQ(after.size(), img.size());
 }
 
+TEST(context_migration_records_each_index_slots_authentication_mode)
+{
+    TempVault tv("slot_modes");
+    vault::Vault v;
+    REQUIRE(build_legacy(v, tv.str(), pattern(4096, 12)));
+
+    vault::Header before;
+    REQUIRE(read_header(tv.str(), before));
+    const uint8_t legacy_slot = before.active_slot;
+    CHECK_FALSE(vault::index_slot_context_bound(before, legacy_slot));
+
+    REQUIRE(vault::apply_context_rewrite(v, "g/pic.bin") == vault::VaultResult::Ok);
+    REQUIRE(vault::finalize_context_migration(v) == vault::VaultResult::Ok);
+    REQUIRE(vault::commit_migration(v, vault::stamp_migrated(vault::vault_settings(v), 1, 512)) ==
+            vault::VaultResult::Ok);
+
+    vault::Header after;
+    REQUIRE(read_header(tv.str(), after));
+    CHECK(vault::has_index_slot_modes(after));
+    CHECK(vault::index_slot_context_bound(after, after.active_slot));
+    CHECK_FALSE(vault::index_slot_context_bound(after, legacy_slot));
+}
+
+TEST(context_migration_recovers_legacy_fallback_after_new_slot_damage)
+{
+    TempVault tv("legacy_fallback");
+    const auto img = pattern(4096, 13);
+    vault::Vault v;
+    REQUIRE(build_legacy(v, tv.str(), img));
+    REQUIRE(vault::apply_context_rewrite(v, "g/pic.bin") == vault::VaultResult::Ok);
+    REQUIRE(vault::finalize_context_migration(v) == vault::VaultResult::Ok);
+    REQUIRE(vault::commit_migration(v, vault::stamp_migrated(vault::vault_settings(v), 1, 512)) ==
+            vault::VaultResult::Ok);
+
+    vault::Header h;
+    REQUIRE(read_header(tv.str(), h));
+    const auto damaged = h.slot[h.active_slot];
+    v.lock();
+    // Emulate a Phase-99-produced vault from before per-slot modes existed:
+    // the global context flag describes the new active blob but incorrectly
+    // also makes the legacy fallback appear context-bound.
+    h.flags &= ~vault::FLAG_INDEX_SLOT_MODES;
+    REQUIRE(write_header(tv.str(), h));
+    std::error_code ec;
+    fs::resize_file(tv.path, damaged.offset + damaged.length - 1, ec);
+    REQUIRE(!ec);
+
+    vault::Vault recovered;
+    REQUIRE(vault::Vault::open(tv.str(), recovered) == vault::VaultResult::Ok);
+    REQUIRE(recovered.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    CHECK_FALSE(vault::uses_context_chunks(recovered));
+    auto nodes = recovered.list("g");
+    REQUIRE(nodes.size() == 1);
+    crypto::SecureBytes out;
+    REQUIRE(recovered.read_image(*nodes[0], out) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(img));
+
+    // A resumed migration rewrites the recovered legacy records and installs
+    // durable per-slot metadata without re-wrapping the already-context-bound
+    // master key.
+    REQUIRE(vault::apply_context_rewrite(recovered, "g/pic.bin") == vault::VaultResult::Ok);
+    REQUIRE(vault::finalize_context_migration(recovered) == vault::VaultResult::Ok);
+    REQUIRE(vault::commit_migration(
+                recovered, vault::stamp_migrated(vault::vault_settings(recovered), 1, 512)) ==
+            vault::VaultResult::Ok);
+    CHECK(vault::uses_context_chunks(recovered));
+    recovered.lock();
+
+    vault::Vault healed;
+    REQUIRE(vault::Vault::open(tv.str(), healed) == vault::VaultResult::Ok);
+    REQUIRE(healed.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    CHECK(vault::uses_context_chunks(healed));
+    vault::Header healed_header;
+    REQUIRE(read_header(tv.str(), healed_header));
+    CHECK(vault::has_index_slot_modes(healed_header));
+}
+
 TEST(context_completed_migration_detects_swaps)
 {
     TempVault tv("swapdetect");
     const auto img = pattern(2048, 3);
     {
         vault::Vault v;
-        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-                == vault::VaultResult::Ok);
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) ==
+                vault::VaultResult::Ok);
         REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
         REQUIRE(v.add_image("g", img, "a.bin") == vault::VaultResult::Ok);
         REQUIRE(v.add_image("g", img, "b.bin") == vault::VaultResult::Ok);
@@ -159,8 +263,8 @@ TEST(context_completed_migration_detects_swaps)
         REQUIRE(vault::apply_context_rewrite(v, "g/a.bin") == vault::VaultResult::Ok);
         REQUIRE(vault::apply_context_rewrite(v, "g/b.bin") == vault::VaultResult::Ok);
         REQUIRE(vault::finalize_context_migration(v) == vault::VaultResult::Ok);
-        REQUIRE(vault::commit_migration(v, vault::stamp_migrated(vault::vault_settings(v), 1, 512))
-                == vault::VaultResult::Ok);
+        REQUIRE(vault::commit_migration(v, vault::stamp_migrated(vault::vault_settings(v), 1,
+                                                                 512)) == vault::VaultResult::Ok);
     }
     vault::Vault v;
     REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
@@ -212,8 +316,8 @@ TEST(context_cancel_leaves_mixed_vault_reopenable)
     const auto img = pattern(2048, 4);
     {
         vault::Vault v;
-        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-                == vault::VaultResult::Ok);
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) ==
+                vault::VaultResult::Ok);
         REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
         REQUIRE(v.add_image("g", img, "a.bin") == vault::VaultResult::Ok);
         REQUIRE(v.add_image("g", img, "b.bin") == vault::VaultResult::Ok);
@@ -221,8 +325,8 @@ TEST(context_cancel_leaves_mixed_vault_reopenable)
 
         // "Cancel" after rewriting exactly ONE node: commit without finalizing.
         REQUIRE(vault::apply_context_rewrite(v, "g/a.bin") == vault::VaultResult::Ok);
-        REQUIRE(vault::commit_migration(v, vault::stamp_migrated(vault::vault_settings(v), 1, 512))
-                == vault::VaultResult::Ok);
+        REQUIRE(vault::commit_migration(v, vault::stamp_migrated(vault::vault_settings(v), 1,
+                                                                 512)) == vault::VaultResult::Ok);
         // The flag is still clear => still owed at the next unlock.
         CHECK_FALSE(vault::uses_context_chunks(v));
     }
@@ -234,7 +338,7 @@ TEST(context_cancel_leaves_mixed_vault_reopenable)
     REQUIRE(nodes.size() == 2);
     for (const auto* n : nodes) {
         crypto::SecureBytes out;
-        CHECK_EQ(v.read_image(*n, out), vault::VaultResult::Ok);   // both read fine
+        CHECK_EQ(v.read_image(*n, out), vault::VaultResult::Ok);  // both read fine
         CHECK_EQ(out.size(), img.size());
     }
     // Exactly one node is migrated; the scan reports the other.
@@ -249,16 +353,16 @@ TEST(context_migration_reencodes_video_chunks)
     REQUIRE(!video.empty());
     {
         vault::Vault v;
-        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-                == vault::VaultResult::Ok);
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) ==
+                vault::VaultResult::Ok);
         REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
         REQUIRE(v.add_video("g", video, "clip.mp4", 2048) == vault::VaultResult::Ok);
         vault::test_only_downgrade_to_legacy(v);
         CHECK_FALSE(vault::uses_context_chunks(v));
         REQUIRE(vault::apply_context_rewrite(v, "g/clip.mp4") == vault::VaultResult::Ok);
         REQUIRE(vault::finalize_context_migration(v) == vault::VaultResult::Ok);
-        REQUIRE(vault::commit_migration(v, vault::stamp_migrated(vault::vault_settings(v), 1, 512))
-                == vault::VaultResult::Ok);
+        REQUIRE(vault::commit_migration(v, vault::stamp_migrated(vault::vault_settings(v), 1,
+                                                                 512)) == vault::VaultResult::Ok);
     }
     vault::Vault v;
     REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
@@ -270,8 +374,7 @@ TEST(context_migration_reencodes_video_chunks)
     // Every video chunk carries a 0-based sequence and a nonzero record id.
     for (size_t i = 0; i < nodes[0]->vmeta.chunks.size(); ++i) {
         CHECK_EQ(nodes[0]->vmeta.chunks[i].sequence, static_cast<uint32_t>(i));
-        CHECK_FALSE(testing::bytes_equal(nodes[0]->vmeta.chunks[i].id,
-                                         std::array<uint8_t, 16>{}));
+        CHECK_FALSE(testing::bytes_equal(nodes[0]->vmeta.chunks[i].id, std::array<uint8_t, 16>{}));
     }
     crypto::SecureBytes out;
     REQUIRE(v.read_video(*nodes[0], out) == vault::VaultResult::Ok);

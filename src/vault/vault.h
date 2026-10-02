@@ -113,7 +113,7 @@ struct VideoProbeApply {
     std::span<const uint8_t> poster_jpeg;  // empty = leave the poster alone
 };
 
-class Vault { // NOSONAR cpp:S1448 -- stable public facade dispatches both storage backends
+class Vault {  // NOSONAR cpp:S1448 -- stable public facade dispatches both storage backends
 public:
     // Auto-compaction gates (remove_image): rewrite the vault only when at
     // least this much is reclaimable AND the waste is at least a quarter of
@@ -497,6 +497,10 @@ private:
     // while unlocked and wiped at lock/reset (Phase A boundary).
     crypto::SecureBuffer<crypto::KEY_SIZE> kek_;
     bool kek_valid_ = false;
+    // True only when unlock recovered a pre-context index beneath a
+    // context-bound header. The media migration must be offered again before
+    // the vault can claim the transition is complete.
+    bool recovered_legacy_index_ = false;
     IndexNode root_ = IndexNode::gallery("");
     std::vector<SavedSearch> saved_searches_;  // vault-global (Phase 18)
     VaultSettings settings_;                   // vault-global (Phase 49)
