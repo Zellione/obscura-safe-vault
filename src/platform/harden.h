@@ -12,14 +12,13 @@ namespace platform {
 // Disable core dumps on this process. Called once at app startup (Release builds only)
 // to prevent core dumps from containing decrypted data or key material.
 //
-// On Linux: uses prctl(PR_SET_DUMPABLE, 0) + setrlimit(RLIMIT_CORE, {0,0}).
-// On Windows: no-op (Windows doesn't support prctl and core dumps work differently).
+// On Linux: uses setrlimit(RLIMIT_CORE, {0,0}). PR_SET_DUMPABLE must remain
+// unchanged because xdg-desktop-portal needs same-user access to
+// /proc/<pid>/root when opening native file dialogs.
 //
 // Logs a [Platform] error line if it fails; silent on success.
 // Note: This is only called in Release builds (NDEBUG defined). Debug builds keep
-// core dumps + ptrace attach enabled so developers can run debuggers and analyze
-// crashes. The tradeoff is intentional: dev machines with proper access control
-// can be trusted; deployed apps need the stronger guarantee.
+// core dumps enabled so developers can analyze crashes.
 void disable_core_dumps() noexcept;
 
 // Redirects `stream`'s underlying OS handle to `path` (append mode), so every
