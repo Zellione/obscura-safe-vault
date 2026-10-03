@@ -9,6 +9,10 @@ and `src/media/` (FFmpeg video/audio, whole subsystem gated `OSV_VENDORED_AV`).
 - `decoder.*` — `Decoder` interface + `DecoderRegistry` (polymorphic dispatch;
   `default_registry()` wires WebP/HEIF/stb decoders).
 - `decode_webp.*`, `decode_heif.*` — libwebp (WebP), libheif (HEIC/AVIF).
+  `decode_heif_from_memory()` sets each libheif context's maximum tile-decoding
+  threads to zero: libheif 1.23.2's parallel grid assembly races while publishing
+  the shared output plane (caught by TSan on the 2x2 AVIF grid fixture). This
+  serializes libheif's tile assembly only; codec-internal threading remains enabled.
   Phase 57: an animated WebP has no top-level VP8/VP8L chunk, so
   `WebPDecodeRGBInto` fails on it (while `WebPGetInfo` still reports the VP8X
   canvas size) — `decode_webp_from_memory` routes those through
