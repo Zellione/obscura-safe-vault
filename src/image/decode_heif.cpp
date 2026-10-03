@@ -32,6 +32,13 @@ std::optional<ImageData> decode_heif_from_memory(std::span<const uint8_t> data)
     if (!ctx) return std::nullopt;
     CtxGuard guard(ctx);
 
+    // libheif 1.23.2's parallel grid decoder can let one tile initialize the
+    // shared output plane while another tile writes into it (observed by TSan
+    // in the AVIF grid regression). Decode tiles on this calling thread until
+    // the library guarantees synchronized output-plane publication. Codec
+    // implementations may still use their own internal worker threads.
+    heif_context_set_max_decoding_threads(ctx, 0);
+
     // Buffer must outlive the context (no copy); `data` does, for this call.
     if (heif_context_read_from_memory_without_copy(
             ctx, data.data(), data.size(), nullptr).code != heif_error_Ok)
