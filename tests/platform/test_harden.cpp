@@ -10,27 +10,36 @@
 
 #include <sys/prctl.h>
 #include <sys/resource.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 
-// Test that disable_core_dumps() can be called without crashing, and verify
-// that prctl(PR_GET_DUMPABLE) returns 0 after the call.
-TEST(disable_core_dumps_call)
+// Core files must stay disabled without making the process non-dumpable.
+// xdg-desktop-portal resolves native dialog paths through /proc/<pid>/root;
+// PR_SET_DUMPABLE=0 denies that same-user lookup and breaks every Release
+// file dialog before the callback can return a path.
+TEST(disable_core_dumps_preserves_portal_access)
 {
-    // Capture original state for restoration (test isolation).
-    struct rlimit old_limit;
-    getrlimit(RLIMIT_CORE, &old_limit);
+    // Lowering the hard limit to zero cannot be undone without privilege, so
+    // isolate this process-wide hardening operation in a child.
+    const pid_t child = fork();
+    REQUIRE(child >= 0);
+    if (child == 0) {
+        const int old_dumpable = prctl(PR_GET_DUMPABLE);
+        platform::disable_core_dumps();
 
-    platform::disable_core_dumps();
+        struct rlimit disabled_limit{};
+        const bool ok = old_dumpable >= 0 && getrlimit(RLIMIT_CORE, &disabled_limit) == 0 &&
+                        disabled_limit.rlim_cur == 0 && disabled_limit.rlim_max == 0 &&
+                        prctl(PR_GET_DUMPABLE) == old_dumpable;
+        _exit(ok ? 0 : 1);
+    }
 
-    // Verify PR_GET_DUMPABLE is now 0 (dumps disabled).
-    int dumpable = prctl(PR_GET_DUMPABLE);
-    CHECK_EQ(dumpable, 0);
-    // restore: keep the shared test process dumpable for later tests
-    (void)prctl(PR_SET_DUMPABLE, 1);
-
-    // Restore original rlimit.
-    setrlimit(RLIMIT_CORE, &old_limit);
+    int status = 0;
+    REQUIRE(waitpid(child, &status, 0) == child);
+    CHECK_TRUE(WIFEXITED(status));
+    CHECK_EQ(WEXITSTATUS(status), 0);
 }
 
 TEST(redirect_stream_to_file_succeeds_and_writes_land_in_the_file)

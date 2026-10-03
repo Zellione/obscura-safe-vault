@@ -79,9 +79,10 @@ bool App::init()
     // this first, before anything else can throw.
     platform::install_terminate_logger();
 
-    // Disable core dumps in Release builds to prevent decrypted data / key material
-    // from being dumped to disk. In Debug, core dumps and ptrace attach are kept
-    // enabled for developers to use debuggers and analyze crashes.
+    // Disable core-file creation in Release builds to prevent decrypted data / key
+    // material from being dumped to disk. This deliberately leaves the Linux
+    // dumpable flag alone: xdg-desktop-portal needs /proc/<pid>/root access for
+    // every native file dialog.
 #ifdef NDEBUG
     platform::disable_core_dumps();
 #endif

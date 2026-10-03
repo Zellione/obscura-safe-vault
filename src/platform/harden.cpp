@@ -9,18 +9,17 @@
 #include "platform/paths.h"
 #include "platform/path_utf8.h"
 
-#include <sys/prctl.h>     // prctl
 #include <sys/resource.h>  // setrlimit
 
 namespace platform {
 
 void disable_core_dumps() noexcept
 {
-    // Linux: prefer prctl(PR_SET_DUMPABLE, 0) to prevent core dumps and ptrace attach.
-    if (prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0) {
-        platform::safe_println(stderr, "[Platform] prctl(PR_SET_DUMPABLE, 0) failed");
-    }
-    // Also use setrlimit for defense-in-depth.
+    // Do not use PR_SET_DUMPABLE=0 here. xdg-desktop-portal must resolve
+    // native dialog paths through /proc/<pid>/root, and Linux applies the
+    // ptrace access check to that symlink. A non-dumpable Release process
+    // therefore loses every SDL portal file dialog. RLIMIT_CORE is the
+    // control that prevents decrypted data from being written to a core file.
     const struct rlimit zero_core{0, 0};
     if (setrlimit(RLIMIT_CORE, &zero_core) != 0) {
         platform::safe_println(stderr, "[Platform] setrlimit(RLIMIT_CORE, 0) failed");

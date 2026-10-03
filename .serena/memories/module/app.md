@@ -259,10 +259,12 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   write, missing/invalid -> true (auto-play ON is the shipped default); App loads at init
   into `media::autoplay_setting`, saved live by the F2 Playback section (settings is the only
   writer — no exit-save). Exact VolumePref/ThemePref mirror.
-- `harden.{h,cpp}` — `disable_core_dumps()`: `prctl(PR_SET_DUMPABLE,0)` +
-  `setrlimit(RLIMIT_CORE,{0,0})` on Linux, no-op on Windows (macOS removed — `#error` guard in
-  `src/crypto/random.cpp`); called once at app init, Release (NDEBUG) builds only, before any
-  vault unlock, to keep decrypted data/keys out of core dumps.
+- `harden.{h,cpp}` — `disable_core_dumps()`: `setrlimit(RLIMIT_CORE,{0,0})` on Linux; called
+  once at app init, Release (NDEBUG) builds only, before any vault unlock, to keep decrypted
+  data/keys out of core files. It deliberately does **not** set `PR_SET_DUMPABLE=0`: the XDG
+  desktop portal resolves native file-dialog paths through `/proc/<pid>/root`, and Linux's
+  ptrace access check denies that same-user lookup for a non-dumpable process, breaking every
+  Release dialog.
   `grow_secure_mem_budget(bytes)`: best-effort growth of the page-lockable budget, called
   once in `App::init()` (ALL configs, 256 MiB) before any SecureBuffer/SecureBytes exists —
   Windows raises the minimum working-set size via `SetProcessWorkingSetSize` (VirtualLock's
