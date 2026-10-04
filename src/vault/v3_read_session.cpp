@@ -5,6 +5,7 @@
 #include "vault/safe_name.h"
 
 #include <algorithm>
+#include <chrono>
 #include <limits>
 
 namespace vault::v3 {
@@ -218,6 +219,8 @@ ReadStatus ReadSession::unlock(std::span<const uint8_t> password, std::span<cons
         lock();
         return ReadStatus::BadFormat;
     }
+    quick_open_report_ = verify_vault(root_handle_, *database_, master_key_.as_span(),
+                                      header_.vault_id, VerifyDepth::Quick);
     unlocked_ = true;
     return ReadStatus::Ok;
 }
@@ -325,6 +328,60 @@ ReadStatus ReadSession::read_id(const Id& node_id, ObjectRole role,
     return ReadStatus::BadFormat;
 }
 
+VerificationReport ReadSession::verify(VerifyDepth depth) const noexcept
+{
+    const std::lock_guard lock(state_mutex_);
+    if (!unlocked_ || !database_) return {};
+    return verify_vault(root_handle_, *database_, master_key_.as_span(), header_.vault_id, depth);
+}
+
+GarbageCollectionResult ReadSession::garbage_collect(uint64_t grace_seconds) noexcept
+{
+    const std::lock_guard lock(state_mutex_);
+    if (!unlocked_ || !database_ || !session_lock_)
+        return {.status = RecoveryStatus::FilesystemError};
+    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+    const auto cutoff = grace_seconds > static_cast<uint64_t>(now)
+                            ? int64_t{0}
+                            : now - static_cast<int64_t>(grace_seconds);
+    const auto staging = root_handle_.cleanup_staging(*session_lock_, cutoff);
+    if (!staging) return {.status = RecoveryStatus::FilesystemError};
+    const auto report = reconcile_objects(root_handle_, *database_);
+    if (report.status != RecoveryStatus::Ok) return {.status = report.status};
+    auto result =
+        collect_garbage(root_handle_, *session_lock_, *database_, report.garbage, grace_seconds);
+    result.staging_removed = staging->removed;
+    result.staging_preserved = staging->preserved_recent;
+    result.suspicious_staging = staging->quarantined_or_foreign;
+    return result;
+}
+
+BackupResult ReadSession::backup(const std::filesystem::path& destination) const noexcept
+{
+    const std::lock_guard lock(state_mutex_);
+    if (!unlocked_ || !database_ || !session_lock_)
+        return {.status = BackupStatus::InvalidArgument};
+    auto database_key = derive_database_key(master_key_.as_span(), header_.vault_id);
+    return backup_vault(root_handle_, *session_lock_, *database_, database_key.as_span(),
+                        master_key_.as_span(), header_, destination);
+}
+
+DbStatus ReadSession::maintain_database_storage() noexcept
+{
+    const std::lock_guard lock(state_mutex_);
+    if (!unlocked_ || !database_ || !session_lock_) return DbStatus::InvalidArgument;
+    return v3::maintain_database(*database_);
+}
+
+std::optional<uint64_t> ReadSession::database_bytes() const noexcept
+{
+    const std::lock_guard lock(state_mutex_);
+    if (!unlocked_) return std::nullopt;
+    return root_handle_.database_size();
+}
+
 ReadStatus ReadSession::commit_metadata(const IndexNode& root, const VaultSettings& settings,
                                         std::span<const SavedSearch> searches) noexcept
 {
@@ -355,10 +412,9 @@ ReadStatus ReadSession::stage_object(const Id& node_id, ObjectRole role, uint8_t
     const auto written = write_object(root_handle_, master_key_.as_span(), request, plaintext);
     if (written.status != ObjectStatus::Ok) return ReadStatus::IoError;
     try {
-        staged_objects_.emplace_back(
-            written.info.object_id, node_id, role, written.info.encrypted_length,
-            written.info.plaintext_length, written.info.frame_plain_limit,
-            written.info.frame_count, 0);
+        staged_objects_.emplace_back(written.info.object_id, node_id, role,
+                                     written.info.encrypted_length, written.info.plaintext_length,
+                                     written.info.frame_plain_limit, written.info.frame_count, 0);
     } catch (...) {
         // The published immutable object stays unreferenced and is safe for later GC.
         return ReadStatus::IoError;

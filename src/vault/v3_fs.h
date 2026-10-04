@@ -115,9 +115,14 @@ public:
     [[nodiscard]] bool read_header(std::span<uint8_t> destination) const noexcept;
     [[nodiscard]] bool write_header(std::span<const uint8_t> bytes) const noexcept;
     [[nodiscard]] bool replace_header(std::span<const uint8_t> bytes) const noexcept;
+    [[nodiscard]] bool sync_database() const noexcept;
+    [[nodiscard]] std::optional<uint64_t> database_size() const noexcept;
     // Creation-only rollback. Refuses to remove a path whose inode no longer
     // matches the descriptor retained by this instance.
     [[nodiscard]] bool rollback_creation() noexcept;
+    // Atomically publishes this newly-created directory under a sibling name. The destination
+    // must not exist; the retained descriptor prevents source-path substitution.
+    [[nodiscard]] bool publish_directory(const std::filesystem::path& destination) noexcept;
     [[nodiscard]] bool unlink_staging(std::string_view name) const noexcept;
     [[nodiscard]] std::optional<StagingCleanup>
     cleanup_staging(const WriterLock& writer_lock, int64_t older_than_seconds) const noexcept;

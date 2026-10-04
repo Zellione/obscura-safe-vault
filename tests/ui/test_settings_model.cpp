@@ -354,3 +354,11 @@ TEST(settings_section_count_includes_playback)
     CHECK(static_cast<int>(ui::SettingsSection::Playback) == 1);
     CHECK(static_cast<int>(ui::SettingsSection::Browsing) == 2);
 }
+
+TEST(settings_vault_ops_lists_upgrade_verify_repair_gc_backup_and_optimize)
+{
+    ui::SettingsState state;
+    state.vault_unlocked = true;
+    state.section = ui::SettingsSection::VaultOps;
+    CHECK_EQ(ui::settings_row_count(state), 6);
+}

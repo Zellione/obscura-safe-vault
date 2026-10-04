@@ -78,6 +78,115 @@ void bind_id(sqlite3_stmt* statement, int index, const Id& id) noexcept
     sqlite3_bind_blob(statement, index, id.data(), static_cast<int>(id.size()), SQLITE_TRANSIENT);
 }
 
+template <typename T>
+void bind_optional_integer(sqlite3_stmt* statement, int index,
+                           const std::optional<T>& value) noexcept
+{
+    if (value.has_value())
+        sqlite3_bind_int64(statement, index, static_cast<sqlite3_int64>(*value));
+    else
+        sqlite3_bind_null(statement, index);
+}
+
+struct NodeMetadata {
+    std::optional<int> format;
+    std::optional<uint32_t> width;
+    std::optional<uint32_t> height;
+    std::optional<uint64_t> duration_ms;
+    std::optional<int> codec;
+    std::optional<uint64_t> original_size;
+    std::optional<uint8_t> sort_key;
+    std::optional<bool> animated;
+};
+
+NodeMetadata node_metadata(const IndexNode& node) noexcept
+{
+    NodeMetadata metadata;
+    if (node.is_image()) {
+        metadata.format = std::to_underlying(node.meta.format);
+        metadata.width = node.meta.width;
+        metadata.height = node.meta.height;
+        metadata.original_size = node.meta.orig_size;
+        metadata.animated = node.meta.animated;
+    } else if (node.is_video()) {
+        metadata.format = std::to_underlying(node.vmeta.container);
+        metadata.width = node.vmeta.width;
+        metadata.height = node.vmeta.height;
+        metadata.duration_ms = node.vmeta.duration_us / 1000;
+        metadata.codec = std::to_underlying(node.vmeta.codec);
+        metadata.original_size = node.vmeta.orig_size;
+    } else {
+        metadata.sort_key = std::to_underlying(node.sort_key);
+    }
+    return metadata;
+}
+
+class MetadataNodeWriter {
+public:
+    MetadataNodeWriter(Statement& live, Statement& upsert) noexcept : live_(live), upsert_(upsert)
+    {}
+
+    bool store(const IndexNode& node, const Id* parent, uint64_t order) const noexcept
+    {
+        if (!id_valid(node.node_id) || !mark_live(node.node_id)) return false;
+        if (!bind_node(node, parent, order) || sqlite3_step(upsert_.get()) != SQLITE_DONE)
+            return false;
+        for (size_t i = 0; i < node.children.size(); ++i)
+            if (!store(node.children[i], &node.node_id, i)) return false;
+        return true;
+    }
+
+private:
+    bool mark_live(const Id& id) const noexcept
+    {
+        sqlite3_reset(live_.get());
+        sqlite3_clear_bindings(live_.get());
+        bind_id(live_.get(), 1, id);
+        return sqlite3_step(live_.get()) == SQLITE_DONE;
+    }
+
+    bool bind_node(const IndexNode& node, const Id* parent, uint64_t order) const noexcept
+    {
+        sqlite3_reset(upsert_.get());
+        sqlite3_clear_bindings(upsert_.get());
+        bind_identity(node, parent, order);
+        bind_metadata(node_metadata(node));
+        return true;
+    }
+
+    void bind_identity(const IndexNode& node, const Id* parent, uint64_t order) const noexcept
+    {
+        bind_id(upsert_.get(), 1, node.node_id);
+        if (parent)
+            bind_id(upsert_.get(), 2, *parent);
+        else
+            sqlite3_bind_null(upsert_.get(), 2);
+        sqlite3_bind_int(upsert_.get(), 3, static_cast<int>(std::to_underlying(node.type)));
+        const std::string_view display = parent ? node.name.view() : std::string_view{"/"};
+        sqlite3_bind_text(upsert_.get(), 4, display.data(), static_cast<int>(display.size()),
+                          SQLITE_TRANSIENT);
+        sqlite3_bind_int64(upsert_.get(), 5, static_cast<sqlite3_int64>(order));
+        sqlite3_bind_int(upsert_.get(), 6, node.favorite ? 1 : 0);
+        const uint64_t created = node.is_video() ? node.vmeta.created_ts : node.meta.created_ts;
+        sqlite3_bind_int64(upsert_.get(), 7, static_cast<sqlite3_int64>(created));
+    }
+
+    void bind_metadata(const NodeMetadata& metadata) const noexcept
+    {
+        bind_optional_integer(upsert_.get(), 8, metadata.format);
+        bind_optional_integer(upsert_.get(), 9, metadata.width);
+        bind_optional_integer(upsert_.get(), 10, metadata.height);
+        bind_optional_integer(upsert_.get(), 11, metadata.duration_ms);
+        bind_optional_integer(upsert_.get(), 12, metadata.codec);
+        bind_optional_integer(upsert_.get(), 13, metadata.original_size);
+        bind_optional_integer(upsert_.get(), 14, metadata.sort_key);
+        bind_optional_integer(upsert_.get(), 15, metadata.animated);
+    }
+
+    Statement& live_;
+    Statement& upsert_;
+};
+
 std::optional<Id> column_id(sqlite3_stmt* statement, int column) noexcept
 {
     if (sqlite3_column_type(statement, column) == SQLITE_NULL) return std::nullopt;
@@ -440,6 +549,32 @@ bool database_healthy(const Database& database) noexcept
     return text != nullptr && std::string_view{reinterpret_cast<const char*>(text)} == "ok";
 }
 
+bool database_deep_healthy(const Database& database) noexcept
+{
+    if (!database.handle_) return false;
+    Statement integrity{database.handle_, "PRAGMA integrity_check"};
+    if (!integrity.get() || sqlite3_step(integrity.get()) != SQLITE_ROW) return false;
+    if (const auto* text = sqlite3_column_text(integrity.get(), 0);
+        !text || std::string_view{reinterpret_cast<const char*>(text)} != "ok")
+        return false;
+    Statement foreign_keys{database.handle_, "PRAGMA foreign_key_check"};
+    return foreign_keys.get() && sqlite3_step(foreign_keys.get()) == SQLITE_DONE;
+}
+
+DbStatus maintain_database(Database& database) noexcept
+{
+    if (!database.handle_) return InvalidArgument;
+    if (auto status = exec(database.handle_, "PRAGMA optimize"); status != Ok) return status;
+    // VACUUM implements its rewrite through SQLite's private `vacuum_db` attachment.
+    // Normal vault queries forbid all attachments; open one slot only for this statement and
+    // restore the hardening limit before returning, including on failure.
+    const int old_limit = sqlite3_limit(database.handle_, SQLITE_LIMIT_ATTACHED, 1);
+    const auto vacuum = exec(database.handle_, "VACUUM");
+    (void)sqlite3_limit(database.handle_, SQLITE_LIMIT_ATTACHED, old_limit);
+    if (vacuum != Ok) return vacuum;
+    return database_deep_healthy(database) ? Ok : WrongKeyOrCorrupt;
+}
+
 Id database_root_node_id(const Database& database) noexcept
 {
     Id result{};
@@ -492,7 +627,8 @@ DbStatus Database::insert_node(const NodeRecord& node) noexcept
     return map_status(sqlite3_step(statement.get()));
 }
 
-DbStatus Database::sync_metadata(const IndexNode& root, const VaultSettings& settings, // NOSONAR cpp:S3776
+DbStatus Database::sync_metadata(const IndexNode& root,          // NOSONAR cpp:S3776
+                                 const VaultSettings& settings,  // NOSONAR cpp:S3776
                                  std::span<const SavedSearch> searches,
                                  std::span<const ObjectRecord> staged_objects) noexcept
 {
@@ -529,72 +665,8 @@ DbStatus Database::sync_metadata(const IndexNode& root, const VaultSettings& set
         "size,"
         "sort_key=excluded.sort_key,animated=excluded.animated"};
     if (status == Ok && (!live.get() || !upsert.get())) status = IoError;
-    const auto bind_optional = [](sqlite3_stmt* statement, int index, auto value) {
-        if (value.has_value())
-            sqlite3_bind_int64(statement, index, static_cast<sqlite3_int64>(*value));
-        else
-            sqlite3_bind_null(statement, index);
-    };
-    std::function<bool(const IndexNode&, const Id*, uint64_t)> store_node;
-    store_node = [&](const IndexNode& node, const Id* parent, uint64_t order) { // NOSONAR cpp:S3608 cpp:S1188
-        if (!id_valid(node.node_id)) return false;
-        sqlite3_reset(live.get());
-        sqlite3_clear_bindings(live.get());
-        bind_id(live.get(), 1, node.node_id);
-        if (sqlite3_step(live.get()) != SQLITE_DONE) return false;
-        sqlite3_reset(upsert.get());
-        sqlite3_clear_bindings(upsert.get());
-        bind_id(upsert.get(), 1, node.node_id);
-        if (parent)
-            bind_id(upsert.get(), 2, *parent);
-        else
-            sqlite3_bind_null(upsert.get(), 2);
-        sqlite3_bind_int(upsert.get(), 3, static_cast<int>(std::to_underlying(node.type)));
-        const std::string_view display = parent ? node.name.view() : std::string_view{"/"};
-        sqlite3_bind_text(upsert.get(), 4, display.data(), static_cast<int>(display.size()),
-                          SQLITE_TRANSIENT);
-        sqlite3_bind_int64(upsert.get(), 5, static_cast<sqlite3_int64>(order));
-        sqlite3_bind_int(upsert.get(), 6, node.favorite ? 1 : 0);
-        const uint64_t created = node.is_video() ? node.vmeta.created_ts : node.meta.created_ts;
-        sqlite3_bind_int64(upsert.get(), 7, static_cast<sqlite3_int64>(created));
-        std::optional<int> format;
-        std::optional<uint32_t> width;
-        std::optional<uint32_t> height;
-        std::optional<uint64_t> duration_ms;
-        std::optional<int> codec;
-        std::optional<uint64_t> original_size;
-        std::optional<uint8_t> sort_key;
-        std::optional<bool> animated;
-        if (node.is_image()) {
-            format = std::to_underlying(node.meta.format);
-            width = node.meta.width;
-            height = node.meta.height;
-            original_size = node.meta.orig_size;
-            animated = node.meta.animated;
-        } else if (node.is_video()) {
-            format = std::to_underlying(node.vmeta.container);
-            width = node.vmeta.width;
-            height = node.vmeta.height;
-            duration_ms = node.vmeta.duration_us / 1000;
-            codec = std::to_underlying(node.vmeta.codec);
-            original_size = node.vmeta.orig_size;
-        } else {
-            sort_key = std::to_underlying(node.sort_key);
-        }
-        bind_optional(upsert.get(), 8, format);
-        bind_optional(upsert.get(), 9, width);
-        bind_optional(upsert.get(), 10, height);
-        bind_optional(upsert.get(), 11, duration_ms);
-        bind_optional(upsert.get(), 12, codec);
-        bind_optional(upsert.get(), 13, original_size);
-        bind_optional(upsert.get(), 14, sort_key);
-        bind_optional(upsert.get(), 15, animated);
-        if (sqlite3_step(upsert.get()) != SQLITE_DONE) return false;
-        for (size_t i = 0; i < node.children.size(); ++i)
-            if (!store_node(node.children[i], &node.node_id, i)) return false;
-        return true;
-    };
-    if (status == Ok && !store_node(root, nullptr, 0))
+    if (MetadataNodeWriter node_writer{live, upsert};
+        status == Ok && !node_writer.store(root, nullptr, 0))
         status = map_status(sqlite3_extended_errcode(handle_));
     if (status == Ok)
         status =
@@ -605,7 +677,7 @@ DbStatus Database::sync_metadata(const IndexNode& root, const VaultSettings& set
             handle_, "DELETE FROM nodes WHERE node_id NOT IN (SELECT node_id FROM osv_live_nodes)");
     Statement staged_owner_is_live{handle_, "SELECT 1 FROM osv_live_nodes WHERE node_id=?"};
     if (status == Ok && !staged_owner_is_live.get()) status = IoError;
-    for (const auto& object : staged_objects) { // NOSONAR cpp:S924 -- fail-fast transaction loop
+    for (const auto& object : staged_objects) {  // NOSONAR cpp:S924 -- fail-fast transaction loop
         if (status != Ok) break;
         sqlite3_reset(staged_owner_is_live.get());
         sqlite3_clear_bindings(staged_owner_is_live.get());
@@ -656,10 +728,10 @@ DbStatus Database::sync_metadata(const IndexNode& root, const VaultSettings& set
         register_tag(item.tag.view());
     if (tags.size() > 4096) status = Constraint;
     if (status == Ok) {
-        for (size_t i = 0; i < tags.size() && status == Ok; ++i) // NOSONAR cpp:S886
+        for (size_t i = 0; i < tags.size() && status == Ok; ++i)  // NOSONAR cpp:S886
             status = add_tag(static_cast<int64_t>(i + 1), tags[i].second, tags[i].first);
     }
-    const auto tag_id = [&](std::string_view value) { // NOSONAR cpp:S3574
+    const auto tag_id = [&](std::string_view value) {  // NOSONAR cpp:S3574
         std::string canonical(value);
         std::ranges::transform(canonical, canonical.begin(), [](unsigned char ch) {
             return static_cast<char>(std::tolower(ch));
@@ -695,7 +767,7 @@ DbStatus Database::sync_metadata(const IndexNode& root, const VaultSettings& set
                 Statement field{handle_,
                                 "INSERT INTO category_fields(category_id,field_order,display_name) "
                                 "VALUES(?,?,?)"};
-                if (!field.get()) { // NOSONAR cpp:S134 -- bounded category/field hierarchy
+                if (!field.get()) {  // NOSONAR cpp:S134 -- bounded category/field hierarchy
                     status = IoError;
                     break;
                 }
@@ -721,7 +793,7 @@ DbStatus Database::sync_metadata(const IndexNode& root, const VaultSettings& set
                        return std::tolower(x) == std::tolower(y);
                    });
         };
-        for (const auto& value : settings.tag_field_values) { // NOSONAR cpp:S924 -- validation exits uniformly
+        for (const auto& value : settings.tag_field_values) {  // NOSONAR cpp:S924
             const std::string_view tag = value.tag.view();
             const size_t colon = tag.find(':');
             if (colon == std::string_view::npos) {
@@ -762,7 +834,7 @@ DbStatus Database::sync_metadata(const IndexNode& root, const VaultSettings& set
         status = set_settings(record);
     }
     if (status == Ok) {
-        for (size_t i = 0; i < searches.size() && status == Ok; ++i) // NOSONAR cpp:S886
+        for (size_t i = 0; i < searches.size() && status == Ok; ++i)  // NOSONAR cpp:S886
             status = add_saved_search(
                 {static_cast<int64_t>(i + 1), searches[i].name, searches[i].query});
     }
@@ -1387,7 +1459,7 @@ DbStatus Database::backup_to(const std::filesystem::path& destination,
         status != Ok || !database_healthy(*target.database)) {
         target.database.reset();
         remove_temporary();
-        return status;
+        return status == Ok ? WrongKeyOrCorrupt : status;
     }
     target.database.reset();
     if (!publish_backup(temporary, destination, parent)) {
@@ -1395,6 +1467,21 @@ DbStatus Database::backup_to(const std::filesystem::path& destination,
         return IoError;
     }
     return Ok;
+}
+
+DbStatus Database::backup_to(const VaultRoot& destination,
+                             std::span<const uint8_t, crypto::KEY_SIZE> database_key) const noexcept
+{
+    if (!handle_ || destination.native_handle() < 0) return InvalidArgument;
+    const auto path = std::filesystem::path{
+        std::format("/proc/self/fd/{}/vault.db", destination.native_handle())};
+    auto target = open_raw(path, database_key, SQLITE_OPEN_READWRITE);
+    if (!target.database) return target.status;
+    if (const auto copied = copy_database(handle_, target.database->handle_);
+        copied != Ok || !database_healthy(*target.database))
+        return copied == Ok ? WrongKeyOrCorrupt : copied;
+    target.database.reset();
+    return destination.sync_database() ? Ok : IoError;
 }
 
 DbStatus set_database_user_version_for_test(Database& database, int version) noexcept

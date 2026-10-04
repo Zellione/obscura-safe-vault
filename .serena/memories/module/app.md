@@ -168,6 +168,12 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   EXCLUDED from `apply_nav`'s screen teardown (alongside `ToggleKeepUnlocked`/`Quit`/`None`) —
   the overlay draws over the screen, so tearing it down would rebuild the vault manager
   underneath. The teardown lives in a guard clause ABOVE the switch, not in any case.
+- Phase 113 adds the sibling `NavKind::ToVaultMaintenance`: directory-vault **Shift+C** opens F2
+  directly on the Vault section instead of offering legacy single-file compaction. App's bundled
+  `MaintenanceUi` runs deep verify, rechecked GC/staging cleanup, SQLCipher maintenance, and
+  encrypted backup on one `std::async` worker. While it runs, the import queue is exclusive, the
+  screen does not update/render, input and quit are swallowed, and the maintenance flag feeds the
+  existing auto-lock suppression. Completion reopens the Vault panel with a non-secret summary.
 - `ui::draw_help_popup` synthesises a global "Global" group (F1/F2) so both appear on every
   screen: `Screen::help_groups()` is a per-screen virtual with eight overrides and had no
   shared entry point. `help_line_count` and the scroll clamp must be fed the SAME list that is

@@ -13,6 +13,8 @@
 #include "ui/gallery_view.h"
 #include "ui/gallery_sort.h"
 #include "ui/settings_model.h"
+
+#include <array>
 #include "ui/text_input_event.h"
 #include "ui/widgets.h"
 
@@ -208,15 +210,18 @@ void apply_value_delta(SettingsState& state, int delta, bool& commit_out)
     return false;
 }
 
-// Handle VaultOps actions (Enter to trigger migration).
+// Handle VaultOps actions.
 [[nodiscard]] bool handle_vault_ops_action(SettingsState& state, SDL_Keycode key)
 {
     if (state.section != SettingsSection::VaultOps || !state.in_pane || !state.vault_unlocked) {
         return false;
     }
-    if ((key == SDLK_RETURN || key == SDLK_KP_ENTER) && state.row == 0) {
-        // Phase 65: trigger migration check
-        state.trigger_migration = true;
+    if (key == SDLK_RETURN || key == SDLK_KP_ENTER) {
+        using enum VaultMaintenanceAction;
+        if (constexpr std::array actions{Upgrade, Verify, RepairDerived, GarbageCollect, Backup,
+                                         Optimize};
+            state.row >= 0 && state.row < static_cast<int>(actions.size()))
+            state.maintenance_action = actions[static_cast<size_t>(state.row)];
         return true;
     }
     return false;
@@ -395,8 +400,12 @@ std::pair<std::string, std::string> tagcolours_row(int row_index, const Settings
 
 std::pair<std::string, std::string> vaultops_row(int row_index, const SettingsState&)
 {
-    // Phase 65: vault operations (only available when unlocked).
     if (row_index == 0) return {"Re-check vault for upgrades", "[Enter]"};
+    if (row_index == 1) return {"Deep verify", "[Enter]"};
+    if (row_index == 2) return {"Rebuild thumbnails/posters", "[Enter]"};
+    if (row_index == 3) return {"Collect garbage", "[Enter]"};
+    if (row_index == 4) return {"Encrypted backup", "[Enter]"};
+    if (row_index == 5) return {"Optimize database", "[Enter]"};
     return {};
 }
 

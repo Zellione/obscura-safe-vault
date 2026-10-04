@@ -250,6 +250,11 @@ Sections:
 - **Browsing — this vault.** Vault-wide default sort order, and "show tags on
   tiles".
 - **Tag colours — this vault.** The category→swatch rows.
+- **Vault — this vault (Phase 113).** Upgrade check, deep verify, rebuild thumbnails/posters,
+  collect garbage/stale staging, encrypted backup, and optimize database. Directory vaults show
+  encrypted DB/live-object/garbage metrics in the footer. Long maintenance actions use an
+  exclusive progress modal and return count/byte/status summaries without names or plaintext.
+  **Shift+C** opens this section for directory vaults; legacy vaults retain compact behavior.
 - **Security — this machine (Phase 92).** Two rows: the Phase 66 **Keep 2nd
   vault after transfer** default, and **Clipboard** Allow / Warn / Disable — a
   gate over every clipboard write (the OS clipboard is a persistent,

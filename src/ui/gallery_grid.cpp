@@ -855,6 +855,11 @@ void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
 {
     if (!((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT))) return;
 
+    if (vault::vault_uses_directory_storage(g.vault_)) {
+        g.request(NavKind::ToVaultMaintenance);
+        return;
+    }
+
     // Phase 50: gate compact behind a running import check
     if (g.queue_.busy()) {
         g.status_ = "Imports running — press Shift+I for status";
@@ -1969,6 +1974,9 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         nav_entries.emplace_back("F3", "Split view (side-by-side)");
     }
 
+    const std::string shift_c_action = vault::vault_uses_directory_storage(vault_)
+                                           ? "Vault maintenance"
+                                           : "Compact vault";
     return {
         {"Navigate", nav_entries},
         {"Search & tags", {
@@ -1982,7 +1990,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
             {"X", "Export selection"}, {"M", "Move/copy to — or pull from — another vault"}, {"Shift+M", "Combine gallery (move or copy)"}, {"R", "Rename"}, {"Del", "Delete (acts on selection)"},
         }},
         {"Vault tools", {
-            {"Shift+C", "Compact vault"}, {"Ctrl+D", "Find duplicate files"},
+            {"Shift+C", shift_c_action}, {"Ctrl+D", "Find duplicate files"},
         }},
         {"Session", {
             {"Shift+S", "Cycle sort order"}, {"U", "Keep unlocked for session"},
@@ -2051,10 +2059,11 @@ void GalleryGrid::render(gfx::Renderer& r)
     // Combine with selection count on the same line to avoid collision.
     const uint64_t file_sz = vault::vault_file_bytes(vault_);
     const uint64_t waste_sz = vault::vault_wasted_bytes(vault_);
-    const bool show_waste = should_display_waste(waste_sz, file_sz);
+    const bool show_waste = !vault::vault_uses_directory_storage(vault_) &&
+                            should_display_waste(waste_sz, file_sz);
     const bool show_selection = !sel_.empty();
     const std::string read_only_status =
-        vault::vault_is_read_only(vault_) ? "Experimental v3 vault - read only" : "";
+        vault::vault_is_read_only(vault_) ? "Vault is read only" : "";
     const std::string& visible_status = status_.empty() ? read_only_status : status_;
 
     draw_footer_status(r, font_, OX, bands.footer, FooterStatus{

@@ -1,6 +1,7 @@
 #include "test_framework.h"
 
 #include "vault/v3_db.h"
+#include "vault/v3_object_store.h"
 #include "vault/v3_recovery.h"
 
 #include <array>
@@ -53,6 +54,7 @@ std::optional<Database> make_database(const fs::path& path)
     node.parent_id = ROOT;
     node.type = NodeType::Image;
     node.display_name = "image.jpg";
+    node.media_format = 1;
     if (opened.database->insert_node(node) != DbStatus::Ok) return std::nullopt;
     return std::move(*opened.database);
 }
@@ -133,4 +135,77 @@ TEST(v3_reconciliation_distinguishes_missing_reference_from_garbage)
     REQUIRE(scan.missing.size() == 1);
     CHECK_EQ(scan.missing[0], missing.object_id);
     CHECK_TRUE(scan.garbage.empty());
+}
+
+TEST(v3_deep_verify_authenticates_referenced_objects_and_classifies_garbage)
+{
+    TempDir temp;
+    auto root = VaultRoot::create(temp.path / "vault.osv");
+    REQUIRE(root.has_value());
+    auto made = make_database(temp.path / "db");
+    REQUIRE(made.has_value());
+    auto db = std::move(*made);
+
+    ObjectWriteRequest request{.vault_id = ROOT,
+                               .owner_node_id = NODE,
+                               .role = ObjectRole::OriginalImage,
+                               .media_format = 1};
+    const std::array<uint8_t, 5> plain{1, 2, 3, 4, 5};
+    const auto written = write_object(*root, KEY, request, plain);
+    REQUIRE(written.status == ObjectStatus::Ok);
+    ObjectRecord reference{written.info.object_id,        NODE,
+                           ObjectRole::OriginalImage,     written.info.encrypted_length,
+                           written.info.plaintext_length, written.info.frame_plain_limit,
+                           written.info.frame_count,      0};
+    REQUIRE(db.commit_object_create(reference) == DbStatus::Ok);
+
+    auto garbage = root->create_staging_file();
+    REQUIRE(garbage.has_value());
+    REQUIRE(garbage->write_all(std::array<uint8_t, 3>{9, 8, 7}));
+    REQUIRE(garbage->sync());
+    ObjectId garbage_id{7};
+    garbage_id[15] = 7;
+    REQUIRE(root->publish(*garbage, garbage_id));
+
+    const auto report = verify_vault(*root, db, KEY, ROOT, VerifyDepth::Deep);
+    CHECK(report.status == RecoveryStatus::Ok);
+    CHECK_EQ(report.objects_checked, 1);
+    CHECK_EQ(report.authenticated_bytes, plain.size());
+    CHECK_EQ(report.garbage_objects, 1);
+    CHECK_FALSE(report.has_corruption());
+}
+
+TEST(v3_deep_verify_reports_unauthentic_referenced_object_without_deleting_it)
+{
+    TempDir temp;
+    auto root = VaultRoot::create(temp.path / "vault.osv");
+    REQUIRE(root.has_value());
+    auto made = make_database(temp.path / "db");
+    REQUIRE(made.has_value());
+    auto db = std::move(*made);
+
+    ObjectWriteRequest request{.vault_id = ROOT,
+                               .owner_node_id = NODE,
+                               .role = ObjectRole::OriginalImage,
+                               .media_format = 1};
+    const std::array<uint8_t, 4> plain{1, 2, 3, 4};
+    const auto written = write_object(*root, KEY, request, plain);
+    REQUIRE(written.status == ObjectStatus::Ok);
+    auto reference = ObjectRecord{written.info.object_id,        NODE,
+                                  ObjectRole::OriginalImage,     written.info.encrypted_length,
+                                  written.info.plaintext_length, written.info.frame_plain_limit,
+                                  written.info.frame_count,      0};
+    REQUIRE(db.commit_object_create(reference) == DbStatus::Ok);
+
+    auto file = root->open_object(reference.object_id);
+    REQUIRE(file.has_value());
+    // A wrong master key is equivalent to authenticated-object corruption and
+    // avoids introducing a test-only write seam into descriptor-safe ObjectFile.
+    constexpr std::array<uint8_t, 32> WRONG_KEY{9, 8, 7, 6};
+    const auto report = verify_vault(*root, db, WRONG_KEY, ROOT, VerifyDepth::Deep);
+    CHECK(report.status == RecoveryStatus::Corrupt);
+    REQUIRE(report.findings.size() == 1);
+    CHECK(report.findings[0].kind == IntegrityFindingKind::UnauthenticObject);
+    CHECK_EQ(report.findings[0].object_id, reference.object_id);
+    CHECK_TRUE(root->open_object(reference.object_id).has_value());
 }
