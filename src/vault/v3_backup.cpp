@@ -49,7 +49,7 @@ bool copy_object(const VaultRoot& source, const VaultRoot& destination, const Ob
     return output->sync() && destination.publish(*output, object.object_id);
 }
 
-bool populate_backup(const VaultRoot& source, VaultRoot& backup, const Database& database,
+bool populate_backup(const VaultRoot& source, const VaultRoot& backup, const Database& database,
                      std::span<const uint8_t, crypto::KEY_SIZE> database_key,
                      std::span<const uint8_t, crypto::KEY_SIZE> master_key, const V3Header& header,
                      BackupResult& result) noexcept

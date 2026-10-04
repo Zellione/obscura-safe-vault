@@ -138,8 +138,8 @@ void authenticate_object(const VaultRoot& root, const Database& database,
     }
     for (uint32_t frame = 0; frame < object.frame_count; ++frame) {
         crypto::SecureBytes plaintext;
-        const auto status = opened.reader->read_frame(frame, plaintext);
-        if (status != ObjectStatus::Ok) {
+        if (const auto status = opened.reader->read_frame(frame, plaintext);
+            status != ObjectStatus::Ok) {
             report.findings.push_back({finding_for(status), object.object_id});
             return;
         }

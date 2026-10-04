@@ -126,7 +126,7 @@ public:
     MetadataNodeWriter(Statement& live, Statement& upsert) noexcept : live_(live), upsert_(upsert)
     {}
 
-    bool store(const IndexNode& node, const Id* parent, uint64_t order) noexcept
+    bool store(const IndexNode& node, const Id* parent, uint64_t order) const noexcept
     {
         if (!id_valid(node.node_id) || !mark_live(node.node_id)) return false;
         if (!bind_node(node, parent, order) || sqlite3_step(upsert_.get()) != SQLITE_DONE)
@@ -137,7 +137,7 @@ public:
     }
 
 private:
-    bool mark_live(const Id& id) noexcept
+    bool mark_live(const Id& id) const noexcept
     {
         sqlite3_reset(live_.get());
         sqlite3_clear_bindings(live_.get());
@@ -145,7 +145,7 @@ private:
         return sqlite3_step(live_.get()) == SQLITE_DONE;
     }
 
-    bool bind_node(const IndexNode& node, const Id* parent, uint64_t order) noexcept
+    bool bind_node(const IndexNode& node, const Id* parent, uint64_t order) const noexcept
     {
         sqlite3_reset(upsert_.get());
         sqlite3_clear_bindings(upsert_.get());
@@ -154,7 +154,7 @@ private:
         return true;
     }
 
-    void bind_identity(const IndexNode& node, const Id* parent, uint64_t order) noexcept
+    void bind_identity(const IndexNode& node, const Id* parent, uint64_t order) const noexcept
     {
         bind_id(upsert_.get(), 1, node.node_id);
         if (parent)
@@ -171,7 +171,7 @@ private:
         sqlite3_bind_int64(upsert_.get(), 7, static_cast<sqlite3_int64>(created));
     }
 
-    void bind_metadata(const NodeMetadata& metadata) noexcept
+    void bind_metadata(const NodeMetadata& metadata) const noexcept
     {
         bind_optional_integer(upsert_.get(), 8, metadata.format);
         bind_optional_integer(upsert_.get(), 9, metadata.width);
@@ -665,8 +665,8 @@ DbStatus Database::sync_metadata(const IndexNode& root,          // NOSONAR cpp:
         "size,"
         "sort_key=excluded.sort_key,animated=excluded.animated"};
     if (status == Ok && (!live.get() || !upsert.get())) status = IoError;
-    MetadataNodeWriter node_writer{live, upsert};
-    if (status == Ok && !node_writer.store(root, nullptr, 0))
+    if (MetadataNodeWriter node_writer{live, upsert};
+        status == Ok && !node_writer.store(root, nullptr, 0))
         status = map_status(sqlite3_extended_errcode(handle_));
     if (status == Ok)
         status =
