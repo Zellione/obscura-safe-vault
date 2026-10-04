@@ -17,7 +17,8 @@ enum class NavKind {
     None, ToUnlock, ToGallery, ToDualGallery, ToViewer, ToFavoriteImages, ToFavoriteGalleries,
     ToFavoriteViewer, ToAdvancedSearch, ToTagOverview, ToTagGalleries,
     ToTagImages, ToTagViewer, ToImportStatus, ToDuplicates,
-    ToVaultManager, LockActive, LockSecond, ToggleKeepUnlocked, ToSettings, Quit
+    ToVaultManager, LockActive, LockSecond, ToggleKeepUnlocked, ToSettings,
+    ToVaultMaintenance, Quit
 };
 
 // A transition request. `path`/`index` carry context for the destination:
@@ -29,6 +30,7 @@ enum class NavKind {
 //   ToTagViewer    — viewer over a tag's media set; `path` = tag, `index` = pos.
 //   ToSettings — open the global settings overlay on its Appearance section
 //                (Phase 49; the C shortcut that used to open the theme picker).
+//   ToVaultMaintenance — open that overlay directly on the Vault section.
 struct Nav {
     NavKind     kind = NavKind::None;
     std::string path;

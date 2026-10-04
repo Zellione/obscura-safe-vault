@@ -22,10 +22,8 @@ fs::path db_temp_dir()
 }
 
 constexpr std::array<uint8_t, 32> DB_KEY{
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-    0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-    0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
 };
 constexpr vault::v3::Id ROOT_ID{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
 constexpr vault::v3::Id CHILD_ID{2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2};
@@ -98,8 +96,7 @@ TEST(v3_db_constraints_are_typed_and_connection_closes)
     invalid.display_name = "child";
     CHECK(created.database->insert_node(invalid) == vault::v3::DbStatus::InvalidArgument);
     invalid.node_id = ROOT_ID;
-    CHECK(created.database->insert_node(invalid) ==
-          vault::v3::DbStatus::Constraint);
+    CHECK(created.database->insert_node(invalid) == vault::v3::DbStatus::Constraint);
     created.database.reset();
     CHECK(fs::exists(path));
     fs::remove_all(dir);
@@ -203,5 +200,32 @@ TEST(v3_db_repository_round_trip_and_encrypted_backup)
     REQUIRE(backup_open.database.has_value());
     CHECK(backup_open.database->find_node(CHILD_ID).value.has_value());
     backup_open.database.reset();
+    fs::remove_all(dir);
+}
+
+TEST(v3_db_deep_integrity_and_lossless_maintenance_preserve_rows)
+{
+    const auto dir = db_temp_dir();
+    REQUIRE(!dir.empty());
+    const auto path = dir / "vault.db";
+    auto opened = vault::v3::Database::create(path, DB_KEY, ROOT_ID);
+    REQUIRE(opened.database.has_value());
+    auto& db = *opened.database;
+    REQUIRE(vault::v3::database_deep_healthy(db));
+
+    vault::v3::NodeRecord child;
+    child.node_id = CHILD_ID;
+    child.parent_id = ROOT_ID;
+    child.type = vault::v3::NodeType::Image;
+    child.display_name = "preserved.jpg";
+    child.media_format = 1;
+    REQUIRE(db.insert_node(child) == vault::v3::DbStatus::Ok);
+    REQUIRE(vault::v3::maintain_database(db) == vault::v3::DbStatus::Ok);
+    REQUIRE(vault::v3::database_deep_healthy(db));
+    const auto found = db.find_node(CHILD_ID);
+    REQUIRE(found.status == vault::v3::DbStatus::Ok);
+    REQUIRE(found.value.has_value());
+    CHECK(found.value->display_name == "preserved.jpg");
+    opened.database.reset();
     fs::remove_all(dir);
 }

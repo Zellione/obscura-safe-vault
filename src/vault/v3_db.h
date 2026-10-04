@@ -51,7 +51,8 @@ struct NodeRecord {
 
 struct ObjectRecord {
     ObjectRecord() = default;
-    ObjectRecord(Id object, Id node, ObjectRole object_role, uint64_t encrypted, // NOSONAR cpp:S107 -- mirrors the fixed objects row
+    ObjectRecord(Id object, Id node, ObjectRole object_role,
+                 uint64_t encrypted,  // NOSONAR cpp:S107 -- mirrors the fixed objects row
                  uint64_t plaintext, uint32_t frame_limit, uint32_t frames,
                  uint64_t generation) noexcept
         : object_id(object), node_id(node), role(object_role), encrypted_length(encrypted),
@@ -113,7 +114,8 @@ template <typename T> struct DbResult {
     T value{};
 };
 
-class Database { // NOSONAR cpp:S1448 -- typed repositories intentionally share one SQLCipher handle
+class Database {  // NOSONAR cpp:S1448 -- typed repositories intentionally share one SQLCipher
+                  // handle
 public:
     struct OpenResult;
 
@@ -177,6 +179,9 @@ public:
     [[nodiscard]] DbStatus
     backup_to(const std::filesystem::path& destination,
               std::span<const uint8_t, crypto::KEY_SIZE> database_key) const noexcept;
+    [[nodiscard]] DbStatus
+    backup_to(VaultRoot& destination,
+              std::span<const uint8_t, crypto::KEY_SIZE> database_key) const noexcept;
     // Atomically mirrors the logical metadata snapshot while preserving object
     // references for live nodes. References belonging to removed nodes are
     // dropped in the same transaction; their immutable files become GC input.
@@ -187,6 +192,8 @@ public:
 
 private:
     friend bool database_healthy(const Database&) noexcept;
+    friend bool database_deep_healthy(const Database&) noexcept;
+    friend DbStatus maintain_database(Database&) noexcept;
     friend Id database_root_node_id(const Database&) noexcept;
     friend DbStatus set_database_user_version_for_test(Database&, int) noexcept;
     [[nodiscard]] static OpenResult
@@ -197,6 +204,8 @@ private:
 };
 
 [[nodiscard]] bool database_healthy(const Database& database) noexcept;
+[[nodiscard]] bool database_deep_healthy(const Database& database) noexcept;
+[[nodiscard]] DbStatus maintain_database(Database& database) noexcept;
 [[nodiscard]] Id database_root_node_id(const Database& database) noexcept;
 // Test-only migration seam; production never sets versions directly.
 [[nodiscard]] DbStatus set_database_user_version_for_test(Database& database, int version) noexcept;

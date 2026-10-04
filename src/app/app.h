@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <future>
 #include <string>
 
 #include "app/idle_timer.h"
@@ -187,6 +188,14 @@ private:
         ui::MigrationOutcome result;             // handed back by take_outcome()
     };
     MigrationUi                        migration_ui_;
+
+    struct MaintenanceUi {
+        struct Result { bool ok = false; std::string message; };
+        std::future<Result> future;
+        std::string title;
+        bool running = false;
+    };
+    MaintenanceUi                      maintenance_ui_;
 
     // Phase 50: import queue and related UI state. Declared after active_/pending_
     // so ~ImportQueue (which flushes into the vault) runs before the vault is destroyed.

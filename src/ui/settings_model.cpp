@@ -58,7 +58,7 @@ int settings_row_count(const SettingsState& state) noexcept
         return state.vault_unlocked ? size : 0;
     }
     case VaultOps:
-        return state.vault_unlocked ? 1 : 0; // Phase 65: re-check vault for upgrades
+        return state.vault_unlocked ? 6 : 0;
     case Security:
         return 2; // machine-scoped: keep-open default + clipboard gate
     }

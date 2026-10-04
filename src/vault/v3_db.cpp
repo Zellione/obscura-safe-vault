@@ -440,6 +440,31 @@ bool database_healthy(const Database& database) noexcept
     return text != nullptr && std::string_view{reinterpret_cast<const char*>(text)} == "ok";
 }
 
+bool database_deep_healthy(const Database& database) noexcept
+{
+    if (!database.handle_) return false;
+    Statement integrity{database.handle_, "PRAGMA integrity_check"};
+    if (!integrity.get() || sqlite3_step(integrity.get()) != SQLITE_ROW) return false;
+    const auto* text = sqlite3_column_text(integrity.get(), 0);
+    if (!text || std::string_view{reinterpret_cast<const char*>(text)} != "ok") return false;
+    Statement foreign_keys{database.handle_, "PRAGMA foreign_key_check"};
+    return foreign_keys.get() && sqlite3_step(foreign_keys.get()) == SQLITE_DONE;
+}
+
+DbStatus maintain_database(Database& database) noexcept
+{
+    if (!database.handle_) return InvalidArgument;
+    if (auto status = exec(database.handle_, "PRAGMA optimize"); status != Ok) return status;
+    // VACUUM implements its rewrite through SQLite's private `vacuum_db` attachment.
+    // Normal vault queries forbid all attachments; open one slot only for this statement and
+    // restore the hardening limit before returning, including on failure.
+    const int old_limit = sqlite3_limit(database.handle_, SQLITE_LIMIT_ATTACHED, 1);
+    const auto vacuum = exec(database.handle_, "VACUUM");
+    (void)sqlite3_limit(database.handle_, SQLITE_LIMIT_ATTACHED, old_limit);
+    if (vacuum != Ok) return vacuum;
+    return database_deep_healthy(database) ? Ok : WrongKeyOrCorrupt;
+}
+
 Id database_root_node_id(const Database& database) noexcept
 {
     Id result{};
@@ -492,7 +517,8 @@ DbStatus Database::insert_node(const NodeRecord& node) noexcept
     return map_status(sqlite3_step(statement.get()));
 }
 
-DbStatus Database::sync_metadata(const IndexNode& root, const VaultSettings& settings, // NOSONAR cpp:S3776
+DbStatus Database::sync_metadata(const IndexNode& root,
+                                 const VaultSettings& settings,  // NOSONAR cpp:S3776
                                  std::span<const SavedSearch> searches,
                                  std::span<const ObjectRecord> staged_objects) noexcept
 {
@@ -536,7 +562,8 @@ DbStatus Database::sync_metadata(const IndexNode& root, const VaultSettings& set
             sqlite3_bind_null(statement, index);
     };
     std::function<bool(const IndexNode&, const Id*, uint64_t)> store_node;
-    store_node = [&](const IndexNode& node, const Id* parent, uint64_t order) { // NOSONAR cpp:S3608 cpp:S1188
+    store_node = [&](const IndexNode& node, const Id* parent,
+                     uint64_t order) {  // NOSONAR cpp:S3608 cpp:S1188
         if (!id_valid(node.node_id)) return false;
         sqlite3_reset(live.get());
         sqlite3_clear_bindings(live.get());
@@ -721,7 +748,8 @@ DbStatus Database::sync_metadata(const IndexNode& root, const VaultSettings& set
                        return std::tolower(x) == std::tolower(y);
                    });
         };
-        for (const auto& value : settings.tag_field_values) { // NOSONAR cpp:S924 -- validation exits uniformly
+        for (const auto& value :
+             settings.tag_field_values) {  // NOSONAR cpp:S924 -- validation exits uniformly
             const std::string_view tag = value.tag.view();
             const size_t colon = tag.find(':');
             if (colon == std::string_view::npos) {
@@ -1387,7 +1415,7 @@ DbStatus Database::backup_to(const std::filesystem::path& destination,
         status != Ok || !database_healthy(*target.database)) {
         target.database.reset();
         remove_temporary();
-        return status;
+        return status == Ok ? WrongKeyOrCorrupt : status;
     }
     target.database.reset();
     if (!publish_backup(temporary, destination, parent)) {
@@ -1395,6 +1423,21 @@ DbStatus Database::backup_to(const std::filesystem::path& destination,
         return IoError;
     }
     return Ok;
+}
+
+DbStatus Database::backup_to(VaultRoot& destination,
+                             std::span<const uint8_t, crypto::KEY_SIZE> database_key) const noexcept
+{
+    if (!handle_ || destination.native_handle() < 0) return InvalidArgument;
+    const auto path = std::filesystem::path{
+        std::format("/proc/self/fd/{}/vault.db", destination.native_handle())};
+    auto target = open_raw(path, database_key, SQLITE_OPEN_READWRITE);
+    if (!target.database) return target.status;
+    const auto copied = copy_database(handle_, target.database->handle_);
+    if (copied != Ok || !database_healthy(*target.database))
+        return copied == Ok ? WrongKeyOrCorrupt : copied;
+    target.database.reset();
+    return destination.sync_database() ? Ok : IoError;
 }
 
 DbStatus set_database_user_version_for_test(Database& database, int version) noexcept

@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -41,6 +42,12 @@ class VideoSource;
 }
 
 namespace vault {
+namespace v3 {
+enum class VerifyDepth : uint8_t;
+struct VerificationReport;
+struct GarbageCollectionResult;
+struct BackupResult;
+}  // namespace v3
 
 namespace v3 {
 class ReadSession;
@@ -207,6 +214,12 @@ public:
     }
     friend bool vault_is_read_only(const Vault& v) noexcept;
     friend bool vault_uses_directory_storage(const Vault& v) noexcept;
+    friend v3::VerificationReport verify_directory_vault(const Vault&, v3::VerifyDepth) noexcept;
+    friend v3::GarbageCollectionResult garbage_collect_directory_vault(Vault&, uint64_t) noexcept;
+    friend v3::BackupResult backup_directory_vault(const Vault&,
+                                                   const std::filesystem::path&) noexcept;
+    friend VaultResult maintain_directory_database(Vault&) noexcept;
+    friend std::optional<uint64_t> directory_vault_database_bytes(const Vault&) noexcept;
 
     // Phase 99: true when this vault's index blob + master-key wrap are sealed
     // with the context-bound AEAD (header FLAG_CONTEXT_BOUND_CHUNKS). A clear
@@ -515,6 +528,14 @@ private:
 
 [[nodiscard]] bool vault_is_read_only(const Vault& v) noexcept;
 [[nodiscard]] bool vault_uses_directory_storage(const Vault& v) noexcept;
+[[nodiscard]] v3::VerificationReport verify_directory_vault(const Vault& v,
+                                                            v3::VerifyDepth depth) noexcept;
+[[nodiscard]] v3::GarbageCollectionResult
+garbage_collect_directory_vault(Vault& v, uint64_t grace_seconds) noexcept;
+[[nodiscard]] v3::BackupResult
+backup_directory_vault(const Vault& v, const std::filesystem::path& destination) noexcept;
+[[nodiscard]] VaultResult maintain_directory_database(Vault& v) noexcept;
+[[nodiscard]] std::optional<uint64_t> directory_vault_database_bytes(const Vault& v) noexcept;
 [[nodiscard]] VaultResult move_node_within(Vault& v, std::string_view source_gallery,
                                            std::string_view name,
                                            std::string_view destination_gallery,

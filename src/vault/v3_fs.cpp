@@ -571,6 +571,26 @@ std::optional<VaultRoot> VaultRoot::open(const std::filesystem::path& path)
     return root;
 }
 
+bool VaultRoot::sync_database() const noexcept
+{
+    if (fd_ < 0) return false;
+    const int database = ::openat(fd_, "vault.db", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (database < 0) return false;
+    const bool ok = ::fsync(database) == 0;
+    ::close(database);
+    return ok && sync_dir(fd_);
+}
+
+std::optional<uint64_t> VaultRoot::database_size() const noexcept
+{
+    if (fd_ < 0) return std::nullopt;
+    struct stat info{};
+    if (::fstatat(fd_, "vault.db", &info, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(info.st_mode) ||
+        info.st_size < 0)
+        return std::nullopt;
+    return static_cast<uint64_t>(info.st_size);
+}
+
 namespace {
 
 std::optional<std::pair<unsigned, bool>> root_entry_kind(std::string_view name) noexcept
@@ -817,7 +837,8 @@ bool VaultRoot::rollback_creation() noexcept
     struct stat held{};
     if (struct stat named{}; parent < 0 || ::fstat(fd_, &held) != 0 ||
         ::fstatat(parent, leaf.c_str(), &named, AT_SYMLINK_NOFOLLOW) != 0 ||
-        held.st_dev != named.st_dev || held.st_ino != named.st_ino || !S_ISDIR(named.st_mode)) {
+                             held.st_dev != named.st_dev || held.st_ino != named.st_ino ||
+                             !S_ISDIR(named.st_mode)) {
         if (parent >= 0) ::close(parent);
         return false;
     }
@@ -829,10 +850,37 @@ bool VaultRoot::rollback_creation() noexcept
     // `leaf` is one filename component and the inode was matched to our retained root fd above.
     if (ok)
         ok = ::unlinkat( // NOSONAR cppsecurity:S2083 -- validated component and inode
-                 parent, leaf.c_str(), AT_REMOVEDIR) == 0 && sync_dir(parent);
+                 parent, leaf.c_str(), AT_REMOVEDIR) == 0 &&
+             sync_dir(parent);
     ::close(parent);
     if (ok) close();
     return ok;
+}
+
+bool VaultRoot::publish_directory(const std::filesystem::path& destination) noexcept
+{
+    if (fd_ < 0 || display_path_.filename().empty() || destination.filename().empty()) return false;
+    const auto source_parent =
+        display_path_.has_parent_path() ? display_path_.parent_path() : std::filesystem::path{"."};
+    const auto destination_parent =
+        destination.has_parent_path() ? destination.parent_path() : std::filesystem::path{"."};
+    if (source_parent != destination_parent) return false;
+    const std::string source_leaf = display_path_.filename().string();
+    const std::string destination_leaf = destination.filename().string();
+    if (!plain_staging_name(source_leaf) || !plain_staging_name(destination_leaf)) return false;
+    const int parent = open_root(source_parent);
+    if (parent < 0) return false;
+    struct stat current{};
+    struct stat retained{};
+    const bool same = ::fstat(fd_, &retained) == 0 &&
+                      ::fstatat(parent, source_leaf.c_str(), &current, AT_SYMLINK_NOFOLLOW) == 0 &&
+                      current.st_dev == retained.st_dev && current.st_ino == retained.st_ino;
+    const bool renamed =
+        same && rename_noreplace(parent, source_leaf.c_str(), parent, destination_leaf.c_str());
+    const bool synced = renamed && sync_dir(parent);
+    ::close(parent);
+    if (renamed) display_path_ = destination;
+    return renamed && synced;
 }
 
 bool VaultRoot::unlink_staging(std::string_view name) const noexcept

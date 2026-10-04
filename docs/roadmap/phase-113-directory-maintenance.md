@@ -1,6 +1,21 @@
 # Maintenance, backup, integrity, and operations (Phase 113)
 
-**Status:** not started
+**Status:** complete
+
+## Progress
+
+- ✅ Typed quick/deep verification with non-secret findings and full object-frame authentication.
+- ✅ Race-safe garbage collection exposed through the directory-vault session/facade.
+- ✅ Consistent encrypted snapshots: writer barrier, SQLCipher online backup, referenced immutable
+  object copy, destination deep verification, and atomic no-replace directory publication.
+- ✅ Restore to a new path with credential/integrity verification and source preservation.
+- ✅ Operational cold-copy, snapshot, restore, finding, and maintenance guidance.
+- ✅ Lossless thumbnail/poster rebuild and SQLCipher optimize/VACUUM maintenance actions.
+- ✅ Live database/object/garbage metrics, staging cleanup metrics, and replacement of the
+  directory-vault legacy compaction screen/help surface.
+- ✅ Exclusive background progress UI, structured non-secret outcomes, and exact backup
+  low-disk preflight requirements.
+- ✅ 2,353 Debug tests and 2,353 ASAN/UBSAN tests pass.
 
 ## Goal
 

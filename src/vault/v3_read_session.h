@@ -2,10 +2,12 @@
 
 #include "crypto/secure_mem.h"
 #include "vault/index.h"
+#include "vault/v3_backup.h"
 #include "vault/v3_db.h"
 #include "vault/v3_fs.h"
 #include "vault/v3_header.h"
 #include "vault/v3_object_store.h"
+#include "vault/v3_recovery.h"
 
 #include <filesystem>
 #include <mutex>
@@ -73,6 +75,11 @@ public:
                                              std::span<const uint8_t> old_keyfile,
                                              std::span<const uint8_t> new_password,
                                              std::span<const uint8_t> new_keyfile) noexcept;
+    [[nodiscard]] VerificationReport verify(VerifyDepth depth) const noexcept;
+    [[nodiscard]] GarbageCollectionResult garbage_collect(uint64_t grace_seconds) noexcept;
+    [[nodiscard]] BackupResult backup(const std::filesystem::path& destination) const noexcept;
+    [[nodiscard]] DbStatus maintain_database_storage() noexcept;
+    [[nodiscard]] std::optional<uint64_t> database_bytes() const noexcept;
 
 private:
     friend class ::media::VideoSource;
@@ -93,6 +100,7 @@ private:
     VaultSettings settings_;
     std::vector<SavedSearch> saved_searches_;
     bool unlocked_ = false;
+    VerificationReport quick_open_report_;
     mutable std::mutex state_mutex_;
 };
 

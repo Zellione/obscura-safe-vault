@@ -20,7 +20,7 @@ class FolderDialog {
 public:
     // What the currently-open dialog is collecting. Lets one shared FolderDialog
     // be polled by several handlers without one stealing another's result.
-    enum class Purpose { None, Export, ImportFolder };
+    enum class Purpose { None, Export, ImportFolder, Backup };
 
     void open(SDL_Window* parent, Purpose purpose, bool allow_many);
 

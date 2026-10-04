@@ -3,6 +3,8 @@
 #include <SDL3/SDL.h>
 
 #include "platform/safe_print.h"
+#include <chrono>
+#include <functional>
 #include <string>
 
 #include "app/auto_lock.h"
@@ -50,6 +52,8 @@
 #include "ui/unlock_screen.h"
 #include "ui/vault_manager.h"
 #include "ui/widgets.h"
+#include "vault/v3_backup.h"
+#include "vault/v3_recovery.h"
 #include "vault/vault_search.h"
 
 #ifndef OSV_DEFAULT_FONT
@@ -677,6 +681,16 @@ void draw_migration_result(gfx::Renderer& r, gfx::FontAtlas& font, float win_w, 
 } // namespace
 
 struct App::OverlayDispatch {
+    static void start_maintenance(App& app, std::string title,
+                                  std::function<App::MaintenanceUi::Result()> work)
+    {
+        ui::close_settings(app.overlays_.settings, app.window_);
+        app.import_ui_.queue.set_exclusive(true);
+        app.maintenance_ui_.title = std::move(title);
+        app.maintenance_ui_.running = true;
+        app.maintenance_ui_.future = std::async(std::launch::async, std::move(work));
+    }
+
     static bool help(App& app, const SDL_Event& e)
     {
         // F1 toggles help (checked before the help.open guard so it opens/closes
@@ -775,11 +789,12 @@ struct App::OverlayDispatch {
     // next one. Phase 104: extracted from settings().
     static bool try_trigger_migration(App& app)
     {
-        if (!app.overlays_.settings.open || !app.overlays_.settings.trigger_migration ||
+        if (!app.overlays_.settings.open ||
+            app.overlays_.settings.maintenance_action != ui::VaultMaintenanceAction::Upgrade ||
             !app.vault_state_.active) {
             return false;
         }
-        app.overlays_.settings.trigger_migration = false;
+        app.overlays_.settings.maintenance_action = ui::VaultMaintenanceAction::None;
 
         if (vault::vault_is_read_only(*app.vault_state_.active)) {
             app.overlays_.settings.error = "Experimental v3 vaults are read only";
@@ -804,6 +819,73 @@ struct App::OverlayDispatch {
         app.migration_ui_.pending_migration = scan;
         app.migration_ui_.offer_open        = true;
         return false;   // fall through to the panel handler
+    }
+
+    static bool try_vault_maintenance(App& app)
+    {
+        using enum ui::VaultMaintenanceAction;
+        auto& state = app.overlays_.settings;
+        if (!state.open || state.maintenance_action == None ||
+            state.maintenance_action == Upgrade || !app.vault_state_.active)
+            return false;
+        const auto action = std::exchange(state.maintenance_action, None);
+        if (!vault::vault_uses_directory_storage(*app.vault_state_.active)) {
+            state.error = "Available for directory vaults only";
+            return true;
+        }
+        if (app.import_ui_.queue.busy()) {
+            state.error = "Wait for imports to finish";
+            return true;
+        }
+        if (action == Verify) {
+            auto* active = app.vault_state_.active.get();
+            start_maintenance(app, "Deep verification…", [active] {
+                const auto report = vault::verify_directory_vault(
+                    *active, vault::v3::VerifyDepth::Deep);
+                const bool ok = report.status == vault::v3::RecoveryStatus::Ok;
+                return App::MaintenanceUi::Result{
+                    ok, ok ? std::format("Verified {} objects ({} live, {} garbage)",
+                                         report.objects_checked,
+                                         ui::format_size(report.referenced_bytes),
+                                         ui::format_size(report.garbage_bytes))
+                           : std::format("Verification found {} issue(s)", report.findings.size())};
+            });
+        } else if (action == RepairDerived) {
+            auto settings = vault::vault_settings(*app.vault_state_.active);
+            settings.migrated_thumb_side = 0;
+            if (vault::set_vault_settings(*app.vault_state_.active, std::move(settings)) !=
+                vault::VaultResult::Ok) {
+                state.error = "Could not schedule preview rebuild";
+                return true;
+            }
+            state.maintenance_action = Upgrade;
+            return try_trigger_migration(app);
+        } else if (action == GarbageCollect) {
+            auto* active = app.vault_state_.active.get();
+            start_maintenance(app, "Collecting safe garbage…", [active] {
+                const auto result =
+                    vault::garbage_collect_directory_vault(*active, 24U * 60U * 60U);
+                const bool ok = result.status == vault::v3::RecoveryStatus::Ok;
+                return App::MaintenanceUi::Result{
+                    ok, ok ? std::format("Removed {} object(s), {} staging; preserved {} recent",
+                                         result.deleted, result.staging_removed,
+                                         result.staging_preserved)
+                           : "Garbage collection failed"};
+            });
+        } else if (action == Optimize) {
+            auto* active = app.vault_state_.active.get();
+            start_maintenance(app, "Optimizing database…", [active] {
+                const bool ok = vault::maintain_directory_database(*active) ==
+                                vault::VaultResult::Ok;
+                return App::MaintenanceUi::Result{
+                    ok, ok ? "Database optimized" : "Database optimization failed"};
+            });
+        } else if (action == Backup) {
+            app.folder_dialog_.open(app.window_.sdl_window(),
+                                    platform::FolderDialog::Purpose::Backup, false);
+            state.error = "Choose a backup destination folder";
+        }
+        return true;
     }
 
     // Phase 104: extracted from settings() — the post-event sync block
@@ -855,6 +937,7 @@ struct App::OverlayDispatch {
         if (try_f2_toggle(app, e))          return true;
         if (try_hwaccel_hotkey(app, e))     return true;
         if (try_trigger_migration(app))     return true;
+        if (try_vault_maintenance(app))     return true;
         // Settings panel (second priority: swallows all events)
         if (!app.overlays_.settings.open)   return false;
         if (bool commit = false; ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit)) {
@@ -926,6 +1009,7 @@ bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
 {
     using D = OverlayDispatch;
     if (D::help(app, e)) return true;
+    if (app.maintenance_ui_.running) return true;
     if (D::clipboard_confirm(app, e)) return true;
     if (D::settings(app, e)) return true;
     if (D::migration(app, e)) return true;
@@ -946,6 +1030,7 @@ void App::dispatch_event(const SDL_Event& e)
     }
     // Phase 50: park SDL_EVENT_QUIT if imports are pending; replayed after confirm
     if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+        if (maintenance_ui_.running) return;
         if (import_ui_.queue.busy() && !import_ui_.lock_confirm.open) {
             import_ui_.lock_confirm = {true, ui::Nav{ui::NavKind::Quit, {}, 0}};
             return;
@@ -1029,6 +1114,15 @@ void App::open_settings_overlay()
     overlays_.settings.enable_hardware = media::enable_hardware_decode();       // Phase 102
     overlays_.settings.force_software  = media::force_software_decode();        // Phase 102
     ui::open_settings(overlays_.settings, ui::SettingsSection::Appearance);
+    if (vault_state_.active && vault::vault_uses_directory_storage(*vault_state_.active)) {
+        const auto report = vault::verify_directory_vault(*vault_state_.active,
+                                                           vault::v3::VerifyDepth::Quick);
+        const auto db = vault::directory_vault_database_bytes(*vault_state_.active);
+        overlays_.settings.error = std::format(
+            "DB {} · live {} · garbage {} · staging checked by GC",
+            db ? ui::format_size(*db) : "unknown", ui::format_size(report.referenced_bytes),
+            ui::format_size(report.garbage_bytes));
+    }
 }
 
 bool App::apply_nav()
@@ -1055,6 +1149,7 @@ bool App::apply_nav()
     // Every transition below except ToggleKeepUnlocked/ToSettings/LockSecond/Quit/None destroys the
     // current screen.
     if (nav.kind != None && nav.kind != ToggleKeepUnlocked && nav.kind != ToSettings &&
+        nav.kind != ToVaultMaintenance &&
         nav.kind != LockSecond && nav.kind != Quit) {
         capture_session_state();
         screen_->on_exit();
@@ -1088,6 +1183,10 @@ bool App::apply_nav()
         case ToTagViewer:         to_tag_viewer(nav.path, nav.index);  return true;
         case ToImportStatus:      to_import_status(); return true;  // Phase 50
         case ToDuplicates:        to_duplicates(); return true;
+        case ToVaultMaintenance:
+            open_settings_overlay();
+            ui::open_settings(overlays_.settings, ui::SettingsSection::VaultOps);
+            return false;
         case ToUnlock:
             import_ui_.queue.end_session();          // Phase 50: flush before switch
             import_ui_.lane.reset();                 // Phase 73: reset CommitLane after session
@@ -1149,7 +1248,8 @@ bool App::maybe_auto_lock(double dt)
     // running vault upgrade (Phase 79 — MigrationJob owns the vault exclusively;
     // a >5-min-idle upgrade must not have it locked and destroyed mid-flight) —
     // see app/auto_lock.h.
-    const bool migration_active = migration_ui_.job && migration_ui_.job->active();
+    const bool migration_active = (migration_ui_.job && migration_ui_.job->active()) ||
+                                  maintenance_ui_.running;
     if (const bool blocks = screen_ && screen_->blocks_idle_lock();
         !should_auto_lock(vault_state_.active != nullptr, blocks, keep_unlocked_, import_ui_.queue.busy(),
                           migration_active, idle_, dt))
@@ -1189,10 +1289,47 @@ void App::update(double dt)
     // (migration_job.h contract), so pause its update for the duration — the App
     // polls progress and draws the modal directly, not through the screen.
     if (const bool migration_active = migration_ui_.job && migration_ui_.job->active();
-        screen_ && !migration_active)
+        screen_ && !migration_active && !maintenance_ui_.running)
         screen_->update(dt);
     badge_elapsed_ += dt;   // Phase 45 Part 6
     hwaccel_toast_.elapsed += dt;   // Phase 102: tick the toggle-toast window
+
+    if (auto picked = folder_dialog_.take_result(platform::FolderDialog::Purpose::Backup)) {
+        if (!picked->empty() && vault_state_.active) {
+            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                                     std::chrono::system_clock::now().time_since_epoch())
+                                     .count();
+            const auto destination = platform::utf8_to_path(picked->front()) /
+                                     std::format("obscura-backup-{}.osv", seconds);
+            auto* active = vault_state_.active.get();
+            OverlayDispatch::start_maintenance(*this, "Creating encrypted backup…",
+                [active, destination] {
+                    const auto result = vault::backup_directory_vault(*active, destination);
+                    const bool ok = result.status == vault::v3::BackupStatus::Ok;
+                    std::string message = ok
+                        ? std::format("Backup complete: {} object(s)", result.copied_objects)
+                        : result.status == vault::v3::BackupStatus::InsufficientSpace
+                            ? std::format("Not enough space: {} required, {} available",
+                                          ui::format_size(result.required_bytes),
+                                          ui::format_size(result.available_bytes))
+                            : "Backup failed";
+                    return MaintenanceUi::Result{ok, std::move(message)};
+                });
+        } else if (overlays_.settings.open) {
+            overlays_.settings.error = "Backup cancelled";
+        }
+    }
+
+    if (maintenance_ui_.running &&
+        maintenance_ui_.future.wait_for(std::chrono::seconds{0}) == std::future_status::ready) {
+        const auto result = maintenance_ui_.future.get();
+        maintenance_ui_.running = false;
+        import_ui_.queue.set_exclusive(false);
+        open_settings_overlay();
+        ui::open_settings(overlays_.settings, ui::SettingsSection::VaultOps);
+        overlays_.settings.error = result.message;
+        if (screen_) screen_->mark_dirty();
+    }
 
     // Phase 66: tick the warm slot. Expiry is deferred while a background job
     // owns a vault handle (same signals that suppress the idle auto-lock).
@@ -1258,7 +1395,8 @@ void App::render_frame()
         // screen must not read the index tree (migration_job.h contract) — the
         // coordinator may be mid-compact, having freed the tree the grid listed.
         // Skip the screen's draw; the migration modal below is rendered directly.
-        if (!(migration_ui_.job && migration_ui_.job->active())) screen_->render(r);
+        if (!(migration_ui_.job && migration_ui_.job->active()) && !maintenance_ui_.running)
+            screen_->render(r);
         const bool keep_badge = vault_state_.active && should_show_badge(keep_unlocked_, badge_elapsed_, BADGE_WINDOW_SECS);
         if (keep_badge)
             draw_keep_unlocked_badge(r, font_, window_.width(), window_.height());
@@ -1286,6 +1424,12 @@ void App::render_frame()
             draw_migration_progress(r, font_, w, h, *migration_ui_.job);
         } else if (migration_ui_.result_open) {
             draw_migration_result(r, font_, w, h, migration_ui_.result);
+        }
+        if (maintenance_ui_.running) {
+            ui::draw_op_progress(r, font_, w, h,
+                                 {.title = maintenance_ui_.title,
+                                  .count_line = "Encrypted vault operation in progress",
+                                  .done = 0, .total = 0});
         }
 
         // Phase 50: render lock_confirm modal after migration/settings so it stays on top

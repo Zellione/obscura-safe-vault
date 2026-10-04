@@ -18,6 +18,9 @@ namespace ui {
 
 enum class SettingsSection : uint8_t { Appearance = 0, Playback, Browsing, TagColours, VaultOps, Security };
 inline constexpr int SETTINGS_SECTION_COUNT = 6;
+enum class VaultMaintenanceAction : uint8_t {
+    None, Upgrade, Verify, RepairDerived, GarbageCollect, Backup, Optimize
+};
 
 struct SettingsState {
     SettingsSection    section           = SettingsSection::Appearance;
@@ -48,7 +51,7 @@ struct SettingsState {
     TextFieldChrome prompt_chrome;   // caret/scroll view state, advanced while drawing
     std::string error;        // one-line failure shown in the overlay footer
     // Phase 65: set by VaultOps section when user presses Enter on "Re-check vault"
-    bool        trigger_migration = false;
+    VaultMaintenanceAction maintenance_action = VaultMaintenanceAction::None;
 };
 
 // Navigate between sections; clamp to [0, SETTINGS_SECTION_COUNT). Reset row to 0.

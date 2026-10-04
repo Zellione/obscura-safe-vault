@@ -115,6 +115,25 @@ password/keyfile rotation now share the public facade across both backends. Phas
 phase—switches default creation; `vault_uses_directory_storage` is the internal dispatch query,
 while the retained `vault_is_read_only` compatibility query is now false.
 
+Phase 113 adds typed v3 operational integrity and snapshot primitives. `v3_recovery.*` now
+performs quick database/reference verification or deep verification that authenticates every
+referenced object frame into per-frame `SecureBytes`; reports contain opaque IDs and metrics only,
+and distinguish corruption from safe unreferenced garbage. `v3_backup.*` holds the existing writer
+lease as a consistency barrier, deep-verifies the source, copies only referenced immutable
+ciphertext objects, uses SQLCipher online backup for `vault.db`, deep-verifies the result, then
+publishes the completed sibling directory no-replace. `restore_vault` authenticates a closed
+snapshot and copies it to a new path; it never overlays or modifies its source. `ReadSession` and
+the Vault free-function facade expose verify, race-safe GC, and backup. Operational guidance is in
+`docs/V3_BACKUP_AND_RECOVERY.md`.
+
+The same facade exposes SQLCipher storage maintenance and database byte metrics. Maintenance runs
+`PRAGMA optimize`, temporarily opens the one SQLite attachment slot required internally by
+`VACUUM` (normal queries keep attachments disabled), restores the hardening limit, and then runs
+integrity plus foreign-key checks. Backup preflight uses checked arithmetic for two DB images,
+referenced ciphertext bytes, and fixed slack; insufficient space creates nothing. GC cleans only
+old application-owned staging names under the writer lease and reports removed/recent/suspicious
+counts without exposing filenames.
+
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
 `seek_end`. WHY: `write_header` does `seek_to(fp_,0)` then `fwrite` as two separately-locked

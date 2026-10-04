@@ -53,6 +53,38 @@ bool vault_uses_directory_storage(const Vault& v) noexcept
     return v.v3_ != nullptr;
 }
 
+v3::VerificationReport verify_directory_vault(const Vault& v, v3::VerifyDepth depth) noexcept
+{
+    if (!v.v3_) return {};
+    return v.v3_->verify(depth);
+}
+
+v3::GarbageCollectionResult garbage_collect_directory_vault(Vault& v,
+                                                            uint64_t grace_seconds) noexcept
+{
+    if (!v.v3_) return {};
+    return v.v3_->garbage_collect(grace_seconds);
+}
+
+v3::BackupResult backup_directory_vault(const Vault& v,
+                                        const std::filesystem::path& destination) noexcept
+{
+    if (!v.v3_) return {.status = v3::BackupStatus::InvalidArgument};
+    return v.v3_->backup(destination);
+}
+
+VaultResult maintain_directory_database(Vault& v) noexcept
+{
+    if (!v.v3_) return VaultResult::InvalidArg;
+    return v.v3_->maintain_database_storage() == v3::DbStatus::Ok ? VaultResult::Ok
+                                                                  : VaultResult::IoError;
+}
+
+std::optional<uint64_t> directory_vault_database_bytes(const Vault& v) noexcept
+{
+    return v.v3_ ? v.v3_->database_bytes() : std::nullopt;
+}
+
 namespace {
 
 VaultResult map_v3_read_status(v3::ReadStatus status) noexcept

@@ -6,8 +6,14 @@
 
 namespace vault::v3 {
 
-ReconciliationReport reconcile_objects(const VaultRoot& root,
-                                        const Database& database) noexcept
+bool VerificationReport::has_corruption() const noexcept
+{
+    return std::ranges::any_of(findings, [](const IntegrityFinding& finding) {
+        return finding.kind != IntegrityFindingKind::UnreferencedGarbage;
+    });
+}
+
+ReconciliationReport reconcile_objects(const VaultRoot& root, const Database& database) noexcept
 {
     ReconciliationReport report;
     report.status = RecoveryStatus::Ok;
@@ -78,6 +84,105 @@ GarbageCollectionResult collect_garbage(const VaultRoot& root, const WriterLock&
         result.reclaimed_bytes += candidate.encrypted_length;
     }
     return result;
+}
+
+namespace {
+uint8_t media_format_for(const Database& database, const ObjectRecord& object, bool& valid) noexcept
+{
+    const auto node = database.find_node(object.node_id);
+    if (node.status != DbStatus::Ok || !node.value || !node.value->media_format ||
+        *node.value->media_format < 0 || *node.value->media_format > 255) {
+        valid = false;
+        return 0;
+    }
+    valid = true;
+    return static_cast<uint8_t>(*node.value->media_format);
+}
+}  // namespace
+
+VerificationReport verify_vault(const VaultRoot& root, const Database& database,
+                                std::span<const uint8_t, crypto::KEY_SIZE> master_key,
+                                const Id& vault_id, VerifyDepth depth) noexcept
+{
+    VerificationReport report;
+    report.status = RecoveryStatus::Ok;
+    report.depth = depth;
+    const bool database_ok =
+        depth == VerifyDepth::Deep ? database_deep_healthy(database) : database_healthy(database);
+    if (!database_ok) {
+        report.status = RecoveryStatus::DatabaseError;
+        return report;
+    }
+    const auto reconciled = reconcile_objects(root, database);
+    if (reconciled.status != RecoveryStatus::Ok) {
+        report.status = reconciled.status;
+        return report;
+    }
+    report.referenced_bytes = reconciled.referenced_bytes;
+    report.garbage_bytes = reconciled.garbage_bytes;
+    report.garbage_objects = reconciled.garbage.size();
+    for (const auto& id : reconciled.missing)
+        report.findings.push_back({IntegrityFindingKind::MissingReferencedObject, id});
+    for (const auto& id : reconciled.size_mismatches)
+        report.findings.push_back({IntegrityFindingKind::ReferencedObjectSizeMismatch, id});
+    for (const auto& garbage : reconciled.garbage)
+        report.findings.push_back({IntegrityFindingKind::UnreferencedGarbage, garbage.id});
+
+    if (depth == VerifyDepth::Deep) {
+        const auto references = database.object_references();
+        if (references.status != DbStatus::Ok) {
+            report.status = RecoveryStatus::DatabaseError;
+            return report;
+        }
+        for (const auto& object : references.value) {
+            if (std::ranges::find(reconciled.missing, object.object_id) !=
+                    reconciled.missing.end() ||
+                std::ranges::find(reconciled.size_mismatches, object.object_id) !=
+                    reconciled.size_mismatches.end())
+                continue;
+            bool valid_format = false;
+            const auto media_format = media_format_for(database, object, valid_format);
+            if (!valid_format) {
+                report.findings.push_back(
+                    {IntegrityFindingKind::MalformedObject, object.object_id});
+                continue;
+            }
+            const ObjectInfo expected{object.object_id,
+                                      vault_id,
+                                      object.node_id,
+                                      object.role,
+                                      media_format,
+                                      object.plaintext_length,
+                                      object.encrypted_length,
+                                      object.frame_plain_limit,
+                                      object.frame_count};
+            auto opened = ObjectReader::open(root, master_key, expected);
+            if (opened.status != ObjectStatus::Ok || !opened.reader) {
+                report.findings.push_back({opened.status == ObjectStatus::AuthenticationFailed
+                                               ? IntegrityFindingKind::UnauthenticObject
+                                               : IntegrityFindingKind::MalformedObject,
+                                           object.object_id});
+                continue;
+            }
+            bool authentic = true;
+            for (uint32_t frame = 0; frame < object.frame_count; ++frame) {
+                crypto::SecureBytes plaintext;
+                const auto status = opened.reader->read_frame(frame, plaintext);
+                if (status != ObjectStatus::Ok) {
+                    report.findings.push_back({status == ObjectStatus::AuthenticationFailed
+                                                   ? IntegrityFindingKind::UnauthenticObject
+                                                   : IntegrityFindingKind::MalformedObject,
+                                               object.object_id});
+                    authentic = false;
+                    break;
+                }
+                report.authenticated_bytes += plaintext.size();
+            }
+            if (authentic) ++report.objects_checked;
+        }
+    }
+    if (report.has_corruption()) report.status = RecoveryStatus::Corrupt;
+    return report;
 }
 
 }  // namespace vault::v3
