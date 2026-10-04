@@ -49,10 +49,33 @@ bool copy_object(const VaultRoot& source, const VaultRoot& destination, const Ob
     return output->sync() && destination.publish(*output, object.object_id);
 }
 
+bool populate_backup(const VaultRoot& source, VaultRoot& backup, const Database& database,
+                     std::span<const uint8_t, crypto::KEY_SIZE> database_key,
+                     std::span<const uint8_t, crypto::KEY_SIZE> master_key, const V3Header& header,
+                     BackupResult& result) noexcept
+{
+    if (const auto raw_header = serialize_v3_header(header); !backup.write_header(raw_header))
+        return false;
+    const auto references = database.object_references();
+    if (references.status != DbStatus::Ok) return false;
+    for (const auto& object : references.value) {
+        if (!copy_object(source, backup, object)) return false;
+        ++result.copied_objects;
+        result.copied_bytes += object.encrypted_length;
+    }
+    if (database.backup_to(backup, database_key) != DbStatus::Ok) return false;
+    auto copied_db = Database::open_read_only(backup, database_key);
+    if (!copied_db.database) return false;
+    const bool valid =
+        verify_vault(backup, *copied_db.database, master_key, header.vault_id, VerifyDepth::Deep)
+            .status == RecoveryStatus::Ok;
+    copied_db.database.reset();
+    return valid;
+}
+
 }  // namespace
 
-BackupResult backup_vault(const VaultRoot& source, const WriterLock&,
-                          const Database& database,  // NOSONAR cpp:S3776
+BackupResult backup_vault(const VaultRoot& source, const WriterLock&, const Database& database,
                           std::span<const uint8_t, crypto::KEY_SIZE> database_key,
                           std::span<const uint8_t, crypto::KEY_SIZE> master_key,
                           const V3Header& header, const std::filesystem::path& destination) noexcept
@@ -96,36 +119,10 @@ BackupResult backup_vault(const VaultRoot& source, const WriterLock&,
                 (void)backup->unlink_object(object.id);
         (void)backup->rollback_creation();
     };
-    if (const auto raw_header = serialize_v3_header(header); !backup->write_header(raw_header)) {
+    if (!populate_backup(source, *backup, database, database_key, master_key, header, result)) {
         rollback();
         return result;
     }
-    const auto references = database.object_references();
-    if (references.status != DbStatus::Ok) {
-        rollback();
-        return result;
-    }
-    for (const auto& object : references.value) {
-        if (!copy_object(source, *backup, object)) {
-            rollback();
-            return result;
-        }
-        ++result.copied_objects;
-        result.copied_bytes += object.encrypted_length;
-    }
-    if (database.backup_to(*backup, database_key) != DbStatus::Ok) {
-        rollback();
-        return result;
-    }
-    auto copied_db = Database::open_read_only(*backup, database_key);
-    if (!copied_db.database ||
-        verify_vault(*backup, *copied_db.database, master_key, header.vault_id, VerifyDepth::Deep)
-                .status != RecoveryStatus::Ok) {
-        copied_db.database.reset();
-        rollback();
-        return result;
-    }
-    copied_db.database.reset();
     if (!backup->publish_directory(destination)) {
         rollback();
         result.status = std::filesystem::exists(destination, error) && !error
