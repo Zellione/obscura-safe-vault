@@ -563,7 +563,7 @@ DbStatus Database::sync_metadata(const IndexNode& root,          // NOSONAR cpp:
             sqlite3_bind_null(statement, index);
     };
     std::function<bool(const IndexNode&, const Id*, uint64_t)> store_node;
-    store_node = [this, &live, &upsert, &bind_optional,
+    store_node = [&live, &upsert, &bind_optional,
                   &store_node](const IndexNode& node, const Id* parent,
                                uint64_t order) {  // NOSONAR cpp:S1188 -- recursive row binder
         if (!id_valid(node.node_id)) return false;
