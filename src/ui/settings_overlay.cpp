@@ -217,15 +217,10 @@ void apply_value_delta(SettingsState& state, int delta, bool& commit_out)
         return false;
     }
     if (key == SDLK_RETURN || key == SDLK_KP_ENTER) {
-        constexpr std::array actions{
-            VaultMaintenanceAction::Upgrade,
-            VaultMaintenanceAction::Verify,
-            VaultMaintenanceAction::RepairDerived,
-            VaultMaintenanceAction::GarbageCollect,
-            VaultMaintenanceAction::Backup,
-            VaultMaintenanceAction::Optimize,
-        };
-        if (state.row >= 0 && state.row < static_cast<int>(actions.size()))
+        using enum VaultMaintenanceAction;
+        if (constexpr std::array actions{Upgrade, Verify, RepairDerived, GarbageCollect, Backup,
+                                         Optimize};
+            state.row >= 0 && state.row < static_cast<int>(actions.size()))
             state.maintenance_action = actions[static_cast<size_t>(state.row)];
         return true;
     }

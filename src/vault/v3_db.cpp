@@ -445,8 +445,9 @@ bool database_deep_healthy(const Database& database) noexcept
     if (!database.handle_) return false;
     Statement integrity{database.handle_, "PRAGMA integrity_check"};
     if (!integrity.get() || sqlite3_step(integrity.get()) != SQLITE_ROW) return false;
-    const auto* text = sqlite3_column_text(integrity.get(), 0);
-    if (!text || std::string_view{reinterpret_cast<const char*>(text)} != "ok") return false;
+    if (const auto* text = sqlite3_column_text(integrity.get(), 0);
+        !text || std::string_view{reinterpret_cast<const char*>(text)} != "ok")
+        return false;
     Statement foreign_keys{database.handle_, "PRAGMA foreign_key_check"};
     return foreign_keys.get() && sqlite3_step(foreign_keys.get()) == SQLITE_DONE;
 }
@@ -517,7 +518,7 @@ DbStatus Database::insert_node(const NodeRecord& node) noexcept
     return map_status(sqlite3_step(statement.get()));
 }
 
-DbStatus Database::sync_metadata(const IndexNode& root,
+DbStatus Database::sync_metadata(const IndexNode& root,          // NOSONAR cpp:S3776
                                  const VaultSettings& settings,  // NOSONAR cpp:S3776
                                  std::span<const SavedSearch> searches,
                                  std::span<const ObjectRecord> staged_objects) noexcept
@@ -562,8 +563,9 @@ DbStatus Database::sync_metadata(const IndexNode& root,
             sqlite3_bind_null(statement, index);
     };
     std::function<bool(const IndexNode&, const Id*, uint64_t)> store_node;
-    store_node = [&](const IndexNode& node, const Id* parent,
-                     uint64_t order) {  // NOSONAR cpp:S3608 cpp:S1188
+    store_node = [this, &live, &upsert, &bind_optional,
+                  &store_node](const IndexNode& node, const Id* parent,
+                               uint64_t order) {  // NOSONAR cpp:S1188 -- recursive row binder
         if (!id_valid(node.node_id)) return false;
         sqlite3_reset(live.get());
         sqlite3_clear_bindings(live.get());
@@ -748,8 +750,7 @@ DbStatus Database::sync_metadata(const IndexNode& root,
                        return std::tolower(x) == std::tolower(y);
                    });
         };
-        for (const auto& value :
-             settings.tag_field_values) {  // NOSONAR cpp:S924 -- validation exits uniformly
+        for (const auto& value : settings.tag_field_values) {  // NOSONAR cpp:S924
             const std::string_view tag = value.tag.view();
             const size_t colon = tag.find(':');
             if (colon == std::string_view::npos) {
@@ -1425,7 +1426,7 @@ DbStatus Database::backup_to(const std::filesystem::path& destination,
     return Ok;
 }
 
-DbStatus Database::backup_to(VaultRoot& destination,
+DbStatus Database::backup_to(const VaultRoot& destination,
                              std::span<const uint8_t, crypto::KEY_SIZE> database_key) const noexcept
 {
     if (!handle_ || destination.native_handle() < 0) return InvalidArgument;
@@ -1433,8 +1434,8 @@ DbStatus Database::backup_to(VaultRoot& destination,
         std::format("/proc/self/fd/{}/vault.db", destination.native_handle())};
     auto target = open_raw(path, database_key, SQLITE_OPEN_READWRITE);
     if (!target.database) return target.status;
-    const auto copied = copy_database(handle_, target.database->handle_);
-    if (copied != Ok || !database_healthy(*target.database))
+    if (const auto copied = copy_database(handle_, target.database->handle_);
+        copied != Ok || !database_healthy(*target.database))
         return copied == Ok ? WrongKeyOrCorrupt : copied;
     target.database.reset();
     return destination.sync_database() ? Ok : IoError;

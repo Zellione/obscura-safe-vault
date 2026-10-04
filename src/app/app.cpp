@@ -688,7 +688,8 @@ struct App::OverlayDispatch {
         app.import_ui_.queue.set_exclusive(true);
         app.maintenance_ui_.title = std::move(title);
         app.maintenance_ui_.running = true;
-        app.maintenance_ui_.future = std::async(std::launch::async, std::move(work));
+        app.maintenance_ui_.future = std::async(  // NOSONAR cpp:S8460 -- explicit owned task
+            std::launch::async, std::move(work));
     }
 
     static bool help(App& app, const SDL_Event& e)
@@ -838,7 +839,7 @@ struct App::OverlayDispatch {
             return true;
         }
         if (action == Verify) {
-            auto* active = app.vault_state_.active.get();
+            const auto* active = app.vault_state_.active.get();
             start_maintenance(app, "Deep verification…", [active] {
                 const auto report = vault::verify_directory_vault(
                     *active, vault::v3::VerifyDepth::Deep);
@@ -1280,7 +1281,7 @@ bool App::maybe_auto_lock(double dt)
     return true;
 }
 
-void App::update(double dt)
+void App::update(double dt)  // NOSONAR cpp:S3776 -- ordered lifecycle coordinator
 {
     const platform::PerfScope perf("app.update", 10.0);
     // Phase 87: while a MigrationJob is active it owns the vault EXCLUSIVELY and
@@ -1301,18 +1302,19 @@ void App::update(double dt)
                                      .count();
             const auto destination = platform::utf8_to_path(picked->front()) /
                                      std::format("obscura-backup-{}.osv", seconds);
-            auto* active = vault_state_.active.get();
+            const auto* active = vault_state_.active.get();
             OverlayDispatch::start_maintenance(*this, "Creating encrypted backup…",
                 [active, destination] {
                     const auto result = vault::backup_directory_vault(*active, destination);
                     const bool ok = result.status == vault::v3::BackupStatus::Ok;
-                    std::string message = ok
-                        ? std::format("Backup complete: {} object(s)", result.copied_objects)
-                        : result.status == vault::v3::BackupStatus::InsufficientSpace
-                            ? std::format("Not enough space: {} required, {} available",
-                                          ui::format_size(result.required_bytes),
-                                          ui::format_size(result.available_bytes))
-                            : "Backup failed";
+                    std::string message = "Backup failed";
+                    if (ok)
+                        message =
+                            std::format("Backup complete: {} object(s)", result.copied_objects);
+                    else if (result.status == vault::v3::BackupStatus::InsufficientSpace)
+                        message = std::format("Not enough space: {} required, {} available",
+                                              ui::format_size(result.required_bytes),
+                                              ui::format_size(result.available_bytes));
                     return MaintenanceUi::Result{ok, std::move(message)};
                 });
         } else if (overlays_.settings.open) {
@@ -1384,7 +1386,7 @@ void App::update(double dt)
     }
 }
 
-void App::render_frame()
+void App::render_frame()  // NOSONAR cpp:S3776 -- ordered overlay composition
 {
     const platform::PerfScope perf("frame", 20.0);
     const uint64_t render_start = SDL_GetTicksNS();

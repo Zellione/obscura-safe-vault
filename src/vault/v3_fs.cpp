@@ -862,9 +862,10 @@ bool VaultRoot::publish_directory(const std::filesystem::path& destination) noex
     if (fd_ < 0 || display_path_.filename().empty() || destination.filename().empty()) return false;
     const auto source_parent =
         display_path_.has_parent_path() ? display_path_.parent_path() : std::filesystem::path{"."};
-    const auto destination_parent =
-        destination.has_parent_path() ? destination.parent_path() : std::filesystem::path{"."};
-    if (source_parent != destination_parent) return false;
+    if (const auto destination_parent =
+            destination.has_parent_path() ? destination.parent_path() : std::filesystem::path{"."};
+        source_parent != destination_parent)
+        return false;
     const std::string source_leaf = display_path_.filename().string();
     const std::string destination_leaf = destination.filename().string();
     if (!plain_staging_name(source_leaf) || !plain_staging_name(destination_leaf)) return false;

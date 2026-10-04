@@ -30,7 +30,7 @@ namespace app {
 
 enum class State { Locked, Managing, Browsing, Viewing };
 
-class App {
+class App {  // NOSONAR cpp:S1820 -- lifetime owner; cohesive sub-state is already bundled
 public:
     App()  = default;
     ~App() = default;

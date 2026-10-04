@@ -31,7 +31,7 @@ std::optional<std::filesystem::path> temporary_path_for(const std::filesystem::p
     return parent / (".osv-backup-" + suffix);
 }
 
-bool copy_object(const VaultRoot& source, VaultRoot& destination, const ObjectRecord& object)
+bool copy_object(const VaultRoot& source, const VaultRoot& destination, const ObjectRecord& object)
 {
     auto input = source.open_object(object.object_id);
     auto output = destination.create_staging_file();
@@ -41,8 +41,9 @@ bool copy_object(const VaultRoot& source, VaultRoot& destination, const ObjectRe
     while (offset < object.encrypted_length) {
         const auto count =
             static_cast<size_t>(std::min<uint64_t>(bytes.size(), object.encrypted_length - offset));
-        const std::span chunk{bytes.data(), count};
-        if (!input->read_at(offset, chunk) || !output->write_all(chunk)) return false;
+        if (const std::span chunk{bytes.data(), count};
+            !input->read_at(offset, chunk) || !output->write_all(chunk))
+            return false;
         offset += count;
     }
     return output->sync() && destination.publish(*output, object.object_id);
@@ -50,7 +51,8 @@ bool copy_object(const VaultRoot& source, VaultRoot& destination, const ObjectRe
 
 }  // namespace
 
-BackupResult backup_vault(const VaultRoot& source, const WriterLock&, const Database& database,
+BackupResult backup_vault(const VaultRoot& source, const WriterLock&,
+                          const Database& database,  // NOSONAR cpp:S3776
                           std::span<const uint8_t, crypto::KEY_SIZE> database_key,
                           std::span<const uint8_t, crypto::KEY_SIZE> master_key,
                           const V3Header& header, const std::filesystem::path& destination) noexcept
@@ -77,7 +79,7 @@ BackupResult backup_vault(const VaultRoot& source, const WriterLock&, const Data
     const auto parent =
         destination.has_parent_path() ? destination.parent_path() : std::filesystem::path{"."};
     const auto space = std::filesystem::space(parent, error);
-    if (!required || error) return result;
+    if (!required.has_value() || error) return result;
     result.required_bytes = *required;
     result.available_bytes = space.available;
     if (space.available < *required) {
@@ -94,8 +96,7 @@ BackupResult backup_vault(const VaultRoot& source, const WriterLock&, const Data
                 (void)backup->unlink_object(object.id);
         (void)backup->rollback_creation();
     };
-    const auto raw_header = serialize_v3_header(header);
-    if (!backup->write_header(raw_header)) {
+    if (const auto raw_header = serialize_v3_header(header); !backup->write_header(raw_header)) {
         rollback();
         return result;
     }

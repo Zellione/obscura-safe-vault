@@ -51,7 +51,7 @@ struct NodeRecord {
 
 struct ObjectRecord {
     ObjectRecord() = default;
-    ObjectRecord(Id object, Id node, ObjectRole object_role,
+    ObjectRecord(Id object, Id node, ObjectRole object_role,  // NOSONAR cpp:S107 -- fixed DB row
                  uint64_t encrypted,  // NOSONAR cpp:S107 -- mirrors the fixed objects row
                  uint64_t plaintext, uint32_t frame_limit, uint32_t frames,
                  uint64_t generation) noexcept
@@ -180,7 +180,7 @@ public:
     backup_to(const std::filesystem::path& destination,
               std::span<const uint8_t, crypto::KEY_SIZE> database_key) const noexcept;
     [[nodiscard]] DbStatus
-    backup_to(VaultRoot& destination,
+    backup_to(const VaultRoot& destination,
               std::span<const uint8_t, crypto::KEY_SIZE> database_key) const noexcept;
     // Atomically mirrors the logical metadata snapshot while preserving object
     // references for live nodes. References belonging to removed nodes are
