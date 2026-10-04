@@ -4,13 +4,13 @@
 #include "crypto/kdf.h"
 #include "crypto/random.h"
 #include "media/video_source.h"
+#include "vault/staging.h"
 #include "vault/transfer.h"
 #include "vault/v3_db.h"
 #include "vault/v3_fs.h"
 #include "vault/v3_header.h"
 #include "vault/v3_object_store.h"
 #include "vault/v3_read_session.h"
-#include "vault/staging.h"
 #include "vault/vault.h"
 
 #include <array>
@@ -350,6 +350,65 @@ TEST(v3_directory_create_refuses_existing_paths_and_locked_password_rotation_wor
     REQUIRE(output.change_password(PASSWORD, {}, replacement, {}) == vault::VaultResult::Ok);
     CHECK(output.unlock(PASSWORD, {}) == vault::VaultResult::AuthFailed);
     CHECK(output.unlock(replacement, {}) == vault::VaultResult::Ok);
+}
+
+TEST(v3_directory_operational_facade_verifies_maintains_collects_and_backs_up)
+{
+    TempRoot source;
+    TempRoot backup;
+    const crypto::KdfParams params{1, 8, 1};
+    vault::Vault directory;
+    REQUIRE(vault::Vault::create_directory(source.path.string(), PASSWORD, {}, params, directory) ==
+            vault::VaultResult::Ok);
+    constexpr std::array<uint8_t, 5> bytes{5, 4, 3, 2, 1};
+    REQUIRE(directory.add_image("", bytes, "kept.bin") == vault::VaultResult::Ok);
+
+    const auto quick = vault::verify_directory_vault(directory, vault::v3::VerifyDepth::Quick);
+    CHECK(quick.status == vault::v3::RecoveryStatus::Ok);
+    CHECK(quick.referenced_bytes > 0);
+    const auto deep = vault::verify_directory_vault(directory, vault::v3::VerifyDepth::Deep);
+    CHECK(deep.status == vault::v3::RecoveryStatus::Ok);
+    CHECK_EQ(deep.authenticated_bytes, bytes.size());
+    const auto before_bytes = vault::directory_vault_database_bytes(directory);
+    REQUIRE(before_bytes.has_value());
+    CHECK(*before_bytes > 0);
+    CHECK(vault::maintain_directory_database(directory) == vault::VaultResult::Ok);
+
+    const auto collected = vault::garbage_collect_directory_vault(directory, 0);
+    CHECK(collected.status == vault::v3::RecoveryStatus::Ok);
+    CHECK_EQ(collected.deleted, 0U);
+    const auto copied = vault::backup_directory_vault(directory, backup.path);
+    REQUIRE(copied.status == vault::v3::BackupStatus::Ok);
+    CHECK_EQ(copied.copied_objects, 1U);
+
+    vault::Vault restored;
+    REQUIRE(vault::Vault::open(backup.path.string(), restored) == vault::VaultResult::Ok);
+    REQUIRE(restored.unlock(PASSWORD, {}) == vault::VaultResult::Ok);
+    const auto listing = restored.list("");
+    REQUIRE(listing.size() == 1U);
+    crypto::SecureBytes roundtrip;
+    REQUIRE(restored.read_image(*listing[0], roundtrip) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(roundtrip.as_span(), bytes);
+
+    directory.lock();
+    CHECK_FALSE(vault::directory_vault_database_bytes(directory).has_value());
+    CHECK(vault::maintain_directory_database(directory) == vault::VaultResult::IoError);
+    CHECK(vault::backup_directory_vault(directory, source.path.parent_path() / "locked-backup")
+              .status == vault::v3::BackupStatus::InvalidArgument);
+    CHECK(vault::garbage_collect_directory_vault(directory, 0).status ==
+          vault::v3::RecoveryStatus::FilesystemError);
+
+    vault::Vault legacy;
+    TempRoot legacy_path;
+    REQUIRE(vault::Vault::create(legacy_path.path.string(), PASSWORD, {}, params, legacy) ==
+            vault::VaultResult::Ok);
+    CHECK(vault::verify_directory_vault(legacy, vault::v3::VerifyDepth::Quick).status ==
+          vault::v3::RecoveryStatus::FilesystemError);
+    CHECK_FALSE(vault::directory_vault_database_bytes(legacy).has_value());
+    CHECK(vault::maintain_directory_database(legacy) == vault::VaultResult::InvalidArg);
+    CHECK(
+        vault::backup_directory_vault(legacy, source.path.parent_path() / "legacy-backup").status ==
+        vault::v3::BackupStatus::InvalidArgument);
 }
 
 TEST(v3_prestaged_image_persists_original_thumbnail_and_metadata)
