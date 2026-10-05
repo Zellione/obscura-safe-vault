@@ -602,14 +602,7 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery, Vault& ds
     if (is_same_vault_cycle(src, dst, src_gallery, dst_parent)) return InvalidArg;
     const std::string name = last_segment(src_gallery);
 
-    // Source must be an existing gallery.
-    bool src_is_gallery = false;
-    for (const auto* c : src.list(parent_path(src_gallery)))
-        if (c->is_gallery() && c->name == name) {
-            src_is_gallery = true;
-            break;
-        }
-    if (!src_is_gallery) return NotFound;
+    if (!gallery_exists(src, src_gallery)) return NotFound;
 
     std::string dest_name = name;
     const CollisionResolution collision =
