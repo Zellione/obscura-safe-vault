@@ -44,13 +44,20 @@ Vault::Vault() = default;
 
 bool vault_is_read_only(const Vault& v) noexcept
 {
-    (void)v;
-    return false;
+    return v.legacy_read_only_;
 }
 
 bool vault_uses_directory_storage(const Vault& v) noexcept
 {
     return v.v3_ != nullptr;
+}
+
+void test_only_allow_legacy_writes(Vault& v) noexcept
+{
+    if (v.v3_ || !v.legacy_read_only_) return;
+    if (v.fp_) std::fclose(v.fp_);
+    v.fp_ = platform::fopen_path(platform::utf8_to_path(v.path_), "r+b");
+    if (v.fp_) v.legacy_read_only_ = false;
 }
 
 v3::VerificationReport verify_directory_vault(const Vault& v, v3::VerifyDepth depth) noexcept
@@ -538,8 +545,10 @@ Vault::Vault(Vault&& o) noexcept
       write_mutex_(std::move(o.write_mutex_)), header_mutex_(std::move(o.header_mutex_)),
       header_(o.header_), unlocked_(o.unlocked_), master_key_(std::move(o.master_key_)),
       kek_(std::move(o.kek_)), kek_valid_(o.kek_valid_),
-      recovered_legacy_index_(o.recovered_legacy_index_), root_(std::move(o.root_)),
-      saved_searches_(std::move(o.saved_searches_)), settings_(std::move(o.settings_))
+      recovered_legacy_index_(o.recovered_legacy_index_),
+      legacy_read_only_(o.legacy_read_only_), root_(std::move(o.root_)),
+      saved_searches_(std::move(o.saved_searches_)), settings_(std::move(o.settings_)),
+      v3_(std::move(o.v3_))
 {
     // Phase 50: A bound CommitLane holds a raw Vault* to &o. App holds the active
     // vault behind unique_ptr and never moves it while a session is live — this
@@ -552,6 +561,7 @@ Vault::Vault(Vault&& o) noexcept
     o.unlocked_ = false;
     o.kek_valid_ = false;
     o.recovered_legacy_index_ = false;
+    o.legacy_read_only_ = false;
 }
 
 Vault& Vault::operator=(Vault&& o) noexcept
@@ -575,6 +585,7 @@ Vault& Vault::operator=(Vault&& o) noexcept
         kek_ = std::move(o.kek_);
         kek_valid_ = o.kek_valid_;
         recovered_legacy_index_ = o.recovered_legacy_index_;
+        legacy_read_only_ = o.legacy_read_only_;
         root_ = std::move(o.root_);
         saved_searches_ = std::move(o.saved_searches_);
         settings_ = std::move(o.settings_);
@@ -585,6 +596,7 @@ Vault& Vault::operator=(Vault&& o) noexcept
         o.unlocked_ = false;
         o.kek_valid_ = false;
         o.recovered_legacy_index_ = false;
+        o.legacy_read_only_ = false;
     }
     return *this;
 }
@@ -646,6 +658,7 @@ void Vault::reset() noexcept
     header_ = Header{};
     settings_ = VaultSettings{};
     v3_.reset();
+    legacy_read_only_ = false;
 }
 
 VaultResult Vault::create(const std::string& path, std::span<const uint8_t> password,
@@ -800,7 +813,12 @@ VaultResult Vault::open(const std::string& path, Vault& out)
                                                                          : VaultResult::IoError;
     }
 
-    std::FILE* fp = platform::fopen_path(platform::utf8_to_path(path), "r+b");
+    // Phase 114 cutover: the legacy reader remains available for browsing and
+    // the non-destructive Phase 115 converter, but opened single-file sessions
+    // must never write back to their source.
+    out.legacy_read_only_ = true;
+
+    std::FILE* fp = platform::fopen_path(platform::utf8_to_path(path), "rb");
     if (!fp) return VaultResult::IoError;
 
     std::array<uint8_t, HEADER_SIZE> raw{};
@@ -1015,6 +1033,7 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
     if (v3_)
         return map_v3_read_status(
             v3_->change_password(old_password, old_keyfile, new_password, new_keyfile));
+    if (legacy_read_only_) return InvalidArg;
     if (fp_ == nullptr) return IoError;
 
     // Verify the old credentials by unwrapping the master key from the header
@@ -1091,6 +1110,7 @@ VaultResult Vault::create_gallery(std::string_view gallery_path)
 {
     using enum VaultResult;
     if (!unlocked_) return Locked;
+    if (legacy_read_only_) return InvalidArg;
 
     const auto segments = split_path(gallery_path);
     if (segments.empty()) return AlreadyExists;  // root always exists
@@ -1358,6 +1378,7 @@ VaultResult apply_video_probe(Vault& v, std::string_view node_path, const VideoP
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
 
     IndexNode* n = v.resolve_node(node_path);
     if (!n || !n->is_video()) return NotFound;
@@ -1402,6 +1423,7 @@ VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
     if (thumb_jpeg.empty()) return InvalidArg;
     IndexNode* n = v.resolve_node(node_path);
     if (!n || !n->is_image()) return NotFound;
@@ -1436,6 +1458,7 @@ VaultResult apply_video_poster(Vault& v, std::string_view node_path,
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
     if (poster_jpeg.empty()) return InvalidArg;
     IndexNode* n = v.resolve_node(node_path);
     if (!n || !n->is_video()) return NotFound;
@@ -1469,6 +1492,7 @@ VaultResult apply_image_animated(Vault& v, std::string_view node_path, bool anim
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
 
     IndexNode* n = v.resolve_node(node_path);
     if (!n || !n->is_image()) return NotFound;
@@ -1483,6 +1507,7 @@ VaultResult commit_migration(Vault& v, VaultSettings settings)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
     v.settings_ = std::move(settings);
     return v.commit_index();
 }
@@ -1752,6 +1777,7 @@ VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view 
 {
     using enum VaultResult;
     if (!unlocked_) return Locked;
+    if (legacy_read_only_) return InvalidArg;
 
     IndexNode* g = find_gallery(gallery_path);
     if (!g) return NotFound;
@@ -1774,6 +1800,7 @@ VaultResult Vault::remove_gallery(std::string_view gallery_path)
 {
     using enum VaultResult;
     if (!unlocked_) return Locked;
+    if (legacy_read_only_) return InvalidArg;
 
     const auto segments = split_path(gallery_path);
     if (segments.empty()) return InvalidArg;  // the root cannot be removed
@@ -1818,6 +1845,7 @@ VaultResult remove_media_batch(Vault& v, std::span<const std::string> node_paths
     using enum VaultResult;
     if (stats) *stats = {};
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
 
     std::size_t removed = 0;
     std::size_t missing = 0;
@@ -1861,6 +1889,7 @@ VaultResult remove_nodes_batch(Vault& v, std::span<const std::string> node_paths
     using enum VaultResult;
     if (stats) *stats = {};
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
 
     std::size_t removed = 0;
     std::size_t missing = 0;
@@ -1890,6 +1919,7 @@ VaultResult set_favorites_batch(Vault& v, std::span<const std::string> node_path
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
 
     bool changed = false;
     for (const std::string& path : node_paths) {
@@ -1907,6 +1937,7 @@ VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths, std
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
     const auto trimmed = normalise_tag(tag);
     if (trimmed.empty()) return InvalidArg;
 
@@ -1933,6 +1964,7 @@ VaultResult remove_tag_batch(Vault& v, std::span<const std::string> node_paths,
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
     const auto trimmed = normalise_tag(tag);
     if (trimmed.empty()) return Ok;  // idempotent, like remove_tag
 
@@ -1976,6 +2008,7 @@ VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey ke
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
 
     IndexNode* g = v.find_gallery(gallery_path);
     if (!g) return NotFound;
@@ -2004,6 +2037,7 @@ VaultResult set_vault_settings(Vault& v, VaultSettings s)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
     v.settings_ = std::move(s);
     return v.commit_index();
 }
@@ -2013,6 +2047,7 @@ VaultResult rename_node(Vault& v, std::string_view gallery_path, std::string_vie
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
     if (!is_safe_node_name(new_name)) return InvalidArg;
 
     IndexNode* g = v.find_gallery(gallery_path);
@@ -2063,6 +2098,7 @@ VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::s
 {
     using enum VaultResult;
     if (!unlocked_) return Locked;
+    if (legacy_read_only_) return InvalidArg;
 
     IndexNode* node = resolve_node(node_path);
     if (!node) return NotFound;
@@ -2092,6 +2128,7 @@ VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
 {
     using enum VaultResult;
     if (!unlocked_) return Locked;
+    if (legacy_read_only_) return InvalidArg;
 
     auto trimmed = normalise_tag(tag);
     if (trimmed.empty()) return InvalidArg;
@@ -2133,6 +2170,7 @@ VaultResult Vault::prune_tags(const std::function<bool(std::string_view)>& keep,
     using enum VaultResult;
     if (stats) *stats = {};
     if (!unlocked_) return Locked;
+    if (legacy_read_only_) return InvalidArg;
     if (!keep) return InvalidArg;
 
     PruneTagsStats local;
@@ -2147,6 +2185,7 @@ VaultResult Vault::remove_tag(std::string_view node_path, std::string_view tag)
 {
     using enum VaultResult;
     if (!unlocked_) return Locked;
+    if (legacy_read_only_) return InvalidArg;
 
     auto trimmed = normalise_tag(tag);
     if (trimmed.empty()) return Ok;  // Idempotent: removing nonexistent empty tag is Ok.
@@ -2270,6 +2309,7 @@ VaultResult VaultSearch::save_search(std::string_view name, const ui::AdvancedQu
 {
     using enum VaultResult;
     if (!v_.unlocked_) return Locked;
+    if (v_.legacy_read_only_) return InvalidArg;
     if (name.empty()) return InvalidArg;
 
     crypto::WipingBytes plain = ui::serialize_query(query);
@@ -2292,6 +2332,7 @@ VaultResult VaultSearch::delete_saved_search(std::string_view name)
 {
     using enum VaultResult;
     if (!v_.unlocked_) return Locked;
+    if (v_.legacy_read_only_) return InvalidArg;
 
     const auto it = std::ranges::find_if(v_.saved_searches_,
                                          [&](const SavedSearch& s) { return s.name == name; });
@@ -2305,6 +2346,7 @@ VaultResult toggle_favorite_node(Vault& v, std::string_view node_path)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
 
     IndexNode* node = v.resolve_node(node_path);
     if (!node) return NotFound;
@@ -2477,6 +2519,7 @@ VaultResult Vault::compact(OpProgress* progress)
     using enum VaultResult;
     if (v3_) return InvalidArg;
     if (!unlocked_ || !fp_) return Locked;
+    if (legacy_read_only_) return InvalidArg;
     // Early cancel is a true no-op: not even an index commit (a UI cancel that
     // races the job start must leave the file byte-identical).
     if (progress && progress->cancel.load()) return Ok;
@@ -2611,6 +2654,7 @@ VaultResult vault_reclaim(Vault& v)
     if (v.v3_) return VaultResult::InvalidArg;
     using enum VaultResult;
     if (!v.unlocked_ || !v.fp_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
 
     // Quiesce the commit lane first: it appends index blobs and flips
     // active_slot from another thread, and punching a region it is about to make
@@ -2693,6 +2737,7 @@ bool Vault::write_header()
 VaultResult Vault::commit_index()
 {
     if (v3_) return map_v3_read_status(v3_->commit_metadata(root_, settings_, saved_searches_));
+    if (legacy_read_only_) return VaultResult::InvalidArg;
     // Phase 50: if a commit router (CommitLane) is active and running, route through
     // it instead of committing synchronously. The router runs serialize on this thread
     // and enqueues the blob for asynchronous durability under the write mutex.

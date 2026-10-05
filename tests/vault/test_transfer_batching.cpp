@@ -83,6 +83,7 @@ TEST(attach_image_prestaged_defers_commit)
         vault::Vault v;
         REQUIRE(vault::Vault::open(tv.str(), v) == Ok);
         REQUIRE(v.unlock(bytes("pw"), {}) == Ok);
+        vault::test_only_allow_legacy_writes(v);
         CHECK(find_media(v, "", "a.jpg") != nullptr);
         CHECK(find_media(v, "", "b.jpg") == nullptr);
 

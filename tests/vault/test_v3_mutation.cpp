@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdio>
 #include <filesystem>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace {
@@ -23,7 +24,11 @@ struct TempDir {
         std::snprintf(p.data(), p.size(), "/tmp/osv-v3-mutation-XXXXXX");
         if (const char* made = ::mkdtemp(p.data())) path = made;
     }
-    ~TempDir() { std::error_code e; fs::remove_all(path, e); }
+    ~TempDir()
+    {
+        std::error_code e;
+        fs::remove_all(path, e);
+    }
 };
 }  // namespace
 
@@ -84,8 +89,8 @@ TEST(v3_mutation_publication_failure_never_creates_database_reference)
 
 TEST(v3_mutation_fault_matrix_cold_reopens_to_prior_or_new_state)
 {
-    for (const auto fault : {FsFault::Write, FsFault::FileSync, FsFault::Rename,
-                             FsFault::DirectorySync}) {
+    for (const auto fault :
+         {FsFault::Write, FsFault::FileSync, FsFault::Rename, FsFault::DirectorySync}) {
         TempDir temp;
         auto root = VaultRoot::create(temp.path / "vault.osv");
         REQUIRE(root.has_value());
@@ -112,6 +117,52 @@ TEST(v3_mutation_fault_matrix_cold_reopens_to_prior_or_new_state)
         CHECK_TRUE(cold.database->object_references().value.empty());
         const auto report = reconcile_objects(*root, *cold.database);
         CHECK_TRUE(report.status == RecoveryStatus::Ok);
+        CHECK_TRUE(report.missing.empty());
+    }
+}
+
+TEST(v3_mutation_fault_matrix_survives_subprocess_termination_and_cold_reopen)
+{
+    for (const auto fault :
+         {FsFault::Write, FsFault::FileSync, FsFault::Rename, FsFault::DirectorySync}) {
+        TempDir temp;
+        const auto vault_path = temp.path / "vault.osv";
+        const auto db_path = temp.path / "db";
+        {
+            auto root = VaultRoot::create(vault_path);
+            REQUIRE(root.has_value());
+            auto opened = Database::create(db_path, KEY, ROOT);
+            REQUIRE(opened.database.has_value());
+            NodeRecord node;
+            node.node_id = NODE;
+            node.parent_id = ROOT;
+            node.type = NodeType::Image;
+            node.display_name = "x";
+            REQUIRE(opened.database->insert_node(node) == DbStatus::Ok);
+        }
+
+        const pid_t child = ::fork();
+        REQUIRE(child >= 0);
+        if (child == 0) {
+            auto root = VaultRoot::open(vault_path);
+            auto opened = Database::open(db_path, KEY, true);
+            if (!root || !opened.database) _exit(90);
+            auto coordinator = MutationCoordinator::open(*root, *opened.database, KEY);
+            if (!coordinator) _exit(91);
+            inject_fs_fault(fault);
+            ObjectWriteRequest request{VAULT, NODE, ObjectRole::OriginalImage, 1, 1024};
+            (void)coordinator->create(request, std::array<uint8_t, 3>{1, 2, 3});
+            _exit(0);
+        }
+        int status = 0;
+        REQUIRE(::waitpid(child, &status, 0) == child);
+        REQUIRE(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+
+        auto root = VaultRoot::open(vault_path);
+        auto cold = Database::open(db_path, KEY, false);
+        REQUIRE(root.has_value() && cold.database.has_value());
+        const auto report = reconcile_objects(*root, *cold.database);
+        CHECK(report.status == RecoveryStatus::Ok);
         CHECK_TRUE(report.missing.empty());
     }
 }

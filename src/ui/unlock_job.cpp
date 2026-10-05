@@ -45,7 +45,7 @@ bool UnlockJob::start_create(vault::Vault& v, std::string path,
                              const crypto::KdfParams& params)
 {
     return launch(password, keyfile, [this, &v, path = std::move(path), params]() {
-        return vault::Vault::create(path, pw_.span(), keyfile_.span(), params, v);
+        return vault::Vault::create_directory(path, pw_.span(), keyfile_.span(), params, v);
     });
 }
 

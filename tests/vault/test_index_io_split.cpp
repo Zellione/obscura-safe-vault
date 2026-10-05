@@ -27,6 +27,7 @@ TEST(uncommitted_staged_chunks_are_clean_orphans)
     }
     vault::Vault v2;
     REQUIRE(ziptest::open_vault(path, v2));   // helper: open+unlock with test creds
+    vault::test_only_allow_legacy_writes(v2);
     CHECK_EQ(static_cast<int>(v2.list("g").size()), 1);          // only the committed one
     CHECK(vault::vault_wasted_bytes(v2) > wasted_before);                    // orphans visible
     CHECK(v2.compact() == vault::VaultResult::Ok);               // and reclaimable

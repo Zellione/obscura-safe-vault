@@ -187,18 +187,20 @@ TEST(change_password_can_add_and_remove_keyfile)
         CHECK_EQ(v.unlock(bytes("pw"), {}), vault::VaultResult::AuthFailed);
         REQUIRE(v.unlock(bytes("pw"), keyfile) == vault::VaultResult::Ok);
 
-        // Drop the keyfile again (change_password also works while unlocked).
+        // Phase 114: a legacy file opened from disk is conversion-only and
+        // cannot be rewrapped in place, even while it is unlocked.
         REQUIRE(v.change_password(bytes("pw"), keyfile, bytes("pw"), {})
-                == vault::VaultResult::Ok);
-        CHECK_TRUE(v.is_unlocked());  // state preserved across a re-wrap
+                == vault::VaultResult::InvalidArg);
+        CHECK_TRUE(v.is_unlocked());
     }
     vault::Header h;
     REQUIRE(read_header(tv.str(), h));
-    CHECK_EQ(h.keyfile_required, 0);
+    CHECK_EQ(h.keyfile_required, 1);
 
     vault::Vault v2;
     REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
-    CHECK_EQ(v2.unlock(bytes("pw"), {}), vault::VaultResult::Ok);
+    CHECK_EQ(v2.unlock(bytes("pw"), {}), vault::VaultResult::AuthFailed);
+    CHECK_EQ(v2.unlock(bytes("pw"), keyfile), vault::VaultResult::Ok);
 }
 
 TEST(change_password_migrates_legacy_kdf_encoding)
@@ -244,11 +246,11 @@ TEST(change_password_migrates_legacy_kdf_encoding)
     REQUIRE(vault::Vault::open(tv.str(), legacy) == vault::VaultResult::Ok);
     REQUIRE(legacy.unlock(bytes("a"), bytes("bc")) == vault::VaultResult::Ok);
     REQUIRE(legacy.change_password(bytes("ab"), bytes("c"), bytes("new"), {})
-            == vault::VaultResult::Ok);
+            == vault::VaultResult::InvalidArg);
     REQUIRE(read_header(tv.str(), h));
-    CHECK(vault::domain_separated_kdf(h));
+    CHECK_FALSE(vault::domain_separated_kdf(h));
 
     vault::Vault migrated;
     REQUIRE(vault::Vault::open(tv.str(), migrated) == vault::VaultResult::Ok);
-    CHECK_EQ(migrated.unlock(bytes("new"), {}), vault::VaultResult::Ok);
+    CHECK_EQ(migrated.unlock(bytes("a"), bytes("bc")), vault::VaultResult::Ok);
 }

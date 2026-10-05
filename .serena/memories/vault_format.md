@@ -17,7 +17,9 @@ header, atomically rename it over `vault.header`, then sync the directory; DB/ob
 unchanged. Same-vault moves update database parent/order/name only and preserve cryptographic
 identity; cross-vault copies decrypt into secure memory and mint fresh destination identities.
 
-The legacy single-file format below remains the default creation format until Phase 114.
+The v3 directory format is the default creation format since Phase 114. The
+legacy single-file format below remains readable but opened sessions are
+read-only until the Phase 115 converter.
 
 ```
 [ Header — plaintext, fixed-size ]

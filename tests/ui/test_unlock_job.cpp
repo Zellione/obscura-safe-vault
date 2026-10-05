@@ -34,7 +34,7 @@ struct TempVault {
                ("osv_unlockjob_" + std::string(tag) + "_" + std::to_string(ctr++) + ".osv");
         std::error_code ec; fs::remove(path, ec);
     }
-    ~TempVault() { std::error_code ec; fs::remove(path, ec); }
+    ~TempVault() { std::error_code ec; fs::remove_all(path, ec); }
     std::string str() const { return path.string(); }
 };
 
@@ -105,7 +105,8 @@ TEST(unlock_job_create_mode_creates_and_unlocks)
     REQUIRE(oc.has_value());
     CHECK_TRUE(*oc == Ok);
     CHECK_TRUE(target.is_unlocked());
-    CHECK_TRUE(fs::exists(tv.path));
+    CHECK_TRUE(fs::is_directory(tv.path));
+    CHECK_TRUE(vault::vault_uses_directory_storage(target));
 }
 
 TEST(unlock_job_refuses_overlapping_start)

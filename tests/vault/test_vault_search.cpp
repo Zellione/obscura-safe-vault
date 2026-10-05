@@ -105,6 +105,7 @@ TEST(search_saved_searches_round_trip_across_reopen)
         vault::Vault v;
         REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
         REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+        vault::test_only_allow_legacy_writes(v);
 
         auto saved = vault::VaultSearch(v).list_saved_searches();
         REQUIRE(saved.size() == 1);

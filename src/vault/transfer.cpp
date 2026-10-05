@@ -536,6 +536,9 @@ VaultResult transfer_image_ex(Vault& src, std::string_view src_gallery, std::str
 {
     using enum VaultResult;
 
+    if (vault_is_read_only(dst) || (mode == TransferMode::Move && vault_is_read_only(src)))
+        return InvalidArg;
+
     crypto::SecureBytes plain;
     if (VaultResult r =
             copy_one_media(src, src_gallery, dst, dst_gallery, filename, plain, stage_out);
@@ -587,6 +590,9 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery, Vault& ds
                              GalleryTransferOpts opts)
 {
     using enum VaultResult;
+
+    if (vault_is_read_only(dst) || (mode == TransferMode::Move && vault_is_read_only(src)))
+        return InvalidArg;
 
     OpProgress* progress = opts.progress;
     TransferTally* tally = opts.tally;

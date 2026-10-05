@@ -4,8 +4,10 @@
 > line was written with AI assistance and the design decisions live in
 > [`AGENTS.md`](AGENTS.md). Do not trust it with data you cannot afford to lose.
 
-A native Linux encrypted photo gallery. All photos live inside a single
-`.osv` vault file — images are decrypted **into locked memory only**, never
+A native Linux encrypted photo gallery. New vaults are `.osv` directories with
+an encrypted SQLCipher metadata database and independently encrypted immutable
+media objects. Legacy single-file vaults remain readable pending the explicit
+Phase 115 converter. Images are decrypted **into locked memory only**, never
 written to a temporary file or disk. The gallery is browsable with a freely
 nestable folder tree, a zoomable full-screen image viewer, and a thumbnail
 strip navigable with arrow keys.
@@ -13,6 +15,19 @@ strip navigable with arrow keys.
 **Stack:** C++23 · SDL3 · SDL_Renderer · Monocypher (XChaCha20-Poly1305 + Argon2id) · stb_image · libwebp / libheif (WebP / HEIC / AVIF) · FFmpeg decode-only (H.264 / H.265 / ProRes / DNxHD / MJPEG / VP8 / VP9 / AV1 / QTRLE / Cinepak video, AAC / Opus / MP3 / Vorbis / FLAC / AC-3 audio) · miniz (ZIP/CBZ) · libarchive (7z/RAR/TAR) · nlohmann/json · premake5 → Ninja
 
 See [`AGENTS.md`](AGENTS.md) for all technology decisions and [`ROADMAP.md`](ROADMAP.md) for the full development plan.
+
+## Vault storage
+
+New Vault creates the v3 directory format. Open Vault selects a directory;
+`Shift+O` opens a legacy `.osv` file read-only. Legacy sources are never
+modified in place, including password changes, imports, metadata edits, and
+maintenance. The non-destructive legacy-to-v3 converter is Phase 115.
+
+The v3 directory contains only encrypted/authenticated material (`vault.db`,
+`vault.header`, and `objects/`). Explicit, consent-gated Export remains the sole
+feature that writes decrypted media to disk. See
+[`docs/V3_VAULT_FORMAT.md`](docs/V3_VAULT_FORMAT.md) and
+[`docs/V3_BACKUP_AND_RECOVERY.md`](docs/V3_BACKUP_AND_RECOVERY.md).
 
 ---
 
@@ -194,11 +209,14 @@ gdb build/bin/Debug/osv
 ### Linux core dumps (Debug builds)
 
 **Release** builds disable core dumps at startup (`platform::disable_core_dumps()`:
-`prctl(PR_SET_DUMPABLE, 0)` + `RLIMIT_CORE=0`) so a crash cannot leave
+`RLIMIT_CORE=0`) so a crash cannot leave
 decrypted media and key material on disk. **Debug** builds keep dumps — and
 ptrace attach — enabled by design so debuggers work. Consequence: a Debug
 `osv` that crashes on a shared machine leaves a core that is as sensitive as
 the vault itself (it holds the master key, KEK, and any decrypted buffers).
+The Release process remains dumpable because XDG desktop portals require
+same-user access to `/proc/<pid>/root`; disabling core-file creation is the
+compatible hardening boundary.
 After analysing one, remove it:
 
 ```bash
