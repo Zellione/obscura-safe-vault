@@ -142,8 +142,11 @@ the result, and cold-reopens it before reporting success. `Database` and
 `ReadSession` expose an optional encrypted `conversion_state` marker containing
 only a BLAKE2b source-header fingerprint and conversion version; it permits only
 a matching interrupted destination to resume and is dropped after successful
-verification. The source is never written. Bounded video streaming, committed
-batch progress, and the UI workflow remain before Phase 115 is complete.
+verification. The source is never written. Bounded video conversion now pulls
+v3 frames while retaining at most one authenticated
+legacy chunk in `SecureBytes`; free-space preflight and `OpProgress` reporting
+are also implemented. Committed batch resume and the UI workflow remain before
+Phase 115 is complete.
 
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER

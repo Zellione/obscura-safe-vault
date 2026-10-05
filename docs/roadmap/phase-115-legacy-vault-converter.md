@@ -17,8 +17,11 @@
 - Success requires deep object verification and a cold credentialed reopen.
   The marker is removed only after those checks, and tests hash the source
   before/after to prove it is unchanged.
-- Remaining work: conservative space preflight, bounded streaming for large
-  videos, committed batches and progress, UI/credential flow, logical digest
+- Large videos are converted through the v3 pull writer while retaining at
+  most one authenticated legacy chunk in locked memory. A conservative free-
+  space preflight and thread-safe item progress/cancellation counters are also
+  in place.
+- Remaining work: committed batches, UI/credential flow, logical digest
   comparison, full legacy-fixture and crash/fault coverage, documentation and
   release gates.
 
