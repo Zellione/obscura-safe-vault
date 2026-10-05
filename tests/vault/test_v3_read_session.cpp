@@ -322,6 +322,25 @@ TEST(v3_vault_facade_creates_directory_without_changing_legacy_create)
     CHECK_FALSE(vault::vault_settings(reopened).tiles_show_tags);
 }
 
+TEST(opened_legacy_vault_is_read_only_after_directory_cutover)
+{
+    TempRoot temp;
+    const crypto::KdfParams params{1, 8, 1};
+    {
+        vault::Vault legacy_writer;
+        REQUIRE(vault::Vault::create(temp.path.string(), PASSWORD, {}, params, legacy_writer) ==
+                vault::VaultResult::Ok);
+        REQUIRE(legacy_writer.create_gallery("existing") == vault::VaultResult::Ok);
+    }
+
+    vault::Vault opened;
+    REQUIRE(vault::Vault::open(temp.path.string(), opened) == vault::VaultResult::Ok);
+    REQUIRE(opened.unlock(PASSWORD, {}) == vault::VaultResult::Ok);
+    CHECK(vault::vault_is_read_only(opened));
+    CHECK(opened.create_gallery("blocked") == vault::VaultResult::InvalidArg);
+    CHECK_EQ(opened.list("").size(), 1U);
+}
+
 TEST(v3_directory_create_failure_rolls_back_only_its_new_root)
 {
     TempRoot temp;

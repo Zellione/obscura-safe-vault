@@ -97,9 +97,9 @@ void VaultManager::handle_key(const SDL_KeyboardEvent& key)
         case SDLK_N:      dlg_.save_vault(win_.sdl_window()); awaiting_dialog_ = true; break;
         case SDLK_O:
             if (key.mod & SDL_KMOD_SHIFT)
-                dlg_.open_vault_directory(win_.sdl_window());
-            else
                 dlg_.open_vault(win_.sdl_window());
+            else
+                dlg_.open_vault_directory(win_.sdl_window());
             awaiting_dialog_ = true;
             break;
         case SDLK_R:
@@ -139,7 +139,7 @@ void VaultManager::handle_click(const SDL_MouseButtonEvent& b)
         dlg_.save_vault(win_.sdl_window()); awaiting_dialog_ = true; return;
     }
     if (point_in_rect(b.x, b.y, L.open_btn)) {
-        dlg_.open_vault(win_.sdl_window()); awaiting_dialog_ = true; return;
+        dlg_.open_vault_directory(win_.sdl_window()); awaiting_dialog_ = true; return;
     }
     if (const int row = hit_test(b.y); row >= 0) {
         selected_ = row;
@@ -231,8 +231,8 @@ std::vector<ui::HelpGroup> VaultManager::help_groups() const
     return {
         {"Vaults", {
             {"Up/Down", "Move selection"}, {"Enter / Space", "Open selected vault"},
-            {"N", "Create new vault"}, {"O", "Open legacy vault file"},
-            {"Shift+O", "Open v3 vault directory"},
+            {"N", "Create new directory vault"}, {"O", "Open vault directory"},
+            {"Shift+O", "Open legacy vault read only"},
             {"R / Del", "Remove from list"}, {"L", "Lock the selected/active vault"},
             {"Shift+I", "Import status"},
         }},

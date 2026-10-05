@@ -258,6 +258,7 @@ TEST(favorites_batch_set_persists_across_reopen)
     Vault v2;
     REQUIRE(Vault::open(tv.str(), v2) == VaultResult::Ok);
     REQUIRE(v2.unlock(bytes("pw"), {}) == VaultResult::Ok);
+    vault::test_only_allow_legacy_writes(v2);
     for (const auto* c : v2.list("")) CHECK_TRUE(c->favorite);
 
     // And back off again, in one batch.

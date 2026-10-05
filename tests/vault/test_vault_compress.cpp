@@ -185,6 +185,7 @@ TEST(legacy_vault_reads_and_appends_raw)
         vault::Vault v;
         REQUIRE(vault::Vault::open(path, v) == vault::VaultResult::Ok);
         REQUIRE(v.unlock(lpw, {}) == vault::VaultResult::Ok);
+        vault::test_only_allow_legacy_writes(v);
 
         // Read and verify both images.
         auto pics = v.list("pics");
@@ -343,6 +344,7 @@ TEST(transfer_framed_to_legacy_and_back)
     vault::Vault legacy_v;
     REQUIRE(vault::Vault::open(legacy_path, legacy_v) == Ok);
     REQUIRE(legacy_v.unlock(lpw, {}) == Ok);
+    vault::test_only_allow_legacy_writes(legacy_v);
 
     // Read the a.bin image from legacy vault to get expected bytes.
     const auto* a_node_legacy = find_image(legacy_v, "pics", "a.bin");

@@ -219,6 +219,7 @@ TEST(context_migration_recovers_legacy_fallback_after_new_slot_damage)
     vault::Vault recovered;
     REQUIRE(vault::Vault::open(tv.str(), recovered) == vault::VaultResult::Ok);
     REQUIRE(recovered.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    vault::test_only_allow_legacy_writes(recovered);
     CHECK_FALSE(vault::uses_context_chunks(recovered));
     auto nodes = recovered.list("g");
     REQUIRE(nodes.size() == 1);

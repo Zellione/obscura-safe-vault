@@ -160,7 +160,7 @@ void UnlockScreen::handle_click(const SDL_MouseButtonEvent& b)
     } else if (point_in_rect(p.x, p.y, L.keyfile_btn)) {
         pending_ = Pending::Keyfile; dlg_.open_keyfile(win_.sdl_window());
     } else if (point_in_rect(p.x, p.y, L.other_btn)) {
-        pending_ = Pending::Vault;   dlg_.open_vault(win_.sdl_window());
+        pending_ = Pending::Vault;   dlg_.open_vault_directory(win_.sdl_window());
     } else if (point_in_rect(p.x, p.y, L.submit_btn)) {
         submit();
     } else if (point_in_rect(p.x, p.y, L.copy_btn)) {
@@ -287,7 +287,7 @@ void UnlockScreen::submit()
     error_.clear();
 
     if (vault_path_.empty()) {
-        error_ = "Please select a vault file.";
+        error_ = "Please select a vault path.";
         return;
     }
 

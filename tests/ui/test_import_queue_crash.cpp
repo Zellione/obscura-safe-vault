@@ -106,6 +106,7 @@ TEST(import_queue_mid_batch_crash_recovers)
     // Phase 4-5: Reopen vault and verify consistency
     vault::Vault v2;
     CHECK(ziptest::open_vault(vault_path, v2));
+    vault::test_only_allow_legacy_writes(v2);
 
     auto list = v2.list("");
     const int committed_count = static_cast<int>(list.size());

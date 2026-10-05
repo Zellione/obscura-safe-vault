@@ -137,15 +137,17 @@ public:
     Vault(Vault&& other) noexcept;
     Vault& operator=(Vault&& other) noexcept;
 
-    // Create a brand-new vault at `path` (truncating any existing file). On
+    // Create a brand-new legacy single-file vault at `path`. Retained for the
+    // Phase 115 converter and test fixtures; production creation uses
+    // create_directory(). On
     // success `out` is returned UNLOCKED and ready to use. `keyfile` may be empty.
     [[nodiscard]] static VaultResult create(const std::string& path,
                                             std::span<const uint8_t> password,
                                             std::span<const uint8_t> keyfile,
                                             const crypto::KdfParams& params, Vault& out);
 
-    // Phase 112 opt-in directory-vault creation. Phase 114 will make this the
-    // default; until then create() intentionally keeps producing legacy files.
+    // Create a v3 directory vault. This is the production default since Phase
+    // 114; create() remains the explicit legacy constructor for conversion.
     [[nodiscard]] static VaultResult create_directory(const std::string& path,
                                                       std::span<const uint8_t> password,
                                                       std::span<const uint8_t> keyfile,
@@ -404,6 +406,9 @@ public:
     // empty AD, node/spans ids wiped, master key re-wrapped without AD, index
     // re-committed without AD). Simulation of a vault predating Phase 99.
     friend void test_only_downgrade_to_legacy(Vault& v);
+    // Test-only seam for exercising the retained Phase 115 legacy writer and
+    // crash machinery. Production code never calls this after Phase 114.
+    friend void test_only_allow_legacy_writes(Vault& v) noexcept;
 
     // Phase 50: while the import queue is active, App points this at the
     // CommitLane; Vault::commit_index() then routes through the lane
@@ -514,6 +519,10 @@ private:
     // context-bound header. The media migration must be offered again before
     // the vault can claim the transition is complete.
     bool recovered_legacy_index_ = false;
+    // Phase 114: legacy files opened from disk remain readable for conversion,
+    // but no production session may mutate them. Fresh legacy instances made
+    // through create() stay writable so Phase 115 can build converter fixtures.
+    bool legacy_read_only_ = false;
     IndexNode root_ = IndexNode::gallery("");
     std::vector<SavedSearch> saved_searches_;  // vault-global (Phase 18)
     VaultSettings settings_;                   // vault-global (Phase 49)
@@ -527,6 +536,7 @@ private:
 };
 
 [[nodiscard]] bool vault_is_read_only(const Vault& v) noexcept;
+void test_only_allow_legacy_writes(Vault& v) noexcept;
 [[nodiscard]] bool vault_uses_directory_storage(const Vault& v) noexcept;
 [[nodiscard]] v3::VerificationReport verify_directory_vault(const Vault& v,
                                                             v3::VerifyDepth depth) noexcept;

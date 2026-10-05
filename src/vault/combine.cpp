@@ -230,6 +230,8 @@ VaultResult combine_galleries(Vault& src, std::string_view src_gallery,
 {
     using enum VaultResult;
     if (!src.is_unlocked() || !dst.is_unlocked()) return Locked;
+    if (vault_is_read_only(dst) || (mode == TransferMode::Move && vault_is_read_only(src)))
+        return InvalidArg;
     if (src_gallery.empty()) return InvalidArg;
 
     if (progress) progress->total.store(count_media(src, src_gallery));

@@ -507,6 +507,7 @@ TEST(reclaim_preserves_remaining_images_and_survives_reopen)
     vault::Vault v2;
     REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
     REQUIRE(v2.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    vault::test_only_allow_legacy_writes(v2);
     const auto kids = v2.list("");
     REQUIRE(kids.size() == 1);
     crypto::SecureBytes img;
@@ -703,6 +704,7 @@ TEST(compact_survives_sync_failure_at_every_step)
         vault::Vault v2;
         REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
         REQUIRE(v2.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+        vault::test_only_allow_legacy_writes(v2);
         auto kids = v2.list("");
         REQUIRE(kids.size() == 3);
         for (size_t i = 0; i < kids.size(); ++i) {

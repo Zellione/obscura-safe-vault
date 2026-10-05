@@ -798,7 +798,7 @@ struct App::OverlayDispatch {
         app.overlays_.settings.maintenance_action = ui::VaultMaintenanceAction::None;
 
         if (vault::vault_is_read_only(*app.vault_state_.active)) {
-            app.overlays_.settings.error = "Experimental v3 vaults are read only";
+            app.overlays_.settings.error = "Legacy vaults are read only; convert in Phase 115";
             return true;
         }
 

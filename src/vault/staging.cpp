@@ -60,6 +60,7 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data, std::string
     if (!v.unlocked_) {
         return {Locked, {}};
     }
+    if (v.legacy_read_only_) return {InvalidArg, {}};
     if (!is_safe_node_name(filename)) {
         return {InvalidArg, {}};
     }
@@ -219,6 +220,7 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data, std::string
     if (!v.unlocked_) {
         return {Locked, {}};
     }
+    if (v.legacy_read_only_) return {InvalidArg, {}};
     if (!is_safe_node_name(filename)) {
         return {InvalidArg, {}};
     }
@@ -354,6 +356,7 @@ VaultResult attach_staged(Vault& v, std::string_view gallery_path, IndexNode&& n
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
 
     IndexNode* g = v.find_gallery(gallery_path);
     if (!g) return NotFound;
@@ -372,6 +375,7 @@ VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
 
     const auto segments = vault_ops::split_path(gallery_path);
     if (segments.empty()) return Ok;  // root already exists, idempotent

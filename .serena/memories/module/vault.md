@@ -22,8 +22,8 @@ freezes schema v1 DDL; and `v3_transaction_model.h` models publish-before-
 reference crash states. `v3_sqlcipher_key.*` converts a derived 32-byte key to
 SQLCipher's required 67-byte raw keyspec inside a wipe-on-release
 `SecureBuffer`, avoiding SQL interpolation and SQLCipher's password KDF. The
-production backend remains the legacy single-file container until later v3
-phases.
+production backend is the v3 directory container since Phase 114; the legacy single-file
+backend remains as a read-only source for Phase 115.
 
 Phase 106 adds the Linux filesystem boundary in `v3_fs.*`: move-only
 `VaultRoot`, `WriterLock`, and `DurableFile` handles; `openat2` no-link root
@@ -86,7 +86,7 @@ any staging file is populated. `ObjectReader::read_frame` is public for bounded 
 consumers. The existing AD already binds video role, vault/object/node identity, frame sequence,
 total count, and total plaintext length, while the authenticated table binds physical records.
 
-Phase 111 adds the experimental read-only v3 application path. `v3_header.*` strictly parses
+Phase 111 added the initial read-only v3 application path. `v3_header.*` strictly parses
 the 256-byte control header and authenticates its vault-bound master-key wrap.
 `v3_read_session.*` owns a descriptor-relative `VaultRoot`, exclusive session lease,
 descriptor-pinned read-only SQLCipher connection, bounded secure `IndexNode` snapshot, and
@@ -551,3 +551,11 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   fails (Poly1305 must still verify). Recovering a legacy index under a context-
   bound header makes `uses_context_chunks` false for that session so migration is
   offered again instead of treating the older tree as fully upgraded.
+
+### Phase 114 scale and adversarial coverage
+- `tests/vault/test_v3_fuzz.cpp` provides deterministic header, canonical-path,
+  authenticated-object/seek-table, and SQL-facing-value properties while the
+  legacy fuzz corpus remains active.
+- `tests/vault/test_v3_bench.cpp` is an opt-in Release regression gate at
+  1k/50k/250k nodes. `test_v3_mutation.cpp` additionally cold-reopens after
+  subprocess fault exits.

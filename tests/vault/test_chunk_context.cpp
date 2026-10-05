@@ -259,6 +259,7 @@ TEST(context_compact_keeps_live_chunks_authenticating)
     vault::Vault v;
     REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
     REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    vault::test_only_allow_legacy_writes(v);
     REQUIRE(v.compact() == vault::VaultResult::Ok);
 
     auto nodes = v.list("g");
@@ -291,6 +292,7 @@ TEST(context_transfer_assigns_fresh_destination_identity)
     vault::Vault dst;
     REQUIRE(vault::Vault::open(tsrc.str(), src) == vault::VaultResult::Ok);
     REQUIRE(src.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    vault::test_only_allow_legacy_writes(src);
     REQUIRE(vault::Vault::create(tdst.str(), bytes("pw"), {}, kTestKdf, dst)
             == vault::VaultResult::Ok);
 
