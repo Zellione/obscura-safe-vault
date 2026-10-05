@@ -382,6 +382,27 @@ std::optional<uint64_t> ReadSession::database_bytes() const noexcept
     return root_handle_.database_size();
 }
 
+DbStatus ReadSession::begin_conversion(const ConversionMarker& marker) noexcept
+{
+    const std::lock_guard lock(state_mutex_);
+    if (!unlocked_ || !database_ || !session_lock_) return DbStatus::InvalidArgument;
+    return database_->begin_conversion(marker);
+}
+
+DbResult<std::optional<ConversionMarker>> ReadSession::conversion_marker() const noexcept
+{
+    const std::lock_guard lock(state_mutex_);
+    if (!unlocked_ || !database_) return {DbStatus::InvalidArgument, std::nullopt};
+    return database_->conversion_marker();
+}
+
+DbStatus ReadSession::finish_conversion() noexcept
+{
+    const std::lock_guard lock(state_mutex_);
+    if (!unlocked_ || !database_ || !session_lock_) return DbStatus::InvalidArgument;
+    return database_->finish_conversion();
+}
+
 ReadStatus ReadSession::commit_metadata(const IndexNode& root, const VaultSettings& settings,
                                         std::span<const SavedSearch> searches) noexcept
 {
@@ -417,6 +438,30 @@ ReadStatus ReadSession::stage_object(const Id& node_id, ObjectRole role, uint8_t
                                      written.info.frame_plain_limit, written.info.frame_count, 0);
     } catch (...) {
         // The published immutable object stays unreferenced and is safe for later GC.
+        return ReadStatus::IoError;
+    }
+    if (info) *info = written.info;
+    return ReadStatus::Ok;
+}
+
+ReadStatus ReadSession::stage_object_stream(const Id& node_id, ObjectRole role,
+                                            uint8_t media_format, uint64_t plaintext_length,
+                                            const ObjectReadFn& read, ObjectInfo* info) noexcept
+{
+    const std::lock_guard lock(state_mutex_);
+    if (!unlocked_ || !database_ || !session_lock_ || plaintext_length == 0 || !read)
+        return ReadStatus::IoError;
+    const uint32_t frame_limit =
+        role == ObjectRole::OriginalVideo ? VIDEO_OBJECT_FRAME_PLAIN : OBJECT_MAX_FRAME_PLAIN;
+    const ObjectWriteRequest request{header_.vault_id, node_id, role, media_format, frame_limit};
+    const auto written =
+        write_object_stream(root_handle_, master_key_.as_span(), request, plaintext_length, read);
+    if (written.status != ObjectStatus::Ok) return ReadStatus::IoError;
+    try {
+        staged_objects_.emplace_back(written.info.object_id, node_id, role,
+                                     written.info.encrypted_length, written.info.plaintext_length,
+                                     written.info.frame_plain_limit, written.info.frame_count, 0);
+    } catch (...) {
         return ReadStatus::IoError;
     }
     if (info) *info = written.info;

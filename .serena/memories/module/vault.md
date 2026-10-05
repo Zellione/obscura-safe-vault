@@ -134,6 +134,17 @@ referenced ciphertext bytes, and fixed slack; insufficient space creates nothing
 old application-owned staging names under the writer lease and reports removed/recent/suspicious
 counts without exposing filenames.
 
+Phase 115 (in progress) adds `legacy_converter.*`: an unlocked read-only legacy
+vault can be copied to a distinct fresh v3 directory with new identities, keys,
+and nonces. The converter preserves the logical tree/settings/search metadata,
+authenticates each original and derived record into `SecureBytes`, deep-verifies
+the result, and cold-reopens it before reporting success. `Database` and
+`ReadSession` expose an optional encrypted `conversion_state` marker containing
+only a BLAKE2b source-header fingerprint and conversion version; it permits only
+a matching interrupted destination to resume and is dropped after successful
+verification. The source is never written. Bounded video streaming, committed
+batch progress, and the UI workflow remain before Phase 115 is complete.
+
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
 `seek_end`. WHY: `write_header` does `seek_to(fp_,0)` then `fwrite` as two separately-locked

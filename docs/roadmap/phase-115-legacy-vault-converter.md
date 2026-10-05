@@ -1,6 +1,26 @@
 # Legacy one-file vault converter (Phase 115)
 
-**Status:** not started
+**Status:** in progress
+
+## Delivered so far
+
+- Added a storage-layer converter that accepts only an unlocked legacy source
+  and a distinct destination, creates a fresh v3 directory, and mints new vault,
+  node, object, key, and nonce identities.
+- Nested topology, sibling order, media metadata, timestamps, own tags,
+  favorites, gallery sort keys, vault settings, and saved searches are copied.
+  Originals and thumbnails/posters are authenticated from the source into
+  locked/wiping buffers before being independently encrypted for v3.
+- A non-secret source-header fingerprint and conversion version are stored in
+  an encrypted `conversion_state` table. An interrupted run resumes only when
+  that marker matches; unrelated existing destinations fail closed.
+- Success requires deep object verification and a cold credentialed reopen.
+  The marker is removed only after those checks, and tests hash the source
+  before/after to prove it is unchanged.
+- Remaining work: conservative space preflight, bounded streaming for large
+  videos, committed batches and progress, UI/credential flow, logical digest
+  comparison, full legacy-fixture and crash/fault coverage, documentation and
+  release gates.
 
 ## Goal
 

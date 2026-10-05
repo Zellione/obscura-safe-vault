@@ -1490,4 +1490,62 @@ DbStatus set_database_user_version_for_test(Database& database, int version) noe
     return exec(database.handle_, std::format("PRAGMA user_version={}", version));
 }
 
+DbStatus Database::begin_conversion(const ConversionMarker& marker) noexcept
+{
+    if (marker.conversion_version == 0) return DbStatus::InvalidArgument;
+    if (exec(handle_, "BEGIN IMMEDIATE") != Ok)
+        return map_status(sqlite3_extended_errcode(handle_));
+    constexpr std::string_view create =
+        "CREATE TABLE IF NOT EXISTS conversion_state("
+        "singleton INTEGER PRIMARY KEY CHECK(singleton=1),"
+        "source_fingerprint BLOB NOT NULL CHECK(length(source_fingerprint)=32),"
+        "conversion_version INTEGER NOT NULL CHECK(conversion_version>0))";
+    if (exec(handle_, create) != Ok) {
+        exec(handle_, "ROLLBACK");
+        return map_status(sqlite3_extended_errcode(handle_));
+    }
+    Statement insert{
+        handle_, "INSERT INTO conversion_state(singleton,source_fingerprint,conversion_version) "
+                 "VALUES(1,?,?)"};
+    if (!insert.get() ||
+        sqlite3_bind_blob(insert.get(), 1, marker.source_fingerprint.data(),
+                          static_cast<int>(marker.source_fingerprint.size()),
+                          SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_int64(insert.get(), 2, marker.conversion_version) != SQLITE_OK ||
+        sqlite3_step(insert.get()) != SQLITE_DONE || exec(handle_, "COMMIT") != Ok) {
+        exec(handle_, "ROLLBACK");
+        return map_status(sqlite3_extended_errcode(handle_));
+    }
+    return Ok;
+}
+
+DbResult<std::optional<ConversionMarker>> Database::conversion_marker() const noexcept
+{
+    Statement exists{handle_, "SELECT count(*) FROM sqlite_schema WHERE type='table' AND "
+                              "name='conversion_state'"};
+    if (!exists.get() || sqlite3_step(exists.get()) != SQLITE_ROW)
+        return {map_status(sqlite3_extended_errcode(handle_)), std::nullopt};
+    if (sqlite3_column_int(exists.get(), 0) == 0) return {Ok, std::nullopt};
+    Statement select{handle_, "SELECT source_fingerprint,conversion_version FROM conversion_state "
+                              "WHERE singleton=1"};
+    if (!select.get()) return {map_status(sqlite3_extended_errcode(handle_)), std::nullopt};
+    const int step = sqlite3_step(select.get());
+    if (step == SQLITE_DONE) return {Ok, std::nullopt};
+    if (step != SQLITE_ROW || sqlite3_column_bytes(select.get(), 0) != 32 ||
+        sqlite3_column_int64(select.get(), 1) <= 0 ||
+        sqlite3_column_int64(select.get(), 1) > std::numeric_limits<uint32_t>::max())
+        return {DbStatus::WrongKeyOrCorrupt, std::nullopt};
+    ConversionMarker marker;
+    const auto* fingerprint = static_cast<const uint8_t*>(sqlite3_column_blob(select.get(), 0));
+    if (!fingerprint) return {DbStatus::WrongKeyOrCorrupt, std::nullopt};
+    std::copy_n(fingerprint, marker.source_fingerprint.size(), marker.source_fingerprint.begin());
+    marker.conversion_version = static_cast<uint32_t>(sqlite3_column_int64(select.get(), 1));
+    return {Ok, marker};
+}
+
+DbStatus Database::finish_conversion() noexcept
+{
+    return exec(handle_, "DROP TABLE IF EXISTS conversion_state");
+}
+
 }  // namespace vault::v3

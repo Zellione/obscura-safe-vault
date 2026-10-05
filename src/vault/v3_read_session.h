@@ -71,6 +71,10 @@ public:
     [[nodiscard]] ReadStatus stage_object(const Id& node_id, ObjectRole role, uint8_t media_format,
                                           std::span<const uint8_t> plaintext,
                                           ObjectInfo* info = nullptr) noexcept;
+    [[nodiscard]] ReadStatus stage_object_stream(const Id& node_id, ObjectRole role,
+                                                 uint8_t media_format, uint64_t plaintext_length,
+                                                 const ObjectReadFn& read,
+                                                 ObjectInfo* info = nullptr) noexcept;
     [[nodiscard]] ReadStatus change_password(std::span<const uint8_t> old_password,
                                              std::span<const uint8_t> old_keyfile,
                                              std::span<const uint8_t> new_password,
@@ -80,6 +84,9 @@ public:
     [[nodiscard]] BackupResult backup(const std::filesystem::path& destination) const noexcept;
     [[nodiscard]] DbStatus maintain_database_storage() noexcept;
     [[nodiscard]] std::optional<uint64_t> database_bytes() const noexcept;
+    [[nodiscard]] DbStatus begin_conversion(const ConversionMarker& marker) noexcept;
+    [[nodiscard]] DbResult<std::optional<ConversionMarker>> conversion_marker() const noexcept;
+    [[nodiscard]] DbStatus finish_conversion() noexcept;
 
 private:
     friend class ::media::VideoSource;
