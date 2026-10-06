@@ -1495,28 +1495,28 @@ DbStatus Database::begin_conversion(const ConversionMarker& marker) noexcept
     if (marker.conversion_version == 0) return DbStatus::InvalidArgument;
     if (exec(handle_, "BEGIN IMMEDIATE") != Ok)
         return map_status(sqlite3_extended_errcode(handle_));
-    constexpr std::string_view create =
+    if (constexpr std::string_view create =
         "CREATE TABLE IF NOT EXISTS conversion_state("
         "singleton INTEGER PRIMARY KEY CHECK(singleton=1),"
         "source_fingerprint BLOB NOT NULL CHECK(length(source_fingerprint)=32),"
         "conversion_version INTEGER NOT NULL CHECK(conversion_version>0))";
-    if (exec(handle_, create) != Ok) {
+        exec(handle_, create) != Ok) {
         exec(handle_, "ROLLBACK");
         return map_status(sqlite3_extended_errcode(handle_));
     }
-    constexpr std::string_view create_nodes =
+    if (constexpr std::string_view create_nodes =
         "CREATE TABLE IF NOT EXISTS conversion_nodes("
         "source_node_id BLOB PRIMARY KEY CHECK(length(source_node_id)=16),"
         "destination_node_id BLOB NOT NULL UNIQUE CHECK(length(destination_node_id)=16)) "
         "WITHOUT ROWID";
-    if (exec(handle_, create_nodes) != Ok) {
+        exec(handle_, create_nodes) != Ok) {
         exec(handle_, "ROLLBACK");
         return map_status(sqlite3_extended_errcode(handle_));
     }
-    Statement insert{
+    if (Statement insert{
         handle_, "INSERT INTO conversion_state(singleton,source_fingerprint,conversion_version) "
                  "VALUES(1,?,?)"};
-    if (!insert.get() ||
+        !insert.get() ||
         sqlite3_bind_blob(insert.get(), 1, marker.source_fingerprint.data(),
                           static_cast<int>(marker.source_fingerprint.size()),
                           SQLITE_TRANSIENT) != SQLITE_OK ||

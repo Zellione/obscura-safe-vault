@@ -49,7 +49,11 @@ private:
         SDL_FRect copy_btn;         // Phase 45 Part 3: copy password to clipboard
     };
     [[nodiscard]] Layout layout() const;
+    bool handle_blocking_event(const SDL_Event& e);
+    bool handle_text_event(const SDL_Event& e);
     void handle_click(const SDL_MouseButtonEvent& b);
+    void render_credentials(gfx::Renderer& r, float width);
+    void render_status(gfx::Renderer& r, float width, float height);
     void submit();
     void apply_dialog_result(const std::string& path);
     void copy_password_to_clipboard();   // Phase 45 Part 3

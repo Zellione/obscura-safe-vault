@@ -227,6 +227,7 @@ public:
     friend std::optional<uint64_t> directory_vault_database_bytes(const Vault&) noexcept;
     friend LegacyConversionReport convert_legacy_vault(Vault&,
                                                        const LegacyConversionRequest&) noexcept;
+    friend class LegacyConverter;
     friend LegacyConversionStatus
     copy_legacy_video_object(Vault&, const IndexNode&, v3::ReadSession&, const IndexNode&) noexcept;
     friend LegacyConversionStatus digest_legacy_original(Vault&, const IndexNode&,

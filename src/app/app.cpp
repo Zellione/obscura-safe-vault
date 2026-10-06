@@ -1141,7 +1141,8 @@ bool App::apply_nav()
 
     // Phase 50: park lock-ish actions that occur while imports are pending.
     // These actions will be replayed after the user confirms the import abort.
-    if ((nav.kind == LockActive || nav.kind == ToUnlock || nav.kind == Quit) &&
+    const bool lockish = nav.kind == LockActive || nav.kind == ToUnlock || nav.kind == Quit;
+    if (lockish &&
         import_ui_.queue.busy() && !import_ui_.lock_confirm.open) {
         import_ui_.lock_confirm = {true, nav};
         return false;   // screen stays; event will be re-queued by dispatch_event
@@ -1149,9 +1150,10 @@ bool App::apply_nav()
 
     // Every transition below except ToggleKeepUnlocked/ToSettings/LockSecond/Quit/None destroys the
     // current screen.
-    if (nav.kind != None && nav.kind != ToggleKeepUnlocked && nav.kind != ToSettings &&
-        nav.kind != ToVaultMaintenance &&
-        nav.kind != LockSecond && nav.kind != Quit) {
+    const bool keeps_screen = nav.kind == None || nav.kind == ToggleKeepUnlocked ||
+                              nav.kind == ToSettings || nav.kind == ToVaultMaintenance ||
+                              nav.kind == LockSecond || nav.kind == Quit;
+    if (!keeps_screen) {
         capture_session_state();
         screen_->on_exit();
     }

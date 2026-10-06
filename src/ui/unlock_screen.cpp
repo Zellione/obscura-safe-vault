@@ -14,8 +14,8 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
-#include "platform/paths.h"
 #include "platform/path_utf8.h"
+#include "platform/paths.h"
 #include "ui/clipboard_gate.h"
 #include "ui/clipboard_secret.h"
 #include "ui/passphrase.h"
@@ -34,9 +34,12 @@ gfx::Color strength_color(Strength s)
 {
     using enum Strength;
     switch (s) {
-        case Medium: return gfx::theme::WARN;
-        case Strong: return gfx::theme::OK;
-        case Weak:   break;
+    case Medium:
+        return gfx::theme::WARN;
+    case Strong:
+        return gfx::theme::OK;
+    case Weak:
+        break;
     }
     return gfx::theme::DANGER;
 }
@@ -56,13 +59,14 @@ bool exists_no_throw(const std::filesystem::path& path) noexcept
 
 UnlockScreen::UnlockScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                            platform::FileDialog& dlg, std::filesystem::path vault_path)
-    : win_(win), font_(font), vault_(vault), dlg_(dlg),
-      vault_path_(std::move(vault_path)),
+    : win_(win), font_(font), vault_(vault), dlg_(dlg), vault_path_(std::move(vault_path)),
       create_mode_(!exists_no_throw(vault_path_))
-{
-}
+{}
 
-void UnlockScreen::on_enter() { SDL_StartTextInput(win_.sdl_window()); }
+void UnlockScreen::on_enter()
+{
+    SDL_StartTextInput(win_.sdl_window());
+}
 
 void UnlockScreen::on_exit()
 {
@@ -95,22 +99,62 @@ UnlockScreen::Layout UnlockScreen::layout() const
 
 void UnlockScreen::handle_event(const SDL_Event& e)
 {
+    if (handle_blocking_event(e)) return;
+    if (handle_text_event(e)) return;
+
+    switch (e.type) {
+    case SDL_EVENT_KEY_DOWN:
+        switch (e.key.key) {
+        case SDLK_TAB:
+            if (create_mode_ || conversion_mode_) password_.focus ^= 1;
+            break;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            submit();
+            break;
+        case SDLK_ESCAPE:
+            request(NavKind::ToVaultManager);
+            break;
+        default:
+            break;
+        }
+        break;
+    case SDL_EVENT_MOUSE_MOTION:
+        mouse_.x = e.motion.x;
+        mouse_.y = e.motion.y;
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (e.button.button == SDL_BUTTON_LEFT) mouse_.down = false;
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        handle_click(e.button);
+        break;
+    default:
+        break;
+    }
+}
+
+bool UnlockScreen::handle_blocking_event(const SDL_Event& e)
+{
     if (conversion_report_ && conversion_report_->status == vault::LegacyConversionStatus::Ok) {
         if (e.type == SDL_EVENT_KEY_DOWN &&
             (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER))
             request(NavKind::ToGallery, platform::path_to_utf8(destination_path_));
-        return;
+        return true;
     }
     if (conversion_job_.active()) {
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) conversion_job_.cancel();
-        return;
+        return true;
     }
     // While the KDF worker owns the vault, swallow ALL input: a second submit
     // would race the job, editing fields mid-derivation is misleading, and Esc
     // would tear the screen down under a worker holding &vault_ (the job dtor
     // would join, but the derivation is not cancellable anyway).
-    if (job_.active()) return;
+    return job_.active();
+}
 
+bool UnlockScreen::handle_text_event(const SDL_Event& e)
+{
     // Precedence rule (Phase 54): the focused field gets first refusal on every
     // event, so its Ctrl+A / Ctrl+V never fall through to a screen shortcut.
     SecureTextInput& f = ((create_mode_ || conversion_mode_) && password_.focus == 1)
@@ -120,32 +164,10 @@ void UnlockScreen::handle_event(const SDL_Event& e)
         const size_t before = f.size();
         if (handle_text_input_event(f, e)) {
             if (f.size() != before) password_.reveal = false;   // edited by hand: stop displaying it
-            return;
-        }
-    }
-
-    switch (e.type) {
-        case SDL_EVENT_KEY_DOWN:
-            switch (e.key.key) {
-                case SDLK_TAB:       if (create_mode_ || conversion_mode_) password_.focus ^= 1; break;
-                case SDLK_RETURN:
-                case SDLK_KP_ENTER:  submit(); break;
-                case SDLK_ESCAPE:    request(NavKind::ToVaultManager); break;
-                default: break;
+            return true;
             }
-            break;
-        case SDL_EVENT_MOUSE_MOTION:
-            mouse_.x = e.motion.x;
-            mouse_.y = e.motion.y;
-            break;
-        case SDL_EVENT_MOUSE_BUTTON_UP:
-            if (e.button.button == SDL_BUTTON_LEFT) mouse_.down = false;
-            break;
-        case SDL_EVENT_MOUSE_BUTTON_DOWN:
-            handle_click(e.button);
-            break;
-        default: break;
     }
+    return false;
 }
 
 void UnlockScreen::handle_click(const SDL_MouseButtonEvent& b)
@@ -157,23 +179,26 @@ void UnlockScreen::handle_click(const SDL_MouseButtonEvent& b)
     const Layout L = layout();
     const SDL_FPoint p{b.x, b.y};
     if (!conversion_mode_ && point_in_rect(p.x, p.y, L.mode_btn)) {
-        create_mode_ = !create_mode_; password_.focus = 0; error_.clear();
+        create_mode_ = !create_mode_;
+        password_.focus = 0;
+        error_.clear();
         password_.reveal = false;
-    } else if ((create_mode_ || conversion_mode_) &&
-               point_in_rect(p.x, p.y, L.generate_btn)) {
+    } else if ((create_mode_ || conversion_mode_) && point_in_rect(p.x, p.y, L.generate_btn)) {
         // Fill both fields with one random passphrase and show it so the user
         // can write it down before creating the vault.
         if (generate_passphrase(password_.pw)) {
-            password_.confirm.set_text(password_.pw.text_view());   // view straight over the mlock'd bytes
+            password_.confirm.set_text(
+                password_.pw.text_view());  // view straight over the mlock'd bytes
             password_.reveal = true;
             error_.clear();
             copy_password_to_clipboard();   // Phase 45 Part 3: auto-copy the generated passphrase
         }
-    } else if ((create_mode_ || conversion_mode_) &&
-               point_in_rect(p.x, p.y, L.new_keyfile_btn)) {
-        pending_ = Pending::NewKeyfile; dlg_.save_keyfile(win_.sdl_window());
+    } else if ((create_mode_ || conversion_mode_) && point_in_rect(p.x, p.y, L.new_keyfile_btn)) {
+        pending_ = Pending::NewKeyfile;
+        dlg_.save_keyfile(win_.sdl_window());
     } else if (point_in_rect(p.x, p.y, L.keyfile_btn)) {
-        pending_ = Pending::Keyfile; dlg_.open_keyfile(win_.sdl_window());
+        pending_ = Pending::Keyfile;
+        dlg_.open_keyfile(win_.sdl_window());
     } else if (point_in_rect(p.x, p.y, L.other_btn)) {
         if (conversion_mode_) {
             pending_ = Pending::Destination;
@@ -194,13 +219,20 @@ static const char* unlock_error_message(vault::VaultResult r)
 {
     using enum vault::VaultResult;
     switch (r) {
-        case AuthFailed:    return "Wrong password or keyfile.";
-        case BadFormat:     return "Not a valid vault file.";
-        case IoError:       return "Could not read/write the vault file.";
-        case Busy:          return "Vault is busy in another process.";
-        case UnsupportedVersion: return "Vault was created by a newer unsupported version.";
-        case AlreadyExists: return "A vault already exists at that path.";
-        default:            return "Unlock failed.";
+    case AuthFailed:
+        return "Wrong password or keyfile.";
+    case BadFormat:
+        return "Not a valid vault file.";
+    case IoError:
+        return "Could not read/write the vault file.";
+    case Busy:
+        return "Vault is busy in another process.";
+    case UnsupportedVersion:
+        return "Vault was created by a newer unsupported version.";
+    case AlreadyExists:
+        return "A vault already exists at that path.";
+    default:
+        return "Unlock failed.";
     }
 }
 
@@ -262,7 +294,9 @@ void UnlockScreen::update(double dt)
         current = cur;
         SDL_free(cur);
     }
-    if (should_clear_clipboard(current, clipboard_.last_set)) { SDL_SetClipboardText(""); }
+    if (should_clear_clipboard(current, clipboard_.last_set)) {
+        SDL_SetClipboardText("");
+    }
     crypto_wipe(clipboard_.last_set.data(), clipboard_.last_set.size());
     clipboard_.last_set.clear();
 }
@@ -342,7 +376,10 @@ void UnlockScreen::submit()
     crypto::SecureBytes keyfile;
     if (!keyfile_path_.empty()) {
         auto kf = platform::read_keyfile(platform::utf8_to_path(keyfile_path_));
-        if (!kf) { error_ = "Cannot read keyfile."; return; }
+        if (!kf) {
+            error_ = "Cannot read keyfile.";
+            return;
+        }
         keyfile = std::move(*kf);
     }
 
@@ -370,7 +407,6 @@ void UnlockScreen::submit()
     }
 }
 
-
 void UnlockScreen::render(gfx::Renderer& r)
 {
     using namespace gfx::theme;
@@ -383,20 +419,45 @@ void UnlockScreen::render(gfx::Renderer& r)
         draw_button(r, font_, {rect, std::string(label)}, s.hover, s.active);
     };
 
-    const std::string_view title = conversion_mode_ ? "Convert Legacy Vault"
-                                                    : (create_mode_ ? "Create Vault" : "Unlock Vault");
+    std::string_view title = "Unlock Vault";
+    if (conversion_mode_)
+        title = "Convert Legacy Vault";
+    else if (create_mode_)
+        title = "Create Vault";
     r.draw_text(font_, 60, 44, title, TEXT);
-    r.draw_text(font_, 60, 92,
-                fit_text(font_, (conversion_mode_ ? "Source: " : "Vault: ") +
-                                    platform::path_to_utf8(vault_path_), W - 120), TEXT_DIM);
-    if (conversion_mode_ && !destination_path_.empty())
-        r.draw_text(font_, 60, 112,
-                    fit_text(font_, "Destination: " + platform::path_to_utf8(destination_path_),
+    r.draw_text(
+        font_, 60, 92,
+        fit_text(font_,
+                 (conversion_mode_ ? "Source: " : "Vault: ") + platform::path_to_utf8(vault_path_),
                              W - 120),
                     TEXT_DIM);
+    if (conversion_mode_ && !destination_path_.empty())
+        r.draw_text(
+            font_, 60, 112,
+            fit_text(font_, "Destination: " + platform::path_to_utf8(destination_path_), W - 120),
+            TEXT_DIM);
 
+    render_credentials(r, W);
+
+    const Layout L = layout();
+    btn(L.keyfile_btn, keyfile_path_.empty() ? "Keyfile: none" : "Keyfile: set");
+    btn(L.other_btn, conversion_mode_ ? "Destination..." : "Open other...");
+    if (!conversion_mode_) btn(L.mode_btn, create_mode_ ? "Have a vault?" : "New vault?");
+    std::string_view submit_label = "Unlock";
+    if (conversion_mode_)
+        submit_label = "Convert";
+    else if (create_mode_)
+        submit_label = "Create";
+    btn(L.submit_btn, submit_label);
+    btn(L.copy_btn, "Copy");
+    render_status(r, W, H);
+}
+
+void UnlockScreen::render_credentials(gfx::Renderer& r, float width)
+{
+    using namespace gfx::theme;
     const float fx = 60;
-    const float fw = W - 120;
+    const float fw = width - 120;
     const float fh = 44;
     r.draw_text(font_, fx, 126, "Password", TEXT_DIM);
     draw_edit_field(r, font_, {fx, 160, fw, fh}, password_.pw, password_.pw_chrome,
@@ -416,63 +477,71 @@ void UnlockScreen::render(gfx::Renderer& r)
         }
 
         const Layout L0 = layout();
-        btn(L0.generate_btn, "Generate passphrase");
-        btn(L0.new_keyfile_btn, "New keyfile...");
+        const auto draw = [&](const SDL_FRect& rect, std::string_view label) {
+            const ButtonState state = button_state(rect, mouse_.x, mouse_.y, mouse_.down);
+            draw_button(r, font_, {rect, std::string(label)}, state.hover, state.active);
+        };
+        draw(L0.generate_btn, "Generate passphrase");
+        draw(L0.new_keyfile_btn, "New keyfile...");
         if (password_.reveal && !password_.pw.empty()) {
             // string_view straight over the mlock'd buffer — no unlocked copy.
             r.draw_text(font_, fx, 372, fit_text(font_, password_.pw.text_view(), fw), OK);
             r.draw_text(font_, fx, 398,
                         conversion_mode_ ? "Write this down, then press Convert."
-                                         : "Write this down, then press Create.", TEXT_DIM);
+                                         : "Write this down, then press Create.",
+                        TEXT_DIM);
+        }
         }
     }
 
-    const Layout L = layout();
-    btn(L.keyfile_btn, keyfile_path_.empty() ? "Keyfile: none" : "Keyfile: set");
-    btn(L.other_btn, conversion_mode_ ? "Destination..." : "Open other...");
-    if (!conversion_mode_) btn(L.mode_btn, create_mode_ ? "Have a vault?" : "New vault?");
-    btn(L.submit_btn, conversion_mode_ ? "Convert" : (create_mode_ ? "Create" : "Unlock"));
-    btn(L.copy_btn, "Copy");
-
+void UnlockScreen::render_status(gfx::Renderer& r, float width, float height)
+{
+    using namespace gfx::theme;
     if (conversion_report_ && conversion_report_->status == vault::LegacyConversionStatus::Ok) {
         const auto& report = *conversion_report_;
         r.draw_text(font_, 60, 430,
                     std::format("Converted {} galleries, {} images, {} videos · {} original bytes",
                                 report.galleries, report.images, report.videos,
-                                report.original_bytes), OK);
-        r.draw_text(font_, 60, 458,
-                    "Deep verification, logical digests, and cold reopen passed.", OK);
-        r.draw_text(font_, 60, 486,
-                    fit_text(font_, "New vault: " + platform::path_to_utf8(destination_path_),
-                             W - 120),
+                                report.original_bytes),
+                    OK);
+        r.draw_text(font_, 60, 458, "Deep verification, logical digests, and cold reopen passed.",
+                    OK);
+        r.draw_text(
+            font_, 60, 486,
+            fit_text(font_, "New vault: " + platform::path_to_utf8(destination_path_), width - 120),
                     TEXT_DIM);
         if (report.missing_derived != 0)
-            r.draw_text(font_, 60, 514,
-                        std::format("Warning: {} source thumbnails/posters were absent; originals are intact.",
+            r.draw_text(
+                font_, 60, 514,
+                std::format(
+                    "Warning: {} source thumbnails/posters were absent; originals are intact.",
                                     report.missing_derived),
                         WARN);
-        r.draw_text(font_, 60, report.missing_derived == 0 ? 514 : 542,
+        r.draw_text(
+            font_, 60, report.missing_derived == 0 ? 514 : 542,
                     "Back up and manually test the new vault before deleting the source. Press Enter.",
                     TEXT_DIM);
     } else if (conversion_job_.active()) {
         const auto done = conversion_job_.progress().done.load();
         const auto total = conversion_job_.progress().total.load();
-        r.draw_text(font_, 60, H - 70,
+        r.draw_text(font_, 60, height - 70,
                     std::format("Converting… {} / {} · Esc cancels safely", done, total), TEXT_DIM);
     } else if (job_.active()) {
         // KDF in flight: input is swallowed (handle_event) until the worker
         // hands back its outcome, so tell the user why nothing reacts.
-        r.draw_text(font_, 60, H - 70,
+        r.draw_text(font_, 60, height - 70,
                     create_mode_ ? "Creating vault — deriving key…" : "Deriving key…", TEXT_DIM);
     } else if (!error_.empty()) {
-        r.draw_text(font_, 60, H - 70, error_, DANGER);
+        r.draw_text(font_, 60, height - 70, error_, DANGER);
     }
 }
 
 std::vector<ui::HelpGroup> UnlockScreen::help_groups() const
 {
-    return {{conversion_mode_ ? "Legacy conversion" : "Unlock", {
-        {"Tab", "Switch password field"}, {"Enter", "Submit"},
+    return {{conversion_mode_ ? "Legacy conversion" : "Unlock",
+             {
+                 {"Tab", "Switch password field"},
+                 {"Enter", "Submit"},
         {"Esc", "Back to vault manager"},
     }},
     text_editing_help_group()};

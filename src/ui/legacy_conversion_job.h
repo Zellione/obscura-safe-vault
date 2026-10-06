@@ -34,6 +34,10 @@ public:
     [[nodiscard]] std::optional<vault::LegacyConversionReport> take_outcome();
 
 private:
+    void run(vault::Vault& source, const std::filesystem::path& destination,
+             const crypto::KdfParams& kdf) noexcept;
+    void fail_start() noexcept;
+
     crypto::SecureBytes password_;
     crypto::SecureBytes keyfile_;
     std::atomic_bool cancel_{false};

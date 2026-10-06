@@ -385,8 +385,8 @@ ReadStatus ReadSession::digest_object(const Id& node_id, ObjectRole role,
     crypto_blake2b_keyed_init(&hash, digest.size(), digest_key.data(), digest_key.size());
     crypto::SecureBytes frame;
     for (uint32_t i = 0; i < info.frame_count; ++i) {
-        const auto status = opened.reader->read_frame(i, frame);
-        if (status != ObjectStatus::Ok) {
+        if (const auto status = opened.reader->read_frame(i, frame);
+            status != ObjectStatus::Ok) {
             crypto_wipe(&hash, sizeof(hash));
             return status == ObjectStatus::AuthenticationFailed ? ReadStatus::AuthenticationFailed
                                                                  : ReadStatus::BadFormat;
