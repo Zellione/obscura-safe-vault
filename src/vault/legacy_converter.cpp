@@ -287,6 +287,85 @@ LegacyConversionStatus copy_node(CopyContext& context, const IndexNode& source,
     return status == LegacyConversionStatus::Ok ? count_and_maybe_commit(context) : status;
 }
 
+bool logical_metadata_equal(const IndexNode& source, const IndexNode& destination) noexcept
+{
+    if (source.type != destination.type || source.name != destination.name ||
+        source.tags != destination.tags || source.favorite != destination.favorite ||
+        source.sort_key != destination.sort_key ||
+        source.children.size() != destination.children.size())
+        return false;
+    if (source.is_image())
+        return source.meta.format == destination.meta.format &&
+               source.meta.width == destination.meta.width &&
+               source.meta.height == destination.meta.height &&
+               source.meta.orig_size == destination.meta.orig_size &&
+               source.meta.created_ts == destination.meta.created_ts &&
+               source.meta.animated == destination.meta.animated;
+    if (source.is_video())
+        return source.vmeta.container == destination.vmeta.container &&
+               source.vmeta.codec == destination.vmeta.codec &&
+               source.vmeta.width == destination.vmeta.width &&
+               source.vmeta.height == destination.vmeta.height &&
+               source.vmeta.duration_us == destination.vmeta.duration_us &&
+               source.vmeta.orig_size == destination.vmeta.orig_size &&
+               source.vmeta.created_ts == destination.vmeta.created_ts;
+    return true;
+}
+
+bool logical_settings_equal(const VaultSettings& source, const VaultSettings& destination) noexcept
+{
+    return source.default_sort == destination.default_sort &&
+           source.tiles_show_tags == destination.tiles_show_tags &&
+           source.categories == destination.categories &&
+           source.tag_descriptions == destination.tag_descriptions &&
+           source.tag_field_values == destination.tag_field_values &&
+           source.migrated_index_version == destination.migrated_index_version &&
+           source.migrated_probe_caps == destination.migrated_probe_caps &&
+           source.migrated_thumb_side == destination.migrated_thumb_side;
+}
+
+bool logical_searches_equal(std::span<const SavedSearch> source,
+                            std::span<const SavedSearch> destination) noexcept
+{
+    if (source.size() != destination.size()) return false;
+    for (size_t i = 0; i < source.size(); ++i)
+        if (source[i].name != destination[i].name ||
+            !std::ranges::equal(source[i].query.as_span(), destination[i].query.as_span()))
+            return false;
+    return true;
+}
+
+LegacyConversionStatus verify_logical_node(Vault& source_vault, v3::ReadSession& destination_vault,
+                                           const IndexNode& source, const IndexNode& destination,
+                                           std::span<const uint8_t> digest_key) noexcept
+{
+    if (!logical_metadata_equal(source, destination))
+        return LegacyConversionStatus::VerificationFailed;
+    if (!source.is_gallery()) {
+        std::array<uint8_t, 32> source_digest{};
+        std::array<uint8_t, 32> destination_digest{};
+        if (digest_legacy_original(source_vault, source, digest_key, source_digest) !=
+            LegacyConversionStatus::Ok)
+            return LegacyConversionStatus::SourceCorrupt;
+        const auto role = source.is_image() ? v3::ObjectRole::OriginalImage
+                                            : v3::ObjectRole::OriginalVideo;
+        const auto destination_status = destination_vault.digest_object(
+            destination.node_id, role, digest_key, destination_digest);
+        const bool matches = source_digest == destination_digest;
+        crypto_wipe(source_digest.data(), source_digest.size());
+        crypto_wipe(destination_digest.data(), destination_digest.size());
+        if (destination_status != v3::ReadStatus::Ok || !matches)
+            return LegacyConversionStatus::VerificationFailed;
+    }
+    for (size_t i = 0; i < source.children.size(); ++i) {
+        const auto status = verify_logical_node(source_vault, destination_vault,
+                                                source.children[i], destination.children[i],
+                                                digest_key);
+        if (status != LegacyConversionStatus::Ok) return status;
+    }
+    return LegacyConversionStatus::Ok;
+}
+
 }  // namespace
 
 LegacyConversionStatus copy_legacy_video_object(Vault& source, const IndexNode& source_node,
@@ -335,6 +414,40 @@ LegacyConversionStatus copy_legacy_video_object(Vault& source, const IndexNode& 
         std::to_underlying(source_node.vmeta.container), source_node.vmeta.orig_size, read);
     return status == v3::ReadStatus::Ok ? LegacyConversionStatus::Ok
                                         : LegacyConversionStatus::SourceCorrupt;
+}
+
+LegacyConversionStatus digest_legacy_original(Vault& source, const IndexNode& source_node,
+                                              std::span<const uint8_t> digest_key,
+                                              std::span<uint8_t> digest) noexcept
+{
+    if (!source.unlocked_ || source.v3_ || source_node.is_gallery() || digest.empty() ||
+        digest.size() > 64 || digest_key.empty() || digest_key.size() > 64)
+        return LegacyConversionStatus::SourceCorrupt;
+    crypto_blake2b_ctx hash{};
+    crypto_blake2b_keyed_init(&hash, digest.size(), digest_key.data(), digest_key.size());
+    if (source_node.is_image()) {
+        crypto::SecureBytes original;
+        if (source.read_image(source_node, original) != VaultResult::Ok) {
+            crypto_wipe(&hash, sizeof(hash));
+            return LegacyConversionStatus::SourceCorrupt;
+        }
+        crypto_blake2b_update(&hash, original.data(), original.size());
+    } else {
+        ChunkStore store(source.read_fp_, source.master_key_.as_span(),
+                         framed_chunks(source.header_));
+        for (const auto& chunk : source_node.vmeta.chunks) {
+            crypto::SecureBytes plaintext;
+            const auto tag =
+                chunk_tag(crypto::ChunkDomain::Video, source_node, chunk.id, chunk.sequence);
+            if (!store.read_chunk({chunk.offset, chunk.length}, tag, plaintext)) {
+                crypto_wipe(&hash, sizeof(hash));
+                return LegacyConversionStatus::SourceCorrupt;
+            }
+            crypto_blake2b_update(&hash, plaintext.data(), plaintext.size());
+        }
+    }
+    crypto_blake2b_final(&hash, digest.data());
+    return LegacyConversionStatus::Ok;
 }
 
 LegacyConversionReport convert_legacy_vault(Vault& source,
@@ -443,12 +556,32 @@ LegacyConversionReport convert_legacy_vault(Vault& source,
         return report;
     }
     if (unlocked != VaultResult::Ok ||
-        reopened.v3_->verify(v3::VerifyDepth::Deep).status != v3::RecoveryStatus::Ok ||
-        reopened.v3_->finish_conversion() != v3::DbStatus::Ok) {
+        reopened.v3_->verify(v3::VerifyDepth::Deep).status != v3::RecoveryStatus::Ok) {
         report.status = LegacyConversionStatus::VerificationFailed;
         return report;
     }
     report.cold_reopened = true;
+    std::array<uint8_t, 32> digest_key{};
+    if (!crypto::fill_random(digest_key)) {
+        report.status = LegacyConversionStatus::IoError;
+        return report;
+    }
+    const auto logical =
+        verify_logical_node(source, *reopened.v3_, source.root_, reopened.root_, digest_key);
+    crypto_wipe(digest_key.data(), digest_key.size());
+    if (logical != LegacyConversionStatus::Ok ||
+        !logical_settings_equal(source.settings_, reopened.settings_) ||
+        !logical_searches_equal(source.saved_searches_, reopened.saved_searches_)) {
+        report.status = logical == LegacyConversionStatus::Ok
+                            ? LegacyConversionStatus::VerificationFailed
+                            : logical;
+        return report;
+    }
+    report.logical_verified = true;
+    if (reopened.v3_->finish_conversion() != v3::DbStatus::Ok) {
+        report.status = LegacyConversionStatus::VerificationFailed;
+        return report;
+    }
     report.status = LegacyConversionStatus::Ok;
     return report;
 }

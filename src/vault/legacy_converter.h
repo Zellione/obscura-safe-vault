@@ -49,6 +49,7 @@ struct LegacyConversionReport {
     uint64_t derived_bytes = 0;
     uint64_t required_free_bytes = 0;
     bool deep_verified = false;
+    bool logical_verified = false;
     bool cold_reopened = false;
     bool resumed = false;
 };
@@ -65,5 +66,10 @@ convert_legacy_vault(Vault& source, const LegacyConversionRequest& request) noex
 [[nodiscard]] LegacyConversionStatus
 copy_legacy_video_object(Vault& source, const IndexNode& source_node, v3::ReadSession& destination,
                          const IndexNode& destination_node) noexcept;
+
+[[nodiscard]] LegacyConversionStatus
+digest_legacy_original(Vault& source, const IndexNode& source_node,
+                       std::span<const uint8_t> digest_key,
+                       std::span<uint8_t> digest) noexcept;
 
 }  // namespace vault

@@ -68,6 +68,9 @@ public:
                                      crypto::SecureBytes& out) const noexcept;
     [[nodiscard]] std::optional<uint64_t>
     object_plaintext_length(const Id& node_id, ObjectRole role) const noexcept;
+    [[nodiscard]] ReadStatus
+    digest_object(const Id& node_id, ObjectRole role, std::span<const uint8_t> digest_key,
+                  std::span<uint8_t> digest) const noexcept;
     [[nodiscard]] ReadStatus commit_metadata(const IndexNode& root, const VaultSettings& settings,
                                              std::span<const SavedSearch> searches) noexcept;
     [[nodiscard]] ReadStatus stage_object(const Id& node_id, ObjectRole role, uint8_t media_format,

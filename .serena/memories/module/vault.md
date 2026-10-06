@@ -149,7 +149,11 @@ are also implemented. Conversion commits every 32 completed nodes; an encrypted
 `conversion_nodes` table maps deterministic source traversal identities to fresh
 v3 node IDs, allowing pre-v13 sources with zero node IDs to resume as well. A
 resume rebuilds the same prefix and skips object roles already referenced by the
-destination DB. The UI workflow remains before
+destination DB. Before clearing the marker, a cold-reopened destination is
+compared with the source for ordered topology, user-visible metadata, settings,
+saved searches, and a fresh random-keyed BLAKE2b digest of every original;
+video hashing is bounded to one authenticated legacy chunk or v3 object frame.
+The UI workflow remains before
 Phase 115 is complete.
 
 ### file_util.h — position-independent size query (PR #109, durability)

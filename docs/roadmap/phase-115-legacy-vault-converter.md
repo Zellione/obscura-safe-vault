@@ -25,8 +25,12 @@
   conversion tables retain a stable traversal-identity to fresh v3 node-ID
   mapping (including pre-v13 sources that have no node IDs), so resume reuses
   committed object references and recopies only the uncommitted tail.
-- Remaining work: UI/credential flow, logical digest
-  comparison, full legacy-fixture and crash/fault coverage, documentation and
+- A cold-reopened destination is compared against the source before the
+  conversion marker is cleared: ordered topology, names, media metadata, tags,
+  settings, saved searches, and every original's fresh random-keyed BLAKE2b
+  digest. Video digests stream one authenticated source chunk / destination
+  object frame at a time.
+- Remaining work: UI/credential flow, full legacy-fixture and crash/fault coverage, documentation and
   release gates.
 
 ## Goal

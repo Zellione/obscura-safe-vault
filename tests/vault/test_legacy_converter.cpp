@@ -84,6 +84,7 @@ TEST(legacy_converter_copies_nested_media_metadata_and_preserves_source)
     CHECK_EQ(converted.videos, 0U);
     CHECK_EQ(converted.original_bytes, original.size());
     CHECK(converted.deep_verified);
+    CHECK(converted.logical_verified);
     CHECK(converted.cold_reopened);
     CHECK_EQ(progress.total.load(), 4);
     CHECK_EQ(progress.done.load(), 4);
