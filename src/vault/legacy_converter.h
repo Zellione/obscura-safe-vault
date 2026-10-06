@@ -47,7 +47,9 @@ struct LegacyConversionReport {
     uint64_t videos = 0;
     uint64_t original_bytes = 0;
     uint64_t derived_bytes = 0;
+    uint64_t missing_derived = 0;
     uint64_t required_free_bytes = 0;
+    uint64_t failed_ordinal = 0;
     bool deep_verified = false;
     bool logical_verified = false;
     bool cold_reopened = false;

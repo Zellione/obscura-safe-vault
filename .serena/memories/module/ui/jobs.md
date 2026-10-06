@@ -3,6 +3,12 @@
 File operations, duplicate scanning, and migration jobs running on background threads.
 
 ## Background jobs (mirror each other; each owns the vault's single-thread file handle)
+- `legacy_conversion_job.*` (Phase 115) — cancellable `std::jthread` wrapper around the
+  copy-only legacy converter. It copies destination password/keyfile into `SecureBytes`, exposes
+  atomic `OpProgress`, and joins on destruction. On success it independently opens and unlocks
+  the destination before replacing the supplied legacy `Vault` handle, so the UI can never
+  promote a destination that failed its final credentialed reopen. Tests cover successful handle
+  replacement and rejection of a non-legacy source.
 - `zip_import_job.*` — ZipImportJob runs import_cbz/import_zip (start_cbz/start_zip, shared
   launch()) on a bg `std::thread`; start_archive/start_archive_cbz wrap the same launch() for
   the libarchive path. Contract: while active() the worker owns the vault handle, so GalleryGrid

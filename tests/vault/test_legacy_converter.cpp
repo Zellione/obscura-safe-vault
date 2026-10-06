@@ -4,6 +4,7 @@
 #include "platform/path_utf8.h"
 #include "vault/legacy_converter.h"
 #include "vault/staging.h"
+#include "vault/v3_fs.h"
 #include "vault/v3_recovery.h"
 #include "vault/vault.h"
 
@@ -11,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <tuple>
 #include <unistd.h>
 #include <vector>
 
@@ -228,8 +230,8 @@ TEST(legacy_converter_persists_stable_node_mapping_for_resume)
             vault::VaultResult::Ok);
     REQUIRE(source.unlock(SOURCE_PASSWORD, {}) == vault::VaultResult::Ok);
     std::atomic_bool stop{true};
-    const vault::LegacyConversionRequest request{destination_path, DEST_PASSWORD, {}, TEST_KDF,
-                                                  &stop};
+    const vault::LegacyConversionRequest request{
+        destination_path, DEST_PASSWORD, {}, TEST_KDF, &stop};
     REQUIRE(vault::convert_legacy_vault(source, request).status ==
             vault::LegacyConversionStatus::Cancelled);
 
@@ -253,4 +255,140 @@ TEST(legacy_converter_persists_stable_node_mapping_for_resume)
     const auto* complete_root = complete.resolve_node("");
     REQUIRE(complete_root != nullptr);
     CHECK(complete_root->node_id == first);
+}
+
+TEST(legacy_converter_wrong_resume_credentials_are_authentication_failure)
+{
+    TempDir temp;
+    const auto source_path = temp.path / "source.osv";
+    const auto destination_path = temp.path / "converted.osv";
+    vault::Vault writer;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(source_path), SOURCE_PASSWORD, {}, TEST_KDF,
+                                 writer) == vault::VaultResult::Ok);
+    writer.lock();
+    vault::Vault source;
+    REQUIRE(vault::Vault::open(platform::path_to_utf8(source_path), source) ==
+            vault::VaultResult::Ok);
+    REQUIRE(source.unlock(SOURCE_PASSWORD, {}) == vault::VaultResult::Ok);
+    std::atomic_bool stop{true};
+    const vault::LegacyConversionRequest create{
+        destination_path, DEST_PASSWORD, {}, TEST_KDF, &stop};
+    REQUIRE(vault::convert_legacy_vault(source, create).status ==
+            vault::LegacyConversionStatus::Cancelled);
+    constexpr std::array<uint8_t, 3> wrong{'b', 'a', 'd'};
+    const vault::LegacyConversionRequest resume{destination_path, wrong, {}, TEST_KDF};
+    CHECK(vault::convert_legacy_vault(source, resume).status ==
+          vault::LegacyConversionStatus::AuthenticationFailed);
+}
+
+TEST(legacy_converter_publication_faults_safely_restart_or_resume)
+{
+    using enum vault::v3::FsFault;
+    for (const auto fault : {Write, FileSync, Rename, DirectorySync}) {
+        TempDir temp;
+        const auto source_path = temp.path / "source.osv";
+        const auto destination_path = temp.path / "converted.osv";
+        vault::Vault writer;
+        REQUIRE(vault::Vault::create(platform::path_to_utf8(source_path), SOURCE_PASSWORD, {},
+                                     TEST_KDF, writer) == vault::VaultResult::Ok);
+        vault::StagedThumb thumb;
+        REQUIRE(thumb.thumb_jpeg.assign(std::array<uint8_t, 2>{8, 9}));
+        thumb.format = vault::ImageFormat::JPEG;
+        REQUIRE(vault::attach_image_prestaged(writer, "", std::array<uint8_t, 4>{1, 2, 3, 4},
+                                              "one.jpg", thumb, 1,
+                                              nullptr) == vault::VaultResult::Ok);
+        REQUIRE(vault::commit_staged(writer) == vault::VaultResult::Ok);
+        writer.lock();
+        const auto before = file_bytes(source_path);
+        vault::Vault source;
+        REQUIRE(vault::Vault::open(platform::path_to_utf8(source_path), source) ==
+                vault::VaultResult::Ok);
+        REQUIRE(source.unlock(SOURCE_PASSWORD, {}) == vault::VaultResult::Ok);
+        const vault::LegacyConversionRequest request{destination_path, DEST_PASSWORD, {}, TEST_KDF};
+        vault::v3::inject_fs_fault(fault);
+        CHECK(vault::convert_legacy_vault(source, request).status !=
+              vault::LegacyConversionStatus::Ok);
+        vault::v3::clear_fs_faults();
+        const auto retried = vault::convert_legacy_vault(source, request);
+        REQUIRE(retried.status == vault::LegacyConversionStatus::Ok);
+        CHECK(file_bytes(source_path) == before);
+    }
+}
+
+TEST(legacy_converter_converts_committed_preframing_fixture_byte_exact)
+{
+    TempDir temp;
+    const auto fixture = std::filesystem::path{OSV_VAULT_FIXTURE_DIR} / "legacy_noflags.osv";
+    const auto source_path = temp.path / "legacy.osv";
+    const auto destination_path = temp.path / "converted.osv";
+    REQUIRE(std::filesystem::copy_file(fixture, source_path));
+    const auto before = file_bytes(source_path);
+    constexpr std::string_view password = "legacy-password";
+    const auto password_bytes = std::span<const uint8_t>{
+        reinterpret_cast<const uint8_t*>(password.data()), password.size()};
+    vault::Vault source;
+    REQUIRE(vault::Vault::open(platform::path_to_utf8(source_path), source) ==
+            vault::VaultResult::Ok);
+    REQUIRE(source.unlock(password_bytes, {}) == vault::VaultResult::Ok);
+    const vault::LegacyConversionRequest request{destination_path, DEST_PASSWORD, {}, TEST_KDF};
+    const auto report = vault::convert_legacy_vault(source, request);
+    REQUIRE(report.status == vault::LegacyConversionStatus::Ok);
+    CHECK(report.logical_verified);
+    CHECK_EQ(report.images, 2U);
+    CHECK(file_bytes(source_path) == before);
+
+    vault::Vault converted;
+    REQUIRE(vault::Vault::open(platform::path_to_utf8(destination_path), converted) ==
+            vault::VaultResult::Ok);
+    REQUIRE(converted.unlock(DEST_PASSWORD, {}) == vault::VaultResult::Ok);
+    for (const auto& [name, size, seed] : {std::tuple{"a.bin", size_t{4096}, uint8_t{0xA5}},
+                                           std::tuple{"b.bin", size_t{100000}, uint8_t{0x5A}}}) {
+        const auto* node = converted.resolve_node(std::string{"pics/"} + name);
+        REQUIRE(node != nullptr);
+        crypto::SecureBytes bytes;
+        REQUIRE(converted.read_image(*node, bytes) == vault::VaultResult::Ok);
+        REQUIRE(bytes.size() == size);
+        for (size_t i = 0; i < size; ++i)
+            REQUIRE(bytes[i] == static_cast<uint8_t>(seed + i * 31));
+    }
+}
+
+TEST(legacy_converter_tampered_source_never_claims_success)
+{
+    TempDir temp;
+    const auto source_path = temp.path / "source.osv";
+    const auto destination_path = temp.path / "converted.osv";
+    vault::Vault writer;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(source_path), SOURCE_PASSWORD, {}, TEST_KDF,
+                                 writer) == vault::VaultResult::Ok);
+    vault::StagedThumb thumb;
+    thumb.format = vault::ImageFormat::JPEG;
+    REQUIRE(vault::attach_image_prestaged(writer, "", std::array<uint8_t, 4>{1, 2, 3, 4}, "one.jpg",
+                                          thumb, 1, nullptr) == vault::VaultResult::Ok);
+    REQUIRE(vault::commit_staged(writer) == vault::VaultResult::Ok);
+    const auto* node = writer.resolve_node("one.jpg");
+    REQUIRE(node != nullptr);
+    const auto offset = node->meta.data_offset + 30;
+    writer.lock();
+    {
+        std::fstream file(source_path, std::ios::binary | std::ios::in | std::ios::out);
+        REQUIRE(file.good());
+        file.seekg(static_cast<std::streamoff>(offset));
+        char byte = 0;
+        file.read(&byte, 1);
+        byte ^= 0x40;
+        file.seekp(static_cast<std::streamoff>(offset));
+        file.write(&byte, 1);
+    }
+    const auto tampered = file_bytes(source_path);
+    vault::Vault source;
+    REQUIRE(vault::Vault::open(platform::path_to_utf8(source_path), source) ==
+            vault::VaultResult::Ok);
+    REQUIRE(source.unlock(SOURCE_PASSWORD, {}) == vault::VaultResult::Ok);
+    const vault::LegacyConversionRequest request{destination_path, DEST_PASSWORD, {}, TEST_KDF};
+    const auto report = vault::convert_legacy_vault(source, request);
+    CHECK(report.status == vault::LegacyConversionStatus::SourceCorrupt);
+    CHECK(report.failed_ordinal != 0);
+    CHECK(!report.logical_verified);
+    CHECK(file_bytes(source_path) == tampered);
 }

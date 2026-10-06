@@ -2,6 +2,7 @@
 
 #include "crypto/random.h"
 #include "platform/path_utf8.h"
+#include "platform/safe_print.h"
 #include "vault/chunk_store.h"
 #include "vault/v3_read_session.h"
 #include "vault/vault.h"
@@ -232,7 +233,10 @@ LegacyConversionStatus stage_media(CopyContext& context, const IndexNode& source
 
     const bool has_derived =
         source.is_image() ? source.meta.thumb_length != 0 : source.vmeta.poster_length != 0;
-    if (!has_derived) return LegacyConversionStatus::Ok;
+    if (!has_derived) {
+        ++context.report.missing_derived;
+        return LegacyConversionStatus::Ok;
+    }
     crypto::SecureBytes derived;
     if (context.source.read_thumbnail(source, derived) != VaultResult::Ok)
         return LegacyConversionStatus::SourceCorrupt;
@@ -284,6 +288,7 @@ LegacyConversionStatus copy_node(CopyContext& context, const IndexNode& source,
     else
         ++context.report.videos;
     const auto status = stage_media(context, source, destination);
+    if (status != LegacyConversionStatus::Ok) context.report.failed_ordinal = source_ordinal;
     return status == LegacyConversionStatus::Ok ? count_and_maybe_commit(context) : status;
 }
 
@@ -487,9 +492,16 @@ LegacyConversionReport convert_legacy_vault(Vault& source,
     const auto destination_utf8 = platform::path_to_utf8(request.destination);
     const auto marker = source_marker(source.header_);
     if (validation == LegacyConversionStatus::DestinationExists) {
-        if (Vault::open(destination_utf8, destination) != VaultResult::Ok ||
-            destination.unlock(request.password, request.keyfile) != VaultResult::Ok ||
-            !destination.v3_) {
+        if (Vault::open(destination_utf8, destination) != VaultResult::Ok) {
+            report.status = LegacyConversionStatus::DestinationExists;
+            return report;
+        }
+        const auto unlock_result = destination.unlock(request.password, request.keyfile);
+        if (unlock_result == VaultResult::AuthFailed) {
+            report.status = LegacyConversionStatus::AuthenticationFailed;
+            return report;
+        }
+        if (unlock_result != VaultResult::Ok || !destination.v3_) {
             report.status = LegacyConversionStatus::DestinationExists;
             return report;
         }
@@ -520,6 +532,9 @@ LegacyConversionReport convert_legacy_vault(Vault& source,
     if (const auto status = copy_node(context, source.root_, converted_root, &root_id);
         status != LegacyConversionStatus::Ok) {
         report.status = status;
+        if (status == LegacyConversionStatus::SourceCorrupt)
+            platform::safe_println(stderr, "[Converter] source item ordinal {} failed authentication",
+                                   report.failed_ordinal);
         return report;
     }
     if (const auto status = commit_batch(context); status != LegacyConversionStatus::Ok) {

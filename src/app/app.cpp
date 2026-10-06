@@ -798,7 +798,7 @@ struct App::OverlayDispatch {
         app.overlays_.settings.maintenance_action = ui::VaultMaintenanceAction::None;
 
         if (vault::vault_is_read_only(*app.vault_state_.active)) {
-            app.overlays_.settings.error = "Legacy vaults are read only; convert in Phase 115";
+            app.overlays_.settings.error = "Lock and reopen this legacy vault to convert it";
             return true;
         }
 
@@ -1157,7 +1157,10 @@ bool App::apply_nav()
     }
     switch (nav.kind) {
         case ToGallery:
-            if (state_ == State::Locked) promote_pending();   // unlock-screen success
+            if (state_ == State::Locked) {
+                if (!nav.path.empty()) vault_state_.pending_path = nav.path;
+                promote_pending();   // unlock/conversion-screen success
+            }
             // Phase 78: viewer round-trip back to split view. If the viewer was
             // launched from a dual-pane screen and split is still active, restore
             // that pane's exact position instead of going to single-grid mode.

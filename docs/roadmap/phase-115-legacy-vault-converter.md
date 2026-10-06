@@ -1,8 +1,8 @@
 # Legacy one-file vault converter (Phase 115)
 
-**Status:** in progress
+**Status:** complete
 
-## Delivered so far
+## Delivered
 
 - Added a storage-layer converter that accepts only an unlocked legacy source
   and a distinct destination, creates a fresh v3 directory, and mints new vault,
@@ -30,8 +30,21 @@
   settings, saved searches, and every original's fresh random-keyed BLAKE2b
   digest. Video digests stream one authenticated source chunk / destination
   object frame at a time.
-- Remaining work: UI/credential flow, full legacy-fixture and crash/fault coverage, documentation and
-  release gates.
+- Authenticating a legacy vault now transitions the unlock screen into an
+  explicit conversion flow. The user chooses a distinct destination, password,
+  and optional keyfile; cancellation and shutdown join the worker before the
+  source handle can be destroyed. The app promotes only a successfully reopened
+  destination, never the legacy source.
+- The completion report shows item and byte totals, destination, verification
+  results, derived-object warnings, and backup/manual-test guidance. There is no
+  automatic source deletion.
+- Publication fault injection covers write, file-sync, rename, and directory-
+  sync failures followed by a safe retry. Wrong resume credentials fail as
+  authentication, tampered source ciphertext reports only an opaque traversal
+  ordinal, and a committed pre-framing golden fixture converts byte-exactly.
+- Historical header/index generations remain covered by the reader/parser test
+  corpus consumed by the converter; the golden fixture additionally exercises
+  the oldest pre-framing object representation end to end.
 
 ## Goal
 
@@ -55,7 +68,7 @@ As the final phase, provide an explicit, non-destructive conversion from a legac
 6. For each original/thumbnail/poster/video: authenticate and decrypt from the source into bounded locked/wiping buffers, stream-encrypt into the new object format, durably publish, then commit its destination row. Videos stream chunk/frame-wise; never materialize a whole large video or write plaintext.
 7. Commit resumable batches. After cancellation/crash, reopen both vaults, validate the source fingerprint and destination conversion marker, reconcile destination objects, skip only rows already committed and verified, and continue idempotently.
 8. Treat source authentication/corruption as a hard stop with the exact logical item identified by opaque ordinal/ID in logs. Offer no "skip corrupt original" mode in the first version; partial silent conversion would undermine success claims.
-9. After copying, compare structural counts, topology, names, metadata, tags/settings/searches, plaintext sizes, and a keyed streaming digest of every decrypted original between source and destination. Regenerate derived thumbnails/posters only when the source lacks a valid one, and record that fact.
+9. After copying, compare structural counts, topology, names, metadata, tags/settings/searches, plaintext sizes, and a keyed streaming digest of every decrypted original between source and destination. Record missing derived thumbnails/posters as warnings; the normal v3 derived-media migration can regenerate them after conversion without weakening original-byte verification.
 10. Clear the conversion-in-progress marker, checkpoint/backup the DB as specified, run v3 deep verification, close both vaults, then reopen the destination from scratch with destination credentials and sample/full-read according to the approved verification policy.
 11. Present a completion report with source/destination locations, counts, bytes, verification result, warnings, and explicit guidance to back up and manually test before removing the source. Do not provide an automatic delete-source button in this phase.
 12. Retain the legacy reader and converter in releases for an owner-approved deprecation window. Add fixtures for every supported legacy header/index generation rather than supporting only the newest legacy file.

@@ -134,7 +134,7 @@ referenced ciphertext bytes, and fixed slack; insufficient space creates nothing
 old application-owned staging names under the writer lease and reports removed/recent/suspicious
 counts without exposing filenames.
 
-Phase 115 (in progress) adds `legacy_converter.*`: an unlocked read-only legacy
+Phase 115 adds `legacy_converter.*`: an unlocked read-only legacy
 vault can be copied to a distinct fresh v3 directory with new identities, keys,
 and nonces. The converter preserves the logical tree/settings/search metadata,
 authenticates each original and derived record into `SecureBytes`, deep-verifies
@@ -153,8 +153,12 @@ destination DB. Before clearing the marker, a cold-reopened destination is
 compared with the source for ordered topology, user-visible metadata, settings,
 saved searches, and a fresh random-keyed BLAKE2b digest of every original;
 video hashing is bounded to one authenticated legacy chunk or v3 object frame.
-The UI workflow remains before
-Phase 115 is complete.
+Source authentication failures log only an opaque traversal ordinal and stop
+the conversion; missing derived objects increment a warning count while original
+verification remains mandatory. Publication-fault retries either resume the
+matching encrypted marker or restart safely, and wrong resume credentials are
+reported as authentication failure. The source bytes remain unchanged on every
+tested success and failure path.
 
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
