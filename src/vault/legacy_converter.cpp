@@ -352,12 +352,14 @@ struct LegacyVideoReader {
     bool load(size_t index, uint64_t raw_index)
     {
         const auto& chunk = node.vmeta.chunks[index];
-        const auto tag = chunk_tag(crypto::ChunkDomain::Video, node, chunk.id, chunk.sequence);
-        if (!store.read_chunk({chunk.offset, chunk.length}, tag, cached)) return false;
+        if (const auto tag = chunk_tag(crypto::ChunkDomain::Video, node, chunk.id, chunk.sequence);
+            !store.read_chunk({chunk.offset, chunk.length}, tag, cached))
+            return false;
         const uint64_t start = raw_index * node.vmeta.chunk_size;
-        const auto expected = static_cast<size_t>(
-            std::min<uint64_t>(node.vmeta.chunk_size, node.vmeta.orig_size - start));
-        if (cached.size() != expected) return false;
+        if (const auto expected = static_cast<size_t>(
+                std::min<uint64_t>(node.vmeta.chunk_size, node.vmeta.orig_size - start));
+            cached.size() != expected)
+            return false;
         cached_index = index;
         return true;
     }
@@ -371,8 +373,9 @@ struct LegacyVideoReader {
             const uint64_t absolute = offset + written;
             const uint64_t raw_index = absolute / node.vmeta.chunk_size;
             if (raw_index >= node.vmeta.chunks.size()) return false;
-            const auto index = static_cast<size_t>(raw_index);
-            if (cached_index != index && !load(index, raw_index)) return false;
+            if (const auto index = static_cast<size_t>(raw_index);
+                cached_index != index && !load(index, raw_index))
+                return false;
             const auto within = static_cast<size_t>(absolute % node.vmeta.chunk_size);
             if (within >= cached.size()) return false;
             const size_t take = std::min(output.size() - written, cached.size() - within);
@@ -475,7 +478,7 @@ public:
         : source_(source), request_(request)
     {}
 
-    LegacyConversionReport run() noexcept
+    LegacyConversionReport run() const noexcept
 {
     LegacyConversionReport report;
         if (!preflight(report)) return report;
@@ -490,8 +493,9 @@ public:
 private:
     bool preflight(LegacyConversionReport& report) const noexcept
     {
-        if (!source_.unlocked_) return fail(report, LegacyConversionStatus::SourceLocked);
-        if (source_.v3_) return fail(report, LegacyConversionStatus::SourceNotLegacy);
+        using enum LegacyConversionStatus;
+        if (!source_.unlocked_) return fail(report, SourceLocked);
+        if (source_.v3_) return fail(report, SourceNotLegacy);
     PreflightTotals totals;
         scan_preflight(source_.root_, totals);
         if (request_.progress) {
@@ -502,7 +506,7 @@ private:
     }
         return preflight_space(platform::utf8_to_path(source_.path_), request_.destination, totals,
                                report) ||
-               fail(report, LegacyConversionStatus::InsufficientSpace);
+               fail(report, InsufficientSpace);
     }
 
     bool open_destination(Vault& destination, LegacyConversionReport& report) const noexcept
@@ -537,8 +541,8 @@ private:
             return fail(report, LegacyConversionStatus::AuthenticationFailed);
         if (unlocked != VaultResult::Ok || !destination.v3_)
             return fail(report, LegacyConversionStatus::DestinationExists);
-        const auto existing = destination.v3_->conversion_marker();
-        if (existing.status != v3::DbStatus::Ok || !existing.value ||
+        if (const auto existing = destination.v3_->conversion_marker();
+            existing.status != v3::DbStatus::Ok || !existing.value ||
             existing.value->conversion_version != marker.conversion_version ||
             existing.value->source_fingerprint != marker.source_fingerprint)
             return fail(report, LegacyConversionStatus::ResumeMismatch);
@@ -570,8 +574,8 @@ private:
 
     bool verify(Vault& destination, LegacyConversionReport& report) const noexcept
     {
-        const auto deep = destination.v3_->verify(v3::VerifyDepth::Deep);
-        if (deep.status != v3::RecoveryStatus::Ok || deep.has_corruption())
+        if (const auto deep = destination.v3_->verify(v3::VerifyDepth::Deep);
+            deep.status != v3::RecoveryStatus::Ok || deep.has_corruption())
             return fail(report, LegacyConversionStatus::VerificationFailed);
     report.deep_verified = true;
         if (report.resumed && destination.v3_->garbage_collect(0).status != v3::RecoveryStatus::Ok)
@@ -583,8 +587,8 @@ private:
     bool cold_verify(LegacyConversionReport& report) const noexcept
     {
     Vault reopened;
-        const auto path = platform::path_to_utf8(request_.destination);
-        if (Vault::open(path, reopened) != VaultResult::Ok)
+        if (const auto path = platform::path_to_utf8(request_.destination);
+            Vault::open(path, reopened) != VaultResult::Ok)
             return fail(report, LegacyConversionStatus::VerificationFailed);
         const auto unlocked = reopened.unlock(request_.password, request_.keyfile);
         if (unlocked == VaultResult::AuthFailed)
@@ -601,17 +605,16 @@ private:
 
     bool logical_verify(Vault& reopened, LegacyConversionReport& report) const noexcept
     {
+        using enum LegacyConversionStatus;
         std::array<uint8_t, 32> key{};
-        if (!crypto::fill_random(key)) return fail(report, LegacyConversionStatus::IoError);
+        if (!crypto::fill_random(key)) return fail(report, IoError);
     const auto logical =
             verify_logical_node(source_, *reopened.v3_, source_.root_, reopened.root_, key);
         crypto_wipe(key.data(), key.size());
-    if (logical != LegacyConversionStatus::Ok ||
+        if (logical != Ok ||
             !logical_settings_equal(source_.settings_, reopened.settings_) ||
             !logical_searches_equal(source_.saved_searches_, reopened.saved_searches_))
-            return fail(report, logical == LegacyConversionStatus::Ok
-                            ? LegacyConversionStatus::VerificationFailed
-                                    : logical);
+            return fail(report, logical == Ok ? VerificationFailed : logical);
     report.logical_verified = true;
         return true;
     }

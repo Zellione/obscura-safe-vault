@@ -469,6 +469,11 @@ constexpr uint64_t FRAME_CAP_NS = 1'000'000'000ULL / 60;
 // (file dialogs, the decode worker) surface promptly even without a wake event.
 constexpr int32_t IDLE_HEARTBEAT_MS = 250;
 
+void replace_if_not_empty(std::string& destination, const std::string& candidate)
+{
+    if (!candidate.empty()) destination = candidate;
+}
+
 // Whether an event is direct user input (resets the idle-lock timer). Window
 // events, the decode-worker wake, and async dialog results deliberately don't.
 bool is_user_input(const SDL_Event& e) noexcept
@@ -1141,8 +1146,8 @@ bool App::apply_nav()
 
     // Phase 50: park lock-ish actions that occur while imports are pending.
     // These actions will be replayed after the user confirms the import abort.
-    const bool lockish = nav.kind == LockActive || nav.kind == ToUnlock || nav.kind == Quit;
-    if (lockish &&
+    if (const bool lockish = nav.kind == LockActive || nav.kind == ToUnlock || nav.kind == Quit;
+        lockish &&
         import_ui_.queue.busy() && !import_ui_.lock_confirm.open) {
         import_ui_.lock_confirm = {true, nav};
         return false;   // screen stays; event will be re-queued by dispatch_event
@@ -1150,17 +1155,17 @@ bool App::apply_nav()
 
     // Every transition below except ToggleKeepUnlocked/ToSettings/LockSecond/Quit/None destroys the
     // current screen.
-    const bool keeps_screen = nav.kind == None || nav.kind == ToggleKeepUnlocked ||
-                              nav.kind == ToSettings || nav.kind == ToVaultMaintenance ||
-                              nav.kind == LockSecond || nav.kind == Quit;
-    if (!keeps_screen) {
+    if (const bool keeps_screen = nav.kind == None || nav.kind == ToggleKeepUnlocked ||
+                                  nav.kind == ToSettings || nav.kind == ToVaultMaintenance ||
+                                  nav.kind == LockSecond || nav.kind == Quit;
+        !keeps_screen) {
         capture_session_state();
         screen_->on_exit();
     }
     switch (nav.kind) {
         case ToGallery:
             if (state_ == State::Locked) {
-                if (!nav.path.empty()) vault_state_.pending_path = nav.path;
+                replace_if_not_empty(vault_state_.pending_path, nav.path);
                 promote_pending();   // unlock/conversion-screen success
             }
             // Phase 78: viewer round-trip back to split view. If the viewer was
