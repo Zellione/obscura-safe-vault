@@ -481,6 +481,7 @@ project "osv_tests"
         "src/ui/text_input_event.cpp",
         "src/ui/unlock_logic.cpp",
         "src/ui/unlock_job.cpp",
+        "src/ui/legacy_conversion_job.cpp",
         "src/ui/widgets.cpp",
         "src/ui/strip_layout.cpp",
         "src/ui/strip_scroll.cpp",

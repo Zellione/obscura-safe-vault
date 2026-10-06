@@ -6,8 +6,8 @@
 
 A native Linux encrypted photo gallery. New vaults are `.osv` directories with
 an encrypted SQLCipher metadata database and independently encrypted immutable
-media objects. Legacy single-file vaults remain readable pending the explicit
-Phase 115 converter. Images are decrypted **into locked memory only**, never
+media objects. Legacy single-file vaults remain readable and can be copied into
+the directory format by the explicit Phase 115 converter. Images are decrypted **into locked memory only**, never
 written to a temporary file or disk. The gallery is browsable with a freely
 nestable folder tree, a zoomable full-screen image viewer, and a thumbnail
 strip navigable with arrow keys.
@@ -19,9 +19,12 @@ See [`AGENTS.md`](AGENTS.md) for all technology decisions and [`ROADMAP.md`](ROA
 ## Vault storage
 
 New Vault creates the v3 directory format. Open Vault selects a directory;
-`Shift+O` opens a legacy `.osv` file read-only. Legacy sources are never
-modified in place, including password changes, imports, metadata edits, and
-maintenance. The non-destructive legacy-to-v3 converter is Phase 115.
+`Shift+O` opens a legacy `.osv` file. After authentication, the conversion
+screen asks for a distinct destination and independent destination credentials.
+Conversion is cancellable and resumable; it never modifies or deletes the
+source. Success is shown only after deep verification, logical and plaintext
+comparison, and a cold credentialed reopen. Back up and manually test the new
+vault before deciding whether to remove the legacy file.
 
 The v3 directory contains only encrypted/authenticated material (`vault.db`,
 `vault.header`, and `objects/`). Explicit, consent-gated Export remains the sole

@@ -78,6 +78,9 @@ struct StagedThumb;
 struct StagedVideoInfo;
 struct StagedNode;
 struct NodeExtras;
+struct LegacyConversionRequest;
+struct LegacyConversionReport;
+enum class LegacyConversionStatus : uint8_t;
 // Phase 99: full definition follows the class (ChunkRef builders take IndexNode).
 struct ChunkRef;
 
@@ -222,6 +225,14 @@ public:
                                                    const std::filesystem::path&) noexcept;
     friend VaultResult maintain_directory_database(Vault&) noexcept;
     friend std::optional<uint64_t> directory_vault_database_bytes(const Vault&) noexcept;
+    friend LegacyConversionReport convert_legacy_vault(Vault&,
+                                                       const LegacyConversionRequest&) noexcept;
+    friend class LegacyConverter;
+    friend LegacyConversionStatus
+    copy_legacy_video_object(Vault&, const IndexNode&, v3::ReadSession&, const IndexNode&) noexcept;
+    friend LegacyConversionStatus digest_legacy_original(Vault&, const IndexNode&,
+                                                          std::span<const uint8_t>,
+                                                          std::span<uint8_t>) noexcept;
 
     // Phase 99: true when this vault's index blob + master-key wrap are sealed
     // with the context-bound AEAD (header FLAG_CONTEXT_BOUND_CHUNKS). A clear

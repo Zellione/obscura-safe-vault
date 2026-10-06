@@ -1,6 +1,6 @@
 # Cutover, performance, fuzzing, and security audit (Phase 114)
 
-**Status:** in progress
+**Status:** complete (owner merged PR #237)
 
 ## Delivered so far
 
@@ -25,8 +25,7 @@
   filesystem, substitution, logging, SQLCipher-memory, core-dump, durability,
   and rollback conclusions.
 
-External CI/Sonar gates and owner merge remain open; the phase acceptance
-criterion is therefore not yet met.
+External CI and Sonar gates passed, and the owner merged PR #237.
 
 ## Goal
 

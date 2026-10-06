@@ -3,8 +3,10 @@
 #include <SDL3/SDL.h>
 
 #include <filesystem>
+#include <optional>
 #include <string>
 
+#include "ui/legacy_conversion_job.h"
 #include "ui/screen.h"
 #include "ui/secure_text_input.h"
 #include "ui/unlock_job.h"
@@ -30,7 +32,11 @@ public:
 
     // Keep frames ticking while the KDF worker runs, so update() polls the
     // outcome promptly and the "Deriving key…" notice animates redraws.
-    [[nodiscard]] bool animating() const override { return job_.active(); }
+    [[nodiscard]] bool animating() const override
+    {
+        return job_.active() || conversion_job_.active();
+    }
+    [[nodiscard]] bool blocks_idle_lock() const override { return conversion_job_.active(); }
 
 private:
     struct Layout {
@@ -43,12 +49,16 @@ private:
         SDL_FRect copy_btn;         // Phase 45 Part 3: copy password to clipboard
     };
     [[nodiscard]] Layout layout() const;
+    bool handle_blocking_event(const SDL_Event& e);
+    bool handle_text_event(const SDL_Event& e);
     void handle_click(const SDL_MouseButtonEvent& b);
+    void render_credentials(gfx::Renderer& r, float width);
+    void render_status(gfx::Renderer& r, float width, float height);
     void submit();
     void apply_dialog_result(const std::string& path);
     void copy_password_to_clipboard();   // Phase 45 Part 3
 
-    enum class Pending { None, Vault, Keyfile, NewKeyfile };
+    enum class Pending { None, Vault, Destination, Keyfile, NewKeyfile };
 
     // UI references and configuration
     gfx::Window&          win_;
@@ -56,7 +66,9 @@ private:
     vault::Vault&         vault_;
     platform::FileDialog& dlg_;
     std::filesystem::path vault_path_;
+    std::filesystem::path destination_path_;
     bool                  create_mode_;
+    bool                  conversion_mode_ = false;
 
     // Password input state
     struct PasswordInput {
@@ -74,6 +86,8 @@ private:
     std::string     error_;
     Pending         pending_ = Pending::None;
     UnlockJob       job_;               // Argon2id runs off the main thread
+    LegacyConversionJob conversion_job_;
+    std::optional<vault::LegacyConversionReport> conversion_report_;
 
     // Phase 45 Part 3: clipboard state (what we last copied and timer)
     struct ClipboardState {

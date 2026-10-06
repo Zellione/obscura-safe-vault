@@ -134,6 +134,32 @@ referenced ciphertext bytes, and fixed slack; insufficient space creates nothing
 old application-owned staging names under the writer lease and reports removed/recent/suspicious
 counts without exposing filenames.
 
+Phase 115 adds `legacy_converter.*`: an unlocked read-only legacy
+vault can be copied to a distinct fresh v3 directory with new identities, keys,
+and nonces. The converter preserves the logical tree/settings/search metadata,
+authenticates each original and derived record into `SecureBytes`, deep-verifies
+the result, and cold-reopens it before reporting success. `Database` and
+`ReadSession` expose an optional encrypted `conversion_state` marker containing
+only a BLAKE2b source-header fingerprint and conversion version; it permits only
+a matching interrupted destination to resume and is dropped after successful
+verification. The source is never written. Bounded video conversion now pulls
+v3 frames while retaining at most one authenticated
+legacy chunk in `SecureBytes`; free-space preflight and `OpProgress` reporting
+are also implemented. Conversion commits every 32 completed nodes; an encrypted
+`conversion_nodes` table maps deterministic source traversal identities to fresh
+v3 node IDs, allowing pre-v13 sources with zero node IDs to resume as well. A
+resume rebuilds the same prefix and skips object roles already referenced by the
+destination DB. Before clearing the marker, a cold-reopened destination is
+compared with the source for ordered topology, user-visible metadata, settings,
+saved searches, and a fresh random-keyed BLAKE2b digest of every original;
+video hashing is bounded to one authenticated legacy chunk or v3 object frame.
+Source authentication failures log only an opaque traversal ordinal and stop
+the conversion; missing derived objects increment a warning count while original
+verification remains mandatory. Publication-fault retries either resume the
+matching encrypted marker or restart safely, and wrong resume credentials are
+reported as authentication failure. The source bytes remain unchanged on every
+tested success and failure path.
+
 ### file_util.h — position-independent size query (PR #109, durability)
 `fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
 `seek_end`. WHY: `write_header` does `seek_to(fp_,0)` then `fwrite` as two separately-locked

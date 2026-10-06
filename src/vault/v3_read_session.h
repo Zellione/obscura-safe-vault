@@ -66,11 +66,20 @@ public:
                                   crypto::SecureBytes& out) const noexcept;
     [[nodiscard]] ReadStatus read_id(const Id& node_id, ObjectRole role,
                                      crypto::SecureBytes& out) const noexcept;
+    [[nodiscard]] std::optional<uint64_t>
+    object_plaintext_length(const Id& node_id, ObjectRole role) const noexcept;
+    [[nodiscard]] ReadStatus
+    digest_object(const Id& node_id, ObjectRole role, std::span<const uint8_t> digest_key,
+                  std::span<uint8_t> digest) const noexcept;
     [[nodiscard]] ReadStatus commit_metadata(const IndexNode& root, const VaultSettings& settings,
                                              std::span<const SavedSearch> searches) noexcept;
     [[nodiscard]] ReadStatus stage_object(const Id& node_id, ObjectRole role, uint8_t media_format,
                                           std::span<const uint8_t> plaintext,
                                           ObjectInfo* info = nullptr) noexcept;
+    [[nodiscard]] ReadStatus stage_object_stream(const Id& node_id, ObjectRole role,
+                                                 uint8_t media_format, uint64_t plaintext_length,
+                                                 const ObjectReadFn& read,
+                                                 ObjectInfo* info = nullptr) noexcept;
     [[nodiscard]] ReadStatus change_password(std::span<const uint8_t> old_password,
                                              std::span<const uint8_t> old_keyfile,
                                              std::span<const uint8_t> new_password,
@@ -80,6 +89,12 @@ public:
     [[nodiscard]] BackupResult backup(const std::filesystem::path& destination) const noexcept;
     [[nodiscard]] DbStatus maintain_database_storage() noexcept;
     [[nodiscard]] std::optional<uint64_t> database_bytes() const noexcept;
+    [[nodiscard]] DbStatus begin_conversion(const ConversionMarker& marker) noexcept;
+    [[nodiscard]] DbResult<std::optional<ConversionMarker>> conversion_marker() const noexcept;
+    [[nodiscard]] DbResult<std::optional<Id>>
+    conversion_node_id(const Id& source_node_id) const noexcept;
+    [[nodiscard]] DbStatus record_conversion_node(const ConversionNode& node) noexcept;
+    [[nodiscard]] DbStatus finish_conversion() noexcept;
 
 private:
     friend class ::media::VideoSource;

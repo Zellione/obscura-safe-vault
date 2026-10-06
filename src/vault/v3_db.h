@@ -84,6 +84,16 @@ struct SavedSearchRecord {
     crypto::SecureBlob query;
 };
 
+struct ConversionMarker {
+    std::array<uint8_t, 32> source_fingerprint{};
+    uint32_t conversion_version = 0;
+};
+
+struct ConversionNode {
+    Id source_node_id{};
+    Id destination_node_id{};
+};
+
 struct TagCategoryRecord {
     int64_t category_id = 0;
     crypto::SecureString display_name;
@@ -189,6 +199,12 @@ public:
     sync_metadata(const IndexNode& root, const VaultSettings& settings,
                   std::span<const SavedSearch> searches,
                   std::span<const ObjectRecord> staged_objects = {}) noexcept;
+    [[nodiscard]] DbStatus begin_conversion(const ConversionMarker& marker) noexcept;
+    [[nodiscard]] DbResult<std::optional<ConversionMarker>> conversion_marker() const noexcept;
+    [[nodiscard]] DbResult<std::optional<Id>>
+    conversion_node_id(const Id& source_node_id) const noexcept;
+    [[nodiscard]] DbStatus record_conversion_node(const ConversionNode& node) noexcept;
+    [[nodiscard]] DbStatus finish_conversion() noexcept;
 
 private:
     friend bool database_healthy(const Database&) noexcept;

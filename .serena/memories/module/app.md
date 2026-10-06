@@ -23,7 +23,13 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   vault; `Shift+O` retains the legacy file picker. `N` creates v3 through
   `UnlockJob::start_create`. The existing pending/active unlock flow accepts either shape through
   `Vault::open`. Opened legacy files are visibly read-only, every mutation facade rejects them,
-  and automatic migration is skipped; Phase 115 will convert without modifying the source.
+  and automatic migration is skipped.
+- **Phase 115 conversion:** after a successful legacy unlock, `UnlockScreen` stays in place and
+  collects a distinct destination plus independent password/keyfile policy. A background
+  `LegacyConversionJob` owns copied credentials and the source handle remains read-only. Only a
+  verified, cold-reopened v3 result emits `ToGallery`; `App::apply_nav` replaces `pending_path`
+  with that destination before promotion, so registry/active-path state can never retain the
+  legacy source. Cancel/shutdown joins the worker and no flow deletes the source.
 - **Phase 50:** App owns `ui::ImportQueue queue_` (declared after vaults for destruction order, so queue drains before vault wipes key).
   `App::update(dt)` drains queue each frame: `queue_.drain(dt)` attaches staged nodes + triggers `on_vault_changed()` broadcast
   on all active screens (GalleryGrid, ImageViewer, FavoritesScreen, AdvancedSearchScreen refetch cached IndexNode* refs).
