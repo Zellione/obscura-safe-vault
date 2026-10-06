@@ -6,6 +6,7 @@
 #include <chrono>
 #include <functional>
 #include <string>
+#include <string_view>
 
 #include "app/auto_lock.h"
 #include "app/back_click.h"
@@ -469,7 +470,7 @@ constexpr uint64_t FRAME_CAP_NS = 1'000'000'000ULL / 60;
 // (file dialogs, the decode worker) surface promptly even without a wake event.
 constexpr int32_t IDLE_HEARTBEAT_MS = 250;
 
-void replace_if_not_empty(std::string& destination, const std::string& candidate)
+void replace_if_not_empty(std::string& destination, std::string_view candidate)
 {
     if (!candidate.empty()) destination = candidate;
 }
