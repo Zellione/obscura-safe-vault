@@ -328,6 +328,17 @@ ReadStatus ReadSession::read_id(const Id& node_id, ObjectRole role,
     return ReadStatus::BadFormat;
 }
 
+std::optional<uint64_t>
+ReadSession::object_plaintext_length(const Id& node_id, ObjectRole role) const noexcept
+{
+    const std::lock_guard lock(state_mutex_);
+    const auto found = std::ranges::find_if(objects_, [&](const ObjectRecord& object) {
+        return object.node_id == node_id && object.role == role;
+    });
+    return found == objects_.end() ? std::nullopt
+                                   : std::optional<uint64_t>{found->plaintext_length};
+}
+
 VerificationReport ReadSession::verify(VerifyDepth depth) const noexcept
 {
     const std::lock_guard lock(state_mutex_);
@@ -394,6 +405,21 @@ DbResult<std::optional<ConversionMarker>> ReadSession::conversion_marker() const
     const std::lock_guard lock(state_mutex_);
     if (!unlocked_ || !database_) return {DbStatus::InvalidArgument, std::nullopt};
     return database_->conversion_marker();
+}
+
+DbResult<std::optional<Id>>
+ReadSession::conversion_node_id(const Id& source_node_id) const noexcept
+{
+    const std::lock_guard lock(state_mutex_);
+    if (!unlocked_ || !database_) return {DbStatus::InvalidArgument, std::nullopt};
+    return database_->conversion_node_id(source_node_id);
+}
+
+DbStatus ReadSession::record_conversion_node(const ConversionNode& node) noexcept
+{
+    const std::lock_guard lock(state_mutex_);
+    if (!unlocked_ || !database_ || !session_lock_) return DbStatus::InvalidArgument;
+    return database_->record_conversion_node(node);
 }
 
 DbStatus ReadSession::finish_conversion() noexcept

@@ -145,7 +145,11 @@ a matching interrupted destination to resume and is dropped after successful
 verification. The source is never written. Bounded video conversion now pulls
 v3 frames while retaining at most one authenticated
 legacy chunk in `SecureBytes`; free-space preflight and `OpProgress` reporting
-are also implemented. Committed batch resume and the UI workflow remain before
+are also implemented. Conversion commits every 32 completed nodes; an encrypted
+`conversion_nodes` table maps deterministic source traversal identities to fresh
+v3 node IDs, allowing pre-v13 sources with zero node IDs to resume as well. A
+resume rebuilds the same prefix and skips object roles already referenced by the
+destination DB. The UI workflow remains before
 Phase 115 is complete.
 
 ### file_util.h — position-independent size query (PR #109, durability)

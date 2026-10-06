@@ -66,6 +66,8 @@ public:
                                   crypto::SecureBytes& out) const noexcept;
     [[nodiscard]] ReadStatus read_id(const Id& node_id, ObjectRole role,
                                      crypto::SecureBytes& out) const noexcept;
+    [[nodiscard]] std::optional<uint64_t>
+    object_plaintext_length(const Id& node_id, ObjectRole role) const noexcept;
     [[nodiscard]] ReadStatus commit_metadata(const IndexNode& root, const VaultSettings& settings,
                                              std::span<const SavedSearch> searches) noexcept;
     [[nodiscard]] ReadStatus stage_object(const Id& node_id, ObjectRole role, uint8_t media_format,
@@ -86,6 +88,9 @@ public:
     [[nodiscard]] std::optional<uint64_t> database_bytes() const noexcept;
     [[nodiscard]] DbStatus begin_conversion(const ConversionMarker& marker) noexcept;
     [[nodiscard]] DbResult<std::optional<ConversionMarker>> conversion_marker() const noexcept;
+    [[nodiscard]] DbResult<std::optional<Id>>
+    conversion_node_id(const Id& source_node_id) const noexcept;
+    [[nodiscard]] DbStatus record_conversion_node(const ConversionNode& node) noexcept;
     [[nodiscard]] DbStatus finish_conversion() noexcept;
 
 private:

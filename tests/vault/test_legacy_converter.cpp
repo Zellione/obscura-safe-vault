@@ -210,3 +210,46 @@ TEST(legacy_converter_streams_multichunk_video_exactly)
     REQUIRE(destination.read_video(*node, copied) == vault::VaultResult::Ok);
     CHECK(std::ranges::equal(copied.as_span(), video));
 }
+
+TEST(legacy_converter_persists_stable_node_mapping_for_resume)
+{
+    TempDir temp;
+    const auto source_path = temp.path / "source.osv";
+    const auto destination_path = temp.path / "converted.osv";
+    vault::Vault writer;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(source_path), SOURCE_PASSWORD, {}, TEST_KDF,
+                                 writer) == vault::VaultResult::Ok);
+    REQUIRE(vault::ensure_gallery_path(writer, "one/two") == vault::VaultResult::Ok);
+    writer.lock();
+
+    vault::Vault source;
+    REQUIRE(vault::Vault::open(platform::path_to_utf8(source_path), source) ==
+            vault::VaultResult::Ok);
+    REQUIRE(source.unlock(SOURCE_PASSWORD, {}) == vault::VaultResult::Ok);
+    std::atomic_bool stop{true};
+    const vault::LegacyConversionRequest request{destination_path, DEST_PASSWORD, {}, TEST_KDF,
+                                                  &stop};
+    REQUIRE(vault::convert_legacy_vault(source, request).status ==
+            vault::LegacyConversionStatus::Cancelled);
+
+    vault::Vault partial;
+    REQUIRE(vault::Vault::open(platform::path_to_utf8(destination_path), partial) ==
+            vault::VaultResult::Ok);
+    REQUIRE(partial.unlock(DEST_PASSWORD, {}) == vault::VaultResult::Ok);
+    const auto* partial_root = partial.resolve_node("");
+    REQUIRE(partial_root != nullptr);
+    const auto first = partial_root->node_id;
+    partial.lock();
+
+    stop = false;
+    const auto resumed = vault::convert_legacy_vault(source, request);
+    REQUIRE(resumed.status == vault::LegacyConversionStatus::Ok);
+    REQUIRE(resumed.resumed);
+    vault::Vault complete;
+    REQUIRE(vault::Vault::open(platform::path_to_utf8(destination_path), complete) ==
+            vault::VaultResult::Ok);
+    REQUIRE(complete.unlock(DEST_PASSWORD, {}) == vault::VaultResult::Ok);
+    const auto* complete_root = complete.resolve_node("");
+    REQUIRE(complete_root != nullptr);
+    CHECK(complete_root->node_id == first);
+}

@@ -1504,6 +1504,15 @@ DbStatus Database::begin_conversion(const ConversionMarker& marker) noexcept
         exec(handle_, "ROLLBACK");
         return map_status(sqlite3_extended_errcode(handle_));
     }
+    constexpr std::string_view create_nodes =
+        "CREATE TABLE IF NOT EXISTS conversion_nodes("
+        "source_node_id BLOB PRIMARY KEY CHECK(length(source_node_id)=16),"
+        "destination_node_id BLOB NOT NULL UNIQUE CHECK(length(destination_node_id)=16)) "
+        "WITHOUT ROWID";
+    if (exec(handle_, create_nodes) != Ok) {
+        exec(handle_, "ROLLBACK");
+        return map_status(sqlite3_extended_errcode(handle_));
+    }
     Statement insert{
         handle_, "INSERT INTO conversion_state(singleton,source_fingerprint,conversion_version) "
                  "VALUES(1,?,?)"};
@@ -1543,9 +1552,51 @@ DbResult<std::optional<ConversionMarker>> Database::conversion_marker() const no
     return {Ok, marker};
 }
 
+DbResult<std::optional<Id>>
+Database::conversion_node_id(const Id& source_node_id) const noexcept
+{
+    if (!handle_ || !id_valid(source_node_id)) return {InvalidArgument, std::nullopt};
+    Statement select{handle_, "SELECT destination_node_id FROM conversion_nodes WHERE "
+                              "source_node_id=?"};
+    if (!select.get()) return {map_status(sqlite3_extended_errcode(handle_)), std::nullopt};
+    bind_id(select.get(), 1, source_node_id);
+    const int step = sqlite3_step(select.get());
+    if (step == SQLITE_DONE) return {Ok, std::nullopt};
+    if (step != SQLITE_ROW || sqlite3_column_bytes(select.get(), 0) != 16)
+        return {WrongKeyOrCorrupt, std::nullopt};
+    Id result{};
+    const auto* bytes = static_cast<const uint8_t*>(sqlite3_column_blob(select.get(), 0));
+    if (!bytes) return {WrongKeyOrCorrupt, std::nullopt};
+    std::copy_n(bytes, result.size(), result.begin());
+    return id_valid(result) ? DbResult<std::optional<Id>>{Ok, result}
+                            : DbResult<std::optional<Id>>{WrongKeyOrCorrupt, std::nullopt};
+}
+
+DbStatus Database::record_conversion_node(const ConversionNode& node) noexcept
+{
+    if (!handle_ || !id_valid(node.source_node_id) || !id_valid(node.destination_node_id))
+        return InvalidArgument;
+    Statement insert{handle_, "INSERT INTO conversion_nodes(source_node_id,destination_node_id) "
+                              "VALUES(?,?) ON CONFLICT(source_node_id) DO UPDATE SET "
+                              "destination_node_id=excluded.destination_node_id WHERE "
+                              "destination_node_id=excluded.destination_node_id"};
+    if (!insert.get()) return map_status(sqlite3_extended_errcode(handle_));
+    bind_id(insert.get(), 1, node.source_node_id);
+    bind_id(insert.get(), 2, node.destination_node_id);
+    return map_status(sqlite3_step(insert.get()));
+}
+
 DbStatus Database::finish_conversion() noexcept
 {
-    return exec(handle_, "DROP TABLE IF EXISTS conversion_state");
+    if (exec(handle_, "BEGIN IMMEDIATE") != Ok)
+        return map_status(sqlite3_extended_errcode(handle_));
+    if (exec(handle_, "DROP TABLE IF EXISTS conversion_nodes") != Ok ||
+        exec(handle_, "DROP TABLE IF EXISTS conversion_state") != Ok ||
+        exec(handle_, "COMMIT") != Ok) {
+        (void)exec(handle_, "ROLLBACK");
+        return map_status(sqlite3_extended_errcode(handle_));
+    }
+    return Ok;
 }
 
 }  // namespace vault::v3

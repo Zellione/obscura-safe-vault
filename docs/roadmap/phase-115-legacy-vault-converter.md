@@ -21,7 +21,11 @@
   most one authenticated legacy chunk in locked memory. A conservative free-
   space preflight and thread-safe item progress/cancellation counters are also
   in place.
-- Remaining work: committed batches, UI/credential flow, logical digest
+- Conversion now commits deterministic 32-node prefixes. The encrypted
+  conversion tables retain a stable traversal-identity to fresh v3 node-ID
+  mapping (including pre-v13 sources that have no node IDs), so resume reuses
+  committed object references and recopies only the uncommitted tail.
+- Remaining work: UI/credential flow, logical digest
   comparison, full legacy-fixture and crash/fault coverage, documentation and
   release gates.
 

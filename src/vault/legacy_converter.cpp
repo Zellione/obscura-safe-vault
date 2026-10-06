@@ -147,7 +147,62 @@ struct CopyContext {
     v3::ReadSession& destination;
     const LegacyConversionRequest& request;
     LegacyConversionReport& report;
+    const VaultSettings& settings;
+    const std::vector<SavedSearch>& saved_searches;
+    IndexNode* root = nullptr;
+    size_t since_commit = 0;
+    uint64_t source_ordinal = 0;
 };
+
+v3::Id conversion_source_key(uint64_t ordinal) noexcept
+{
+    // Pre-v13 legacy indexes have no persistent node IDs. A parent-first DFS
+    // ordinal is stable for the immutable read-only source and therefore also
+    // covers every older index generation without treating an all-zero ID as
+    // a shared identity.
+    v3::Id result{'O', 'S', 'V', 'C', 'O', 'N', 'V', 1};
+    for (size_t i = 0; i < sizeof(ordinal); ++i)
+        result[8 + i] = static_cast<uint8_t>(ordinal >> (i * 8));
+    return result;
+}
+
+LegacyConversionStatus mapped_node_id(CopyContext& context, uint64_t source_ordinal,
+                                      IndexNode& destination, const v3::Id* root_id) noexcept
+{
+    const auto source_key = conversion_source_key(source_ordinal);
+    const auto mapped = context.destination.conversion_node_id(source_key);
+    if (mapped.status != v3::DbStatus::Ok) return LegacyConversionStatus::IoError;
+    if (mapped.value) {
+        destination.node_id = *mapped.value;
+        return LegacyConversionStatus::Ok;
+    }
+    destination.node_id = root_id ? *root_id : v3::Id{};
+    if (!root_id && !crypto::fill_random(destination.node_id))
+        return LegacyConversionStatus::IoError;
+    if (context.destination.record_conversion_node({source_key, destination.node_id}) !=
+        v3::DbStatus::Ok)
+        return LegacyConversionStatus::IoError;
+    return LegacyConversionStatus::Ok;
+}
+
+LegacyConversionStatus commit_batch(CopyContext& context) noexcept
+{
+    if (!context.root || context.since_commit == 0) return LegacyConversionStatus::Ok;
+    if (context.destination.commit_metadata(*context.root, context.settings,
+                                            context.saved_searches) != v3::ReadStatus::Ok)
+        return LegacyConversionStatus::IoError;
+    context.since_commit = 0;
+    return LegacyConversionStatus::Ok;
+}
+
+LegacyConversionStatus count_and_maybe_commit(CopyContext& context) noexcept
+{
+    if (context.request.progress) ++context.request.progress->done;
+    ++context.since_commit;
+    constexpr size_t BATCH_NODES = 32;
+    return context.since_commit >= BATCH_NODES ? commit_batch(context)
+                                               : LegacyConversionStatus::Ok;
+}
 
 LegacyConversionStatus stage_media(CopyContext& context, const IndexNode& source,
                                    IndexNode& destination) noexcept
@@ -155,7 +210,12 @@ LegacyConversionStatus stage_media(CopyContext& context, const IndexNode& source
     if (cancelled(context.request)) return LegacyConversionStatus::Cancelled;
     const uint8_t format = source.is_image() ? std::to_underlying(source.meta.format)
                                              : std::to_underlying(source.vmeta.container);
-    if (source.is_video()) {
+    const auto original_role = source.is_video() ? v3::ObjectRole::OriginalVideo
+                                                  : v3::ObjectRole::OriginalImage;
+    if (context.destination.object_plaintext_length(destination.node_id, original_role)) {
+        context.report.original_bytes +=
+            source.is_video() ? source.vmeta.orig_size : source.meta.orig_size;
+    } else if (source.is_video()) {
         const auto status =
             copy_legacy_video_object(context.source, source, context.destination, destination);
         if (status != LegacyConversionStatus::Ok) return status;
@@ -178,6 +238,11 @@ LegacyConversionStatus stage_media(CopyContext& context, const IndexNode& source
         return LegacyConversionStatus::SourceCorrupt;
     const auto derived_role =
         source.is_image() ? v3::ObjectRole::Thumbnail : v3::ObjectRole::Poster;
+    if (const auto existing =
+            context.destination.object_plaintext_length(destination.node_id, derived_role)) {
+        context.report.derived_bytes += *existing;
+        return LegacyConversionStatus::Ok;
+    }
     if (context.destination.stage_object(destination.node_id, derived_role, format,
                                          derived.as_span()) != v3::ReadStatus::Ok)
         return LegacyConversionStatus::IoError;
@@ -189,13 +254,15 @@ LegacyConversionStatus copy_node(CopyContext& context, const IndexNode& source,
                                  IndexNode& destination, const v3::Id* root_id = nullptr) noexcept
 {
     if (cancelled(context.request)) return LegacyConversionStatus::Cancelled;
+    const uint64_t source_ordinal = ++context.source_ordinal;
     try {
         destination = clone_metadata(source, root_id);
     } catch (...) {
         return LegacyConversionStatus::IoError;
     }
-    if (std::ranges::all_of(destination.node_id, [](uint8_t byte) { return byte == 0; }))
-        return LegacyConversionStatus::IoError;
+    if (const auto status = mapped_node_id(context, source_ordinal, destination, root_id);
+        status != LegacyConversionStatus::Ok)
+        return status;
 
     if (source.is_gallery()) {
         ++context.report.galleries;
@@ -209,8 +276,7 @@ LegacyConversionStatus copy_node(CopyContext& context, const IndexNode& source,
         } catch (...) {
             return LegacyConversionStatus::IoError;
         }
-        if (context.request.progress) ++context.request.progress->done;
-        return LegacyConversionStatus::Ok;
+        return count_and_maybe_commit(context);
     }
 
     if (source.is_image())
@@ -218,9 +284,7 @@ LegacyConversionStatus copy_node(CopyContext& context, const IndexNode& source,
     else
         ++context.report.videos;
     const auto status = stage_media(context, source, destination);
-    if (status == LegacyConversionStatus::Ok && context.request.progress)
-        ++context.request.progress->done;
-    return status;
+    return status == LegacyConversionStatus::Ok ? count_and_maybe_commit(context) : status;
 }
 
 }  // namespace
@@ -338,15 +402,15 @@ LegacyConversionReport convert_legacy_vault(Vault& source,
 
     IndexNode converted_root;
     const v3::Id root_id = destination.root_.node_id;
-    CopyContext context{source, *destination.v3_, request, report};
+    CopyContext context{source,          *destination.v3_, request, report,
+                        source.settings_, source.saved_searches_, &converted_root};
     if (const auto status = copy_node(context, source.root_, converted_root, &root_id);
         status != LegacyConversionStatus::Ok) {
         report.status = status;
         return report;
     }
-    if (destination.v3_->commit_metadata(converted_root, source.settings_,
-                                         source.saved_searches_) != v3::ReadStatus::Ok) {
-        report.status = LegacyConversionStatus::IoError;
+    if (const auto status = commit_batch(context); status != LegacyConversionStatus::Ok) {
+        report.status = status;
         return report;
     }
     destination.root_ = converted_root;
