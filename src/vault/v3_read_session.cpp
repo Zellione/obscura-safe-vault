@@ -169,8 +169,8 @@ ReadStatus ReadSession::unlock(std::span<const uint8_t> password, std::span<cons
     if (unlocked_) return ReadStatus::Ok;
     session_lock_ = root_handle_.try_writer_lock();
     if (!session_lock_) return ReadStatus::Busy;
-    std::array<uint8_t, V3_HEADER_SIZE> raw{};
-    if (!root_handle_.read_header(raw) || parse_v3_header(raw, header_) != HeaderStatus::Ok) {
+    if (std::array<uint8_t, V3_HEADER_SIZE> raw{};
+        !root_handle_.read_header(raw) || parse_v3_header(raw, header_) != HeaderStatus::Ok) {
         session_lock_.reset();
         return ReadStatus::BadFormat;
     }
@@ -259,7 +259,7 @@ void ReadSession::rebuild_object_index()
 {
     std::map<Id, IndexNode*> nodes;
     std::function<void(IndexNode&)> gather = [&](IndexNode& node) {
-        nodes.emplace(node.node_id, &node);
+        nodes.try_emplace(node.node_id, &node);
         for (auto& child : node.children)
             gather(child);
     };
@@ -271,11 +271,11 @@ void ReadSession::rebuild_object_index()
         auto& node = *found->second;
         const auto format = node.is_image() ? std::to_underlying(node.meta.format)
                                             : std::to_underlying(node.vmeta.container);
-        object_index_.emplace(std::pair{object.node_id, object.role},
-                              ObjectInfo{object.object_id, header_.vault_id, object.node_id,
-                                         object.role, format, object.plaintext_length,
-                                         object.encrypted_length, object.frame_plain_limit,
-                                         object.frame_count});
+        object_index_.try_emplace(std::pair{object.node_id, object.role},
+                                  ObjectInfo{object.object_id, header_.vault_id, object.node_id,
+                                             object.role, format, object.plaintext_length,
+                                             object.encrypted_length, object.frame_plain_limit,
+                                             object.frame_count});
         using enum ObjectRole;
         if (node.is_image() && object.role == Thumbnail) {
             node.meta.thumb_offset = object_cache_identity(object.object_id, 2);
@@ -296,9 +296,9 @@ void ReadSession::rebuild_object_index()
     // Imports can have published objects whose nodes have not yet reached the
     // main thread. Retain them until a snapshot actually attaches their owner.
     std::erase_if(staged_objects_,
-                  [&](const auto& object) { return nodes.contains(object.node_id); });
+                  [&nodes](const auto& object) { return nodes.contains(object.node_id); });
     std::erase_if(staged_index_,
-                  [&](const auto& entry) { return nodes.contains(entry.first.first); });
+                  [&nodes](const auto& entry) { return nodes.contains(entry.first.first); });
 }
 
 std::optional<ObjectInfo> ReadSession::object_for(const Id& node_id, ObjectRole role) const noexcept
@@ -558,8 +558,8 @@ ReadStatus ReadSession::change_password(std::span<const uint8_t> old_password,
         temporary_lock = root_handle_.try_writer_lock();
         if (!temporary_lock) return ReadStatus::Busy;
     }
-    std::array<uint8_t, V3_HEADER_SIZE> current{};
-    if (!root_handle_.read_header(current) || parse_v3_header(current, header_) != HeaderStatus::Ok)
+    if (std::array<uint8_t, V3_HEADER_SIZE> current{};
+        !root_handle_.read_header(current) || parse_v3_header(current, header_) != HeaderStatus::Ok)
         return ReadStatus::BadFormat;
     crypto::SecureBuffer<crypto::KEY_SIZE> verified;
     const auto checked = unwrap_v3_master_key(header_, old_password, old_keyfile, verified);

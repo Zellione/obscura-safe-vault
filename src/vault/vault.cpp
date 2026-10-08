@@ -950,8 +950,8 @@ VaultResult Vault::unlock_directory(std::span<const uint8_t> password,
     using enum VaultResult;
         switch (v3_->unlock(password, keyfile)) {
         case v3::ReadStatus::Ok: {
-            const auto marker = v3_->conversion_marker();
-            if (marker.status != v3::DbStatus::Ok || (marker.value && !conversion)) {
+            if (const auto marker = v3_->conversion_marker();
+                marker.status != v3::DbStatus::Ok || (marker.value && !conversion)) {
                 v3_->lock();
                 return marker.status == v3::DbStatus::Ok ? IncompleteConversion : BadFormat;
             }

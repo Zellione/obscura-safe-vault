@@ -217,6 +217,29 @@ LegacyConversionStatus count_and_maybe_commit(CopyContext& context) noexcept
     return context.since_commit >= BATCH_NODES ? commit_batch(context) : LegacyConversionStatus::Ok;
 }
 
+LegacyConversionStatus stage_image_original(CopyContext& context, const IndexNode& source,
+                                            const IndexNode& destination, uint8_t format) noexcept
+{
+    crypto::SecureBytes original;
+    if (context.source.read_image(source, original) != VaultResult::Ok)
+        return LegacyConversionStatus::SourceCorrupt;
+    if (const auto read =
+            [&context, &original](uint64_t offset, std::span<uint8_t> output) {
+                if (cancelled(context.request)) return false;
+                std::ranges::copy(
+                    original.as_span().subspan(static_cast<size_t>(offset), output.size()),
+                    output.begin());
+                return true;
+            };
+        context.destination.stage_object_stream(destination.node_id, v3::ObjectRole::OriginalImage,
+                                                format, original.size(),
+                                                read) != v3::ReadStatus::Ok)
+        return cancelled(context.request) ? LegacyConversionStatus::Cancelled
+                                          : LegacyConversionStatus::IoError;
+    context.report.original_bytes += original.size();
+    return LegacyConversionStatus::Ok;
+}
+
 LegacyConversionStatus stage_media(CopyContext& context, const IndexNode& source,
                                    const IndexNode& destination) noexcept
 {
@@ -237,22 +260,9 @@ LegacyConversionStatus stage_media(CopyContext& context, const IndexNode& source
             return status;
         context.report.original_bytes += source.vmeta.orig_size;
     } else {
-        crypto::SecureBytes original;
-        if (context.source.read_image(source, original) != VaultResult::Ok)
-            return LegacyConversionStatus::SourceCorrupt;
-        const auto read = [&](uint64_t offset, std::span<uint8_t> output) {
-            if (cancelled(context.request)) return false;
-            std::ranges::copy(
-                original.as_span().subspan(static_cast<size_t>(offset), output.size()),
-                output.begin());
-            return true;
-        };
-        if (context.destination.stage_object_stream(destination.node_id,
-                                                    v3::ObjectRole::OriginalImage, format,
-                                                    original.size(), read) != v3::ReadStatus::Ok)
-            return cancelled(context.request) ? LegacyConversionStatus::Cancelled
-                                              : LegacyConversionStatus::IoError;
-        context.report.original_bytes += original.size();
+        if (const auto status = stage_image_original(context, source, destination, format);
+            status != LegacyConversionStatus::Ok)
+            return status;
     }
 
     if (const bool has_derived =

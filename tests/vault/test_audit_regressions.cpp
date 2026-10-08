@@ -425,3 +425,44 @@ TEST(audit_conversion_cancel_during_video_copy_and_final_verification)
         }
     }
 }
+
+#ifdef OSV_VENDORED_AV
+TEST(audit_directory_video_migration_reads_all_original_frames)
+{
+    Fixture f;
+    vault::Vault v;
+    REQUIRE(vault::Vault::create_directory((f.path / "new.osv").string(), password, {}, kdf, v) ==
+            vault::VaultResult::Ok);
+    std::ifstream input(std::filesystem::path(OSV_VAULT_FIXTURE_DIR) / "tiny.mp4",
+                        std::ios::binary);
+    std::vector<uint8_t> bytes{std::istreambuf_iterator<char>{input}, {}};
+    REQUIRE(!bytes.empty());
+    // MP4 permits trailing bytes; exercise the multi-frame join with a real decoder fixture.
+    bytes.resize(vault::VIDEO_CHUNK_SIZE + 17, 0);
+    vault::StagedVideoInfo metadata;
+    metadata.container = vault::VideoContainer::MP4;
+    REQUIRE(vault::add_video_prestaged(v, "", bytes, "movie.mp4", metadata, 0) ==
+            vault::VaultResult::Ok);
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+    std::optional<ui::MigrationOutcome> result;
+    while (!(result = job.take_outcome()))
+        std::this_thread::yield();
+    CHECK(result->ok);
+    CHECK(result->failed == 0);
+    CHECK(result->videos_fixed == 1);
+    v.lock();
+    REQUIRE(v.unlock(password, {}) == vault::VaultResult::Ok);
+    const auto* node = v.resolve_node("movie.mp4");
+    REQUIRE(node);
+    CHECK(node->vmeta.poster_length != 0);
+    crypto::SecureBytes original;
+    crypto::SecureBytes frame;
+    for (size_t i = 0; i < node->vmeta.chunks.size(); ++i) {
+        REQUIRE(vault::read_thumb_span(v, vault::video_chunk_ref(*node, i), frame) ==
+                vault::VaultResult::Ok);
+        REQUIRE(original.append(frame.as_span()));
+    }
+    CHECK(std::ranges::equal(original.as_span(), bytes));
+}
+#endif

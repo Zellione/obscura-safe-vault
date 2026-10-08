@@ -25,18 +25,22 @@ Branch: `fix/audit-110-115`. Original findings below retain the audited baseline
 
 ### Current validation
 
-- `scripts/test.sh`: **2391 tests, 0 failed**.
-- Focused audit regressions: **18 tests, 0 failed**.
+- `scripts/test.sh`: **2392 tests, 0 failed**.
+- Focused audit regressions: **19 tests**, included in the passing full suite.
 - `serena memories check`: no referential integrity issues.
-- `scripts/test.sh --release`: **2390 tests, 0 failed**.
+- `scripts/test.sh --release`: **2392 tests, 0 failed**.
 - Release facade benchmark: 50,000 media / 100,000 objects; batched import
   **111.4 s**, cold unlock **1.413 s**, 2,000 thumbnail reads **10.7 ms**.
-- `scripts/test.sh --asan`: **2391 tests, 0 failed**, exit 0, no sanitizer findings
+- `scripts/test.sh --asan`: **2392 tests, 0 failed**, exit 0, no sanitizer findings
   (unrestricted run for LeakSanitizer thread inspection).
 - No-FFmpeg Debug: **2196 tests, 0 failed**; standard build files restored.
-- Final cancellation-token/secure rebuild-buffer sanitizer run: **2391 tests, 0 failed**, exit 0.
-- Actual migration-job regressions: **22 tests, 0 failed**.
-- Final Release/no-AV recheck and CI/SonarCloud: pending.
+- Actual migration-job regressions: **22 tests, 0 failed**; additional real-video
+  migration regression passes in Release, Debug and ASAN with multiple original frames.
+- Final Release/no-AV rechecks passed with **2392 / 2196 tests, 0 failed**.
+- CI and SonarCloud: [PR #239](https://github.com/Zellione/obscura-safe-vault/pull/239), initial CI passed; SonarCloud reported 10 maintainability findings.
+  Applied explicit captures, narrower variable scopes, map insertion cleanup and
+  extracted image staging. Post-cleanup Debug and ASAN: **2392 tests, 0 failed**
+  each; clean CI/SonarCloud re-scan pending.
 - Scale results above use synthetic small objects on this machine. They do not
   establish the former 250k-media responsiveness claim; the opt-in production
   benchmark now supports that measurement rather than substituting SQL timings.
