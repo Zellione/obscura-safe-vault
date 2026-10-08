@@ -121,11 +121,11 @@ bool App::init()
     // Phase 85: seed the auto-play-videos toggle from the persisted preference.
     media::set_saved_autoplay_enabled(platform::AutoplayPref::default_location().load());
 
-    // Phase 102: seed the two VAAPI runtime overrides from the persisted pref.
+    // Map legacy preferences to the single video decoding choice.
     {
         const auto s = platform::HwAccelPref::default_location().load();
-        media::set_enable_hardware_decode(s.enable_hardware);
-        media::set_force_software_decode(s.force_software);
+        media::set_enable_hardware_decode(s.hardware_selected());
+        media::set_force_software_decode(false);
     }
 
     // Phase 92: seed the clipboard gate from the persisted preference.
@@ -501,7 +501,7 @@ void draw_keep_unlocked_badge(gfx::Renderer& r, gfx::FontAtlas& font, int win_w,
 }
 
 // Phase 102: brief centered top-of-screen toast that fires when the user
-// toggles a hwaccel runtime override (Ctrl+Shift+H, Ctrl+Shift+F, or F2
+// toggles a video decoding choice (Ctrl+Shift+H, or F2
 // Playback cycle). Renders only while hwaccel_toast_elapsed_ is below
 // HWACCEL_TOAST_SECS. Same visual language as the keep_unlocked badge
 // (rounded surface with a coloured outline, padded text) but anchored
@@ -734,44 +734,20 @@ struct App::OverlayDispatch {
         return true;
     }
 
-    // Phase 102: Ctrl+Shift+H toggles hardware decode; Ctrl+Shift+F toggles
-    // force-software. Both are global (work whether or not a clip is
-    // currently playing) but only when neither the help popup nor the
-    // settings overlay nor any modal is open — see
-    // dispatch_overlay_event() ordering. The toggles take effect on the
-    // NEXT clip opened (VideoDecodeWorker re-reads both for_attach_hwaccel()
-    // on construction; the current playback is unaffected). Live-saved via
-    // HwAccelPref so a fresh launch picks up the user's choice, and a
-    // brief on-screen toast confirms the keystroke landed. Phase 104:
-    // extracted from settings() for the same cognitive-complexity reason.
+    // One persisted choice, applied when the next clip opens.
     static bool try_hwaccel_hotkey(App& app, const SDL_Event& e)
     {
-        if (e.type != SDL_EVENT_KEY_DOWN) return false;
+        if (e.type != SDL_EVENT_KEY_DOWN || e.key.repeat) return false;
         if ((e.key.mod & SDL_KMOD_CTRL) == 0 || (e.key.mod & SDL_KMOD_SHIFT) == 0) return false;
-        const SDL_Keycode k = e.key.key;
-        if (k == SDLK_H) {
-            media::set_enable_hardware_decode(!media::enable_hardware_decode());
-            app.hwaccel_toast_.text = std::format("Hardware decode: {}",
-                media::enable_hardware_decode() ? "ON" : "OFF");
-            app.hwaccel_toast_.elapsed = 0.0;
-            (void)platform::HwAccelPref::default_location().save({
-                media::enable_hardware_decode(),
-                media::force_software_decode(),
-            });
-            return true;
-        }
-        if (k == SDLK_F) {
-            media::set_force_software_decode(!media::force_software_decode());
-            app.hwaccel_toast_.text = std::format("Force software decode: {}",
-                media::force_software_decode() ? "ON" : "OFF");
-            app.hwaccel_toast_.elapsed = 0.0;
-            (void)platform::HwAccelPref::default_location().save({
-                media::enable_hardware_decode(),
-                media::force_software_decode(),
-            });
-            return true;
-        }
-        return false;
+        if (e.key.key != SDLK_H) return false;
+        const bool hardware = !(media::enable_hardware_decode() && !media::force_software_decode());
+        media::set_enable_hardware_decode(hardware);
+        media::set_force_software_decode(false);
+        app.hwaccel_toast_.text = std::format("Video decoding: {} (next clip)",
+                                              hardware ? "Hardware (with fallback)" : "Software");
+        app.hwaccel_toast_.elapsed = 0.0;
+        (void)platform::HwAccelPref::default_location().save({hardware, false});
+        return true;
     }
 
     // Phase 65: manual migration trigger from the VaultOps section. On a
@@ -884,7 +860,7 @@ struct App::OverlayDispatch {
     // that fires whenever the settings panel accepted an event. Keeps the
     // outer settings() under the 25-line cognitive-complexity cap and
     // bundles every "settings.X -> runtime -> pref" sync into one place.
-    static void sync_runtime_after_settings_event(App& app, const SDL_Event& e, bool commit)
+    static void sync_runtime_after_settings_event(App& app, bool commit)
     {
         // Phase 66: sync the default mode whenever the event was handled
         app.second_.session.set_default_mode(app.overlays_.settings.second_vault_default);
@@ -895,21 +871,13 @@ struct App::OverlayDispatch {
         // Phase 85: sync autoplay whenever the event was handled
         media::set_saved_autoplay_enabled(app.overlays_.settings.autoplay);
         (void)platform::AutoplayPref::default_location().save(app.overlays_.settings.autoplay);
-        // Phase 102: sync the two hwaccel runtime overrides whenever the event
-        // was handled (the pref is already saved live in apply_value_delta;
-        // this keeps the runtime in sync even if that write failed).
-        const bool hw_before = media::enable_hardware_decode();
-        const bool sw_before = media::force_software_decode();
+        const bool hw_before = media::enable_hardware_decode() && !media::force_software_decode();
         media::set_enable_hardware_decode(app.overlays_.settings.enable_hardware);
-        media::set_force_software_decode(app.overlays_.settings.force_software);
-        if (e.type == SDL_EVENT_KEY_DOWN && media::enable_hardware_decode() != hw_before) {
-            app.hwaccel_toast_.text = std::format("Hardware decode: {}",
-                media::enable_hardware_decode() ? "ON" : "OFF");
-            app.hwaccel_toast_.elapsed = 0.0;
-        }
-        if (e.type == SDL_EVENT_KEY_DOWN && media::force_software_decode() != sw_before) {
-            app.hwaccel_toast_.text = std::format("Force software decode: {}",
-                media::force_software_decode() ? "ON" : "OFF");
+        media::set_force_software_decode(false);
+        if (media::enable_hardware_decode() != hw_before) {
+            app.hwaccel_toast_.text = std::format(
+                "Video decoding: {} (next clip)",
+                media::enable_hardware_decode() ? "Hardware (with fallback)" : "Software");
             app.hwaccel_toast_.elapsed = 0.0;
         }
         // Phase 92: sync the clipboard gate (the pref is already saved
@@ -933,7 +901,7 @@ struct App::OverlayDispatch {
         // Settings panel (second priority: swallows all events)
         if (!app.overlays_.settings.open)   return false;
         if (bool commit = false; ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit)) {
-            sync_runtime_after_settings_event(app, e, commit);
+            sync_runtime_after_settings_event(app, commit);
         }
         return true;
     }
@@ -1097,8 +1065,8 @@ void App::open_settings_overlay()
     overlays_.settings.autoplay = media::saved_autoplay_enabled();   // Phase 85
     overlays_.settings.second_vault_default = second_.session.default_mode();   // Phase 66
     overlays_.settings.clipboard = ui::clipboard_gate();                        // Phase 92
-    overlays_.settings.enable_hardware = media::enable_hardware_decode();       // Phase 102
-    overlays_.settings.force_software  = media::force_software_decode();        // Phase 102
+    overlays_.settings.enable_hardware =
+        media::enable_hardware_decode() && !media::force_software_decode();  // Phase 102
     ui::open_settings(overlays_.settings, ui::SettingsSection::Appearance);
     if (vault_state_.active && vault::vault_uses_directory_storage(*vault_state_.active)) {
         const auto report = vault::verify_directory_vault(*vault_state_.active,

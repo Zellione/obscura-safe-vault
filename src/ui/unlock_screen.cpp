@@ -20,6 +20,7 @@
 #include "ui/clipboard_secret.h"
 #include "ui/passphrase.h"
 #include "ui/text_input_event.h"
+#include "ui/text_metrics.h"
 #include "ui/unlock_logic.h"
 #include "ui/widgets.h"
 #include "vault/vault.h"
@@ -29,6 +30,8 @@ namespace ui {
 namespace {
 
 constexpr double CLIPBOARD_CLEAR_SECS = 25.0;
+constexpr SDL_FRect LEGACY_BROWSE_BUTTON{60, 240, 260, 44};
+constexpr SDL_FRect LEGACY_CONVERT_BUTTON{60, 300, 260, 44};
 
 gfx::Color strength_color(Strength s)
 {
@@ -100,6 +103,7 @@ UnlockScreen::Layout UnlockScreen::layout() const
 void UnlockScreen::handle_event(const SDL_Event& e)
 {
     if (handle_blocking_event(e)) return;
+    if (handle_legacy_choice(e)) return;
     if (handle_text_event(e)) return;
 
     switch (e.type) {
@@ -113,7 +117,16 @@ void UnlockScreen::handle_event(const SDL_Event& e)
             submit();
             break;
         case SDLK_ESCAPE:
-            request(NavKind::ToVaultManager);
+            if (conversion_mode_) {
+                conversion_mode_ = false;
+                legacy_choice_ = true;
+                password_.pw.clear();
+                password_.confirm.clear();
+                password_.reveal = false;
+                error_.clear();
+            } else {
+                request(NavKind::ToVaultManager);
+            }
             break;
         default:
             break;
@@ -131,6 +144,53 @@ void UnlockScreen::handle_event(const SDL_Event& e)
         break;
     default:
         break;
+    }
+}
+
+bool UnlockScreen::handle_legacy_choice(const SDL_Event& e)
+{
+    if (!legacy_choice_) return false;
+    if (e.type == SDL_EVENT_MOUSE_MOTION) {
+        mouse_.x = e.motion.x;
+        mouse_.y = e.motion.y;
+    }
+    bool browse = false;
+    bool convert = false;
+    if (e.type == SDL_EVENT_KEY_DOWN) {
+        browse = e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER;
+        convert = e.key.key == SDLK_C;
+        if (e.key.key == SDLK_ESCAPE) request(NavKind::ToVaultManager);
+    } else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+        browse = point_in_rect(e.button.x, e.button.y, LEGACY_BROWSE_BUTTON);
+        convert = point_in_rect(e.button.x, e.button.y, LEGACY_CONVERT_BUTTON);
+    }
+    if (browse) request(NavKind::ToGallery);
+    if (convert) {
+        legacy_choice_ = false;
+        conversion_mode_ = true;
+        conversion_report_.reset();
+        mark_dirty();
+    }
+    return true;
+}
+
+void UnlockScreen::render_legacy_choice(gfx::Renderer& r)
+{
+    using namespace gfx::theme;
+    const float width = static_cast<float>(win_.width()) - 120;
+    r.draw_text(font_, 60, 44, "Legacy Vault", TEXT);
+    r.draw_text(font_, 60, 110,
+                fit_text(font_, "Browse this vault read-only. Conversion is optional.", width),
+                TEXT_DIM);
+    r.draw_text(
+        font_, 60, 160,
+        fit_text(font_, "Convert a copy to enable editing; the original stays unchanged.", width),
+        TEXT_DIM);
+    for (const Button& b : {Button{LEGACY_BROWSE_BUTTON, "Open read-only [Enter]"},
+                            Button{LEGACY_CONVERT_BUTTON, "Convert a copy [C]"}}) {
+        const auto state = button_state(b.rect, mouse_.x, mouse_.y, false);
+        draw_button(r, font_, {b.rect, fit_text(font_, b.label, b.rect.w - 24)}, state.hover,
+                    state.active);
     }
 }
 
@@ -258,7 +318,7 @@ void UnlockScreen::update(double dt)
             password_.confirm.clear();
             password_.reveal = false;
             if (vault::vault_is_read_only(vault_)) {
-                conversion_mode_ = true;
+                legacy_choice_ = true;
                 create_mode_ = false;
                 keyfile_path_.clear();
                 error_.clear();
@@ -413,6 +473,10 @@ void UnlockScreen::submit()
 
 void UnlockScreen::render(gfx::Renderer& r)
 {
+    if (legacy_choice_) {
+        render_legacy_choice(r);
+        return;
+    }
     using namespace gfx::theme;
     const auto W = static_cast<float>(win_.width());
     const auto H = static_cast<float>(win_.height());
@@ -542,13 +606,18 @@ void UnlockScreen::render_status(gfx::Renderer& r, float width, float height)
 
 std::vector<ui::HelpGroup> UnlockScreen::help_groups() const
 {
+    if (legacy_choice_)
+        return {{"Legacy vault",
+                 {{"Enter", "Open read-only"},
+                  {"C", "Convert a copy"},
+                  {"Esc", "Back to vault manager"}}}};
     return {{conversion_mode_ ? "Legacy conversion" : "Unlock",
              {
                  {"Tab", "Switch password field"},
                  {"Enter", "Submit"},
-        {"Esc", "Back to vault manager"},
-    }},
-    text_editing_help_group()};
+                 {"Esc", conversion_mode_ ? "Back to read-only choice" : "Back to vault manager"},
+             }},
+            text_editing_help_group()};
 }
 
 } // namespace ui

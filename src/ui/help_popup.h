@@ -56,8 +56,7 @@ void toggle_help(HelpPopupState& s);
 //   NotAttempted      — "not attempted (no clip played yet)"
 //   Ok                — "VAAPI OK (probe succeeded; run `vainfo` for driver name)"
 //   Unavailable        — "VAAPI unavailable (see error.log / run `vainfo`)"
-//   HardwareDisabled   — "software-only (hardware disabled by Ctrl+Shift+H)"
-//   ForceSoftware      — "software-only (force-software by Ctrl+Shift+F)"
+// Hardware disabled or internally forced software → "Software selected".
 [[nodiscard]] std::string hwaccel_status_line(int probe_status, bool hw_enabled, bool sw_forced);
 
 // Up/Down/PageUp/PageDown scroll; Esc/Q close. Returns true if the popup was

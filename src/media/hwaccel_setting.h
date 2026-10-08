@@ -2,16 +2,11 @@
 
 namespace media {
 
-// Phase 102: the two runtime user-toggled overrides that gate
-// media::try_attach_hwaccel() (declared in src/media/hw_accel.h).
+// Runtime hardware gate plus a retained internal/test software override.
+// The UI exposes one Hardware (with fallback) / Software choice through F2
+// and Ctrl+Shift+H. App startup maps legacy HwAccelPref bits to that choice;
+// every user selection clears force_software_decode. Applies on next clip.
 //
-// `enable_hardware_decode`  default true; Ctrl+Shift+H toggles live.
-// `force_software_decode`   default false; Ctrl+Shift+F toggles live
-//                            and overrides enable_hardware_decode.
-//
-// Both are seeded from platform::HwAccelPref::default_location() at
-// App::init and persisted on every toggle (live-save, no exit-save needed;
-// the F2 settings overlay's value-cycling path is the only writer).
 // UI-thread only (like the active-theme global in gfx/theme.cpp and the
 // volume / loop / autoplay settings in this directory); no
 // synchronisation needed.

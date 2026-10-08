@@ -54,8 +54,7 @@ TEST(secure_mem_status_line_reports_unlimited_budget)
 // Phase 104: gated on OSV_VENDORED_AV so a build without FFmpeg (--no-av)
 // compiles cleanly — media::HwAccelStatus doesn't exist there and the
 // probe-outcome strings ("VAAPI OK", "unavailable", "not attempted")
-// don't apply. The override strings ("force-software", "disabled by
-// Ctrl+Shift+H") DO apply on every build since they reflect user choice,
+// don't apply. The "Software selected" status applies on every build since it reflects user choice,
 // not the codec probe.
 #if defined(OSV_VENDORED_AV) && defined(OSV_HWACCEL_VAAPI)
 
@@ -64,7 +63,7 @@ TEST(hwaccel_status_line_force_software_overrides_everything)
     // sw_forced=true wins regardless of probe outcome and hw_enabled state.
     const std::string line = ui::hwaccel_status_line(
         /*probe_status=*/2 /*Unavailable*/, /*hw_enabled=*/true,  /*sw_forced=*/true);
-    CHECK(line.find("force-software") != std::string::npos);
+    CHECK(line.find("Software selected") != std::string::npos);
     CHECK(line.find("vainfo") == std::string::npos);   // probe outcome is suppressed
 }
 
@@ -74,7 +73,7 @@ TEST(hwaccel_status_line_hardware_disabled_overrides_probe)
     // the user explicitly turned the auto-probe off.
     const std::string line = ui::hwaccel_status_line(
         /*probe_status=*/1 /*Ok*/, /*hw_enabled=*/false, /*sw_forced=*/false);
-    CHECK(line.find("disabled by Ctrl+Shift+H") != std::string::npos);
+    CHECK(line.find("Software selected") != std::string::npos);
 }
 
 TEST(hwaccel_status_line_ok_when_probe_succeeds_and_no_overrides)

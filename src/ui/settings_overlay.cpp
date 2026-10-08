@@ -124,15 +124,13 @@ void apply_value_delta(SettingsState& state, int delta, bool& commit_out)
         }
     } else if (state.section == SettingsSection::Playback) {
         settings_change_value(state, delta);
-        // Phase 102 row routing: row 0 is autoplay (existing), rows 1 + 2
-        // are the two hwaccel runtime overrides — both persisted via a
-        // single HwAccelPref save.
+        // Persist the single decoding choice in the compatible config format.
         if (state.row == 0) {
             (void)platform::AutoplayPref::default_location().save(state.autoplay);
         } else {
             (void)platform::HwAccelPref::default_location().save({
                 state.enable_hardware,
-                state.force_software,
+                false,
             });
         }
         commit_out = false;  // both prefs are persisted by the pref save
@@ -372,9 +370,9 @@ std::pair<std::string, std::string> appearance_row(int row_index, const Settings
 std::pair<std::string, std::string> playback_row(int row_index, const SettingsState& state)
 {
     if (row_index == 0) return {"Auto-play videos", state.autoplay ? "On" : "Off"};
-    // Phase 102: hardware-decode gate + force-software override.
-    if (row_index == 1) return {"Hardware video decode", state.enable_hardware ? "On" : "Off"};
-    if (row_index == 2) return {"Force software decode", state.force_software ? "On" : "Off"};
+    // Hardware mode always retains automatic software fallback.
+    if (row_index == 1)
+        return {"Video decoding", state.enable_hardware ? "Hardware (with fallback)" : "Software"};
     return {};
 }
 
