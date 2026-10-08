@@ -17,12 +17,12 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   under a worker holding &vault_), `animating()` returns true to keep frames ticking, and
   render shows "Deriving key…". Tests: `test_unlock_job.cpp` (real temp vaults, tiny
   KdfParams).
-  **Phase 115:** a successful legacy unlock changes this same screen into the conversion form
-  instead of navigating. It clears the source credentials, asks for a distinct save destination
-  and independent password confirmation/keyfile policy, then owns `LegacyConversionJob` through
-  cancel or completion. The report includes items/bytes, deep/logical/cold-reopen verification,
-  missing-derived warnings, and backup/manual-test guidance. Enter navigates only after the job
-  has replaced the pending handle with the verified v3 destination.
+  Successful legacy unlock offers Open read-only (Enter) or Convert a copy (C), with
+  no mandatory upgrade. The conversion form clears source credentials and requires its own
+  destination/password/keyfile policy. Escape from the idle form returns to the choice;
+  worker cancellation completes before browsing is allowed. A verified conversion promotes
+  the destination; read-only browsing retains the source path. Screen event regression tests
+  run with an uninitialized Window (no display) in `test_unlock_job.cpp`.
 - `gallery_grid.*` — GalleryGrid: Grid + detailed List views (key `L`), live width reflow,
   centred/elided labels. `Shift+S` cycles a gallery's persisted sort_key; breadcrumb shows
   "Sort: <label>" once non-Manual. Ctor takes a

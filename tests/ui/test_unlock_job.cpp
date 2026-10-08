@@ -7,6 +7,11 @@
 #include <string>
 #include <thread>
 
+#include "gfx/text.h"
+#include "gfx/window.h"
+#include "platform/file_dialog.h"
+#include "ui/unlock_screen.h"
+
 #include "crypto/secure_mem.h"
 #include "ui/unlock_job.h"
 #include "vault/vault.h"
@@ -183,4 +188,66 @@ TEST(unlock_job_thread_launch_failure_wipes_secrets)
     CHECK_FALSE(job.take_outcome().has_value());
     CHECK(crypto::detail::wiping_deallocation_count() > before);
     CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
+}
+
+// Exercise the actual screen without creating a display or renderer.
+
+TEST(unlock_screen_legacy_browse_does_not_require_conversion)
+{
+    TempVault tv("readonly_screen");
+    {
+        vault::Vault source;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kKdf, source) ==
+                vault::VaultResult::Ok);
+    }
+    const auto size_before = fs::file_size(tv.path);
+    const auto modified_before = fs::last_write_time(tv.path);
+    gfx::Window window;
+    gfx::FontAtlas font;
+    platform::FileDialog dialog;
+    vault::Vault target;
+    ui::UnlockScreen screen(window, font, target, dialog, tv.path);
+    SDL_Event event{};
+    event.type = SDL_EVENT_TEXT_INPUT;
+    event.text.text = "pw";
+    screen.handle_event(event);
+    event = {};
+    event.type = SDL_EVENT_KEY_DOWN;
+    event.key.key = SDLK_RETURN;
+    screen.handle_event(event);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (screen.animating() && std::chrono::steady_clock::now() < deadline) {
+        screen.update(0.01);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    screen.update(0.01);
+    REQUIRE(target.is_unlocked());
+    REQUIRE(vault::vault_is_read_only(target));
+    CHECK(screen.take_nav().kind == ui::NavKind::None);
+    // Conversion is explicit, and Escape returns to the browsing choice.
+    event.key.key = SDLK_C;
+    screen.handle_event(event);
+    CHECK(screen.help_groups().front().title == "Legacy conversion");
+    event.key.key = SDLK_ESCAPE;
+    screen.handle_event(event);
+    CHECK(screen.take_nav().kind == ui::NavKind::None);
+    CHECK(screen.help_groups().front().title == "Legacy vault");
+    event.key.key = SDLK_RETURN;
+    // Enter defaults to browsing the original file, without destination credentials.
+    screen.handle_event(event);
+    const auto nav = screen.take_nav();
+    CHECK(nav.kind == ui::NavKind::ToGallery);
+    CHECK(nav.path.empty());
+    event = {};
+    event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    event.button.button = SDL_BUTTON_RIGHT;
+    event.button.x = 100;
+    event.button.y = 260;
+    screen.handle_event(event);
+    CHECK(screen.take_nav().kind == ui::NavKind::None);
+    event.button.button = SDL_BUTTON_LEFT;
+    screen.handle_event(event);
+    CHECK(screen.take_nav().kind == ui::NavKind::ToGallery);
+    CHECK_EQ(fs::file_size(tv.path), size_before);
+    CHECK(fs::last_write_time(tv.path) == modified_before);
 }

@@ -1,7 +1,7 @@
 #pragma once
 
 // Phase 102: pure visibility predicate for the brief on-screen toast that
-// confirms a hwaccel runtime-override toggle (Ctrl+Shift+H, Ctrl+Shift+F,
+// confirms a video decoding toggle (Ctrl+Shift+H,
 // or F2 Playback cycle). The toast renders only while the elapsed timer is
 // below HWACCEL_TOAST_SECS AND there is text to show (empty text = no
 // toast at all, so an app that never sees a toggle never shows one).

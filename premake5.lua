@@ -428,8 +428,8 @@ project "osv_tests"
         "src/image/*.h",
         "src/media/*.cpp",
         "src/media/*.h",
-        -- gfx: only the headless-testable units (NOT window.cpp, which needs a
-        -- real display). texture_cache + text + renderer run against an SDL
+        -- gfx: headless tests never initialize a real Window; unlock screen tests
+        -- use its default empty state. texture_cache + text + renderer use an SDL
         -- software renderer in tests/gfx/.
         "src/gfx/texture_cache.cpp",
         "src/gfx/text.cpp",
@@ -461,6 +461,8 @@ project "osv_tests"
         "src/ui/clipboard.cpp",
         "src/ui/clipboard_gate.cpp",
         "src/ui/text_input_event.cpp",
+        "src/gfx/window.cpp",
+        "src/ui/unlock_screen.cpp",
         "src/ui/unlock_logic.cpp",
         "src/ui/unlock_job.cpp",
         "src/ui/legacy_conversion_job.cpp",

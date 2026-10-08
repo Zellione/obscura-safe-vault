@@ -4,7 +4,8 @@
 
 namespace platform {
 
-// Phase 102: a config-dir record of the two hwaccel runtime overrides
+// Compatible config-dir storage for the single video decoding choice.
+// Legacy files stored two runtime overrides
 // (src/media/hwaccel_setting.h): enable_hardware_decode +
 // force_software_decode. Stored together in one file ("hwaccel.conf") so
 // the pref lives at one path and is written atomically (temp file + rename,
@@ -25,7 +26,12 @@ public:
 
     struct State {
         bool enable_hardware = true;     // default true
-        bool force_software  = false;    // default false
+        bool force_software = false;     // legacy config compatibility
+
+        [[nodiscard]] bool hardware_selected() const noexcept
+        {
+            return enable_hardware && !force_software;
+        }
     };
 
     [[nodiscard]] State load() const;                        // missing/invalid → defaults

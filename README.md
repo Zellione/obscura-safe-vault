@@ -19,8 +19,10 @@ See [`AGENTS.md`](AGENTS.md) for all technology decisions and [`ROADMAP.md`](ROA
 ## Vault storage
 
 New Vault creates the v3 directory format. Open Vault selects a directory;
-`Shift+O` opens a legacy `.osv` file. After authentication, the conversion
-screen asks for a distinct destination and independent destination credentials.
+`Shift+O` opens a legacy `.osv` file. After authentication, choose **Open read-only**
+(Enter) to browse without upgrading, or **Convert a copy** (C). Conversion asks
+for a distinct destination and independent destination credentials. Escape from
+the conversion form returns to the read-only choice.
 Conversion is cancellable and resumable; it never modifies or deletes the
 source. Success is shown only after deep verification, logical and plaintext
 comparison, and a cold credentialed reopen. Back up and manually test the new
@@ -93,14 +95,11 @@ FFmpeg is configured with `--enable-vaapi` and `--enable-hwaccel=h264_vaapi,hevc
    Any other outcome (`driver_not_found`, `render_node_open_failed (errno=N)`, `vaInitialize_failed`) tells you exactly which step blocked it.
 5. Confirm the GPU block is engaged (vs. CPU decoding) by tailing `cat /sys/class/drm/card*/device/gpu_busy_percent` or `radeontop` while a clip plays.
 
-Two persisted settings gate the path when you want to A/B test:
-
-| Hotkey | Setting | Default | Effect |
-|---|---|---|---|
-| `Ctrl+Shift+H` | Hardware decode on/off | on | off → `try_attach_hwaccel` is skipped entirely |
-| `Ctrl+Shift+F` | Force software decode | off | on → always software (overrides `Ctrl+Shift+H`) |
-
-Both are live-toggled and persisted across sessions; the F1 help popup shows their state.
+F2 → Playback → **Video decoding** selects **Hardware (with fallback)** (default)
+or **Software**. `Ctrl+Shift+H` toggles the same setting. Changes are saved and
+apply to the next clip opened; hardware failures still fall back to software.
+F1 reports the selected software mode or hardware probe status. Existing saved
+hardware-disabled or force-software preferences remain software-only until changed.
 
 #### Locked-memory limit (`RLIMIT_MEMLOCK`)
 

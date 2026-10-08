@@ -94,11 +94,11 @@ surfaced as a one-time `[HwAccel]` log line on the first probe attempt —
 `OK; LIBVA_DRIVER_NAME=…` on success, `failed: … — software decode will be
 used; run \`vainfo\` for details` on any failure. Companion log fires once per
 `AVCodec` name when the decoder doesn't advertise a VAAPI `hw_config`.
-Two persisted runtime overrides gate the path: `Ctrl+Shift+H` toggles
-"hardware decode enabled" (default on), `Ctrl+Shift+F` toggles "force
-software decode" (default off); both live-saved to `hwaccel.conf` via
-`platform::HwAccelPref`. New `media::hwaccel_status()` exposes the cached
-probe outcome for the F1 popup's new "Video decode:" row. New `[HwAccel]`
+One persisted Video decoding choice gates the path: Hardware (with fallback), default,
+or Software. F2 Playback and Ctrl+Shift+H change the same choice for the next clip.
+`platform::HwAccelPref` retains compatible two-line storage; old forced-software or
+hardware-disabled settings map to Software, and new selections clear force-software.
+`media::hwaccel_status()` exposes the cached probe outcome for F1. The `[HwAccel]`
 module log tag joins `[Vault]`/`[Crypto]`/`[SecureMem]`/`[Platform]`/
 `[VideoDecodeWorker]`/`[ArchiveReader]`.
 

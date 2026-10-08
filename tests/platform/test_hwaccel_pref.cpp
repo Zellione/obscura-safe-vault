@@ -131,3 +131,17 @@ TEST(hwaccel_pref_default_location_is_config_dir_hwaccel_conf)
     CHECK(loaded.enable_hardware == false);
     CHECK(loaded.force_software  == true);
 }
+
+TEST(hwaccel_legacy_preferences_preserve_effective_decode_choice)
+{
+    TempFile temp("legacy_choice");
+    platform::HwAccelPref pref(temp.path);
+    for (bool hardware : {false, true}) {
+        for (bool forced : {false, true}) {
+            REQUIRE(pref.save({hardware, forced}));
+            CHECK(pref.load().hardware_selected() == (hardware && !forced));
+        }
+    }
+    REQUIRE(pref.save({true, false}));
+    CHECK(pref.load().hardware_selected());
+}

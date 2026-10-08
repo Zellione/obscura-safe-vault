@@ -24,12 +24,15 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   `UnlockJob::start_create`. The existing pending/active unlock flow accepts either shape through
   `Vault::open`. Opened legacy files are visibly read-only, every mutation facade rejects them,
   and automatic migration is skipped.
-- **Phase 115 conversion:** after a successful legacy unlock, `UnlockScreen` stays in place and
-  collects a distinct destination plus independent password/keyfile policy. A background
-  `LegacyConversionJob` owns copied credentials and the source handle remains read-only. Only a
-  verified, cold-reopened v3 result emits `ToGallery`; `App::apply_nav` replaces `pending_path`
-  with that destination before promotion, so registry/active-path state can never retain the
-  legacy source. Cancel/shutdown joins the worker and no flow deletes the source.
+- Legacy unlock clears source credentials and offers Open read-only (Enter) or Convert a
+  copy (C). Browsing promotes the original pending handle/path and skips automatic migration.
+  Optional conversion collects independent destination credentials; Escape from the idle form
+  returns to the choice. `LegacyConversionJob` retains the read-only source until completion.
+  Verified conversion promotes the destination path; no flow deletes the source.
+- F2 Playback and Ctrl+Shift+H share one video decoding choice: Hardware (with fallback)
+  or Software, applied on the next clip. `HwAccelPref::State::hardware_selected()` maps old
+  disabled-hardware/forced-software configs to Software. New selections clear the internal
+  force-software override. Ctrl+Shift+F is retired.
 - **Phase 50:** App owns `ui::ImportQueue queue_` (declared after vaults for destruction order, so queue drains before vault wipes key).
   `App::update(dt)` drains queue each frame: `queue_.drain(dt)` attaches staged nodes + triggers `on_vault_changed()` broadcast
   on all active screens (GalleryGrid, ImageViewer, FavoritesScreen, AdvancedSearchScreen refetch cached IndexNode* refs).

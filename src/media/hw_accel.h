@@ -17,11 +17,11 @@ namespace media {
 // Rendered in the F1 help popup's Video decode row so a user can see whether
 // hardware decode is actually engaging.
 enum class HwAccelStatus : uint8_t {
-    NotAttempted     = 0,   // no clip has played yet this session
-    Ok               = 1,   // VAAPI device context created successfully
-    Unavailable      = 2,   // probe failed (driver not found, render node, vaInitialize)
-    HardwareDisabled = 3,   // user toggled Ctrl+Shift+H off
-    ForceSoftware    = 4,   // user toggled Ctrl+Shift+F on
+    NotAttempted = 0,      // no clip has played yet this session
+    Ok = 1,                // VAAPI device context created successfully
+    Unavailable = 2,       // probe failed (driver not found, render node, vaInitialize)
+    HardwareDisabled = 3,  // user toggled Ctrl+Shift+H off
+    ForceSoftware = 4,     // internal software override
 };
 
 // Attempts to attach a process-wide hardware decode device context to `ctx`
@@ -35,8 +35,7 @@ enum class HwAccelStatus : uint8_t {
 // as expected and fall back to a fresh software-only codec context (see
 // VideoDecodeWorker::reopen_software_only()).
 //
-// Force-software-decode override (Ctrl+Shift+F, persisted in
-// platform::HwAccelPref): when enabled, this returns false unconditionally
+// Internal force-software-decode override: when enabled, this returns false unconditionally
 // so the caller never enters the hwaccel attach path.
 //
 // Hardware-disabled override (Ctrl+Shift+H, persisted in
@@ -86,7 +85,7 @@ void test_only_force_is_hw_format_frame(std::optional<bool> force);
 // test_only_force_hwaccel_unavailable() (returns Unavailable while the
 // override is on, even if real hardware would succeed).
 //
-// Does NOT account for the user-toggled Ctrl+Shift+H / Ctrl+Shift+F
+// Does NOT account for the runtime hardware gate / internal software override
 // overrides — those gates run inside try_attach_hwaccel() itself, so a
 // probe that succeeded and is now overridden reads Ok here (the device
 // still exists). Callers that want the user-visible effective state should

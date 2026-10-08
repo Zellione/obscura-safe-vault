@@ -154,8 +154,8 @@ private:
     double                             badge_elapsed_ = BADGE_WINDOW_SECS;
 
     // Phase 102: brief on-screen toast confirming a hwaccel toggle. Shows
-    // the new value of whichever toggle was just pressed (Ctrl+Shift+H or
-    // Ctrl+Shift+F) so the user has visible feedback that the keystroke
+    // the video decoding choice selected with Ctrl+Shift+H or F2
+    // so the user has visible feedback that the change
     // landed. Same shape as the keep_unlocked badge: time-bounded visibility,
     // pure predicate, drawing lives in app.cpp.
     // Phase 104: bundled into HwAccelToastState (was 3 fields, now 1) so App

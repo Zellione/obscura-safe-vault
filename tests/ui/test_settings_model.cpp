@@ -316,35 +316,22 @@ TEST(settings_gallery_view_row_cycles_both_ways)
     CHECK_EQ(s.gallery_view, ui::GalleryView::GridS);
 }
 
-TEST(settings_playback_section_has_three_rows_and_toggles_autoplay_then_hwaccel)
+TEST(settings_playback_has_one_decode_choice)
 {
-    // Phase 85: row 0 is auto-play videos. Phase 102 adds two more rows for
-    // the hwaccel runtime overrides (hardware on/off + force software).
     ui::SettingsState s;
     s.section = ui::SettingsSection::Playback;
-    CHECK_EQ(ui::settings_row_count(s), 3);
-    CHECK(s.autoplay == true);
-    s.in_pane = true; s.row = 0;
+    CHECK_EQ(ui::settings_row_count(s), 2);
+    s.in_pane = true;
+    s.row = 0;
     ui::settings_change_value(s, +1);
-    CHECK(s.autoplay == false);
-    ui::settings_change_value(s, -1);
-    CHECK(s.autoplay == true);
-
-    // Row 1 toggles the hardware-decode gate.
+    CHECK_FALSE(s.autoplay);
     s.row = 1;
-    const bool hw_before = s.enable_hardware;
     ui::settings_change_value(s, +1);
-    CHECK(s.enable_hardware != hw_before);
+    CHECK_FALSE(s.enable_hardware);
     ui::settings_change_value(s, -1);
-    CHECK(s.enable_hardware == hw_before);
-
-    // Row 2 toggles the force-software override.
-    s.row = 2;
-    const bool sw_before = s.force_software;
-    ui::settings_change_value(s, +1);
-    CHECK(s.force_software != sw_before);
-    ui::settings_change_value(s, -1);
-    CHECK(s.force_software == sw_before);
+    CHECK(s.enable_hardware);
+    ui::settings_move_row(s, 1);
+    CHECK_EQ(s.row, 1);
 }
 
 TEST(settings_section_count_includes_playback)

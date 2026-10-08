@@ -55,12 +55,7 @@ std::string secure_mem_status_line(size_t budget_bytes, bool degraded)
 // (--no-av) compiles cleanly — media::HwAccelStatus doesn't exist there.
 std::string hwaccel_status_line(int probe_status, bool hw_enabled, bool sw_forced)
 {
-    // Override wins: force-software is the explicit "always software" signal.
-    if (sw_forced)
-        return "Video decode: software-only (force-software by Ctrl+Shift+F)";
-    // Then hardware-disabled: the user explicitly turned the auto-probe off.
-    if (!hw_enabled)
-        return "Video decode: software-only (hardware disabled by Ctrl+Shift+H)";
+    if (sw_forced || !hw_enabled) return "Video decode: Software selected (Ctrl+Shift+H to change)";
 #if defined(OSV_VENDORED_AV) && defined(OSV_HWACCEL_VAAPI)
     // Then the probe outcome — the actual device-context state. Every
     // reference is fully-qualified (media::HwAccelStatus::Ok etc.) so no
@@ -236,8 +231,10 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
     std::vector<HelpGroup> all_groups = {
         {.title = "Global",
          .entries = {
-             {.key = "F1",          .description = "Help"},
-             {.key = "F2",          .description = "Settings"},
+             {.key = "F1", .description = "Help"},
+             {.key = "F2", .description = "Settings"},
+             {.key = "Ctrl+Shift+H",
+              .description = "Video decoding: Hardware / Software (next clip)"},
              {.key = "Right-click", .description = "Back / up one level"},
              {.key = "",
               .description = secure_mem_status_line(platform::lockable_budget_bytes(),
