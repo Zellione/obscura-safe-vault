@@ -7,6 +7,7 @@
 #include "media/mem_avio.h"
 
 #include <fstream>
+#include <unistd.h>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -66,6 +67,44 @@ TEST(audio_decoder_decodes_aac_to_f32)
     frames.clear();
     dec.decode(nullptr, frames);
     for (auto& f : frames) total_samples += f.samples.size();
+    CHECK(dec.eof());
+
+    // Playback polls after EOF. Repeated drains must be silent and produce
+    // no duplicate samples. Capture diagnostics in a pipe, never on disk.
+    int diagnostics[2];
+    REQUIRE(pipe(diagnostics) == 0);
+    const int saved_stderr = dup(STDERR_FILENO);
+    REQUIRE(saved_stderr >= 0);
+    std::fflush(stderr);
+    REQUIRE(dup2(diagnostics[1], STDERR_FILENO) >= 0);
+    close(diagnostics[1]);
+    frames.clear();
+    for (int i = 0; i < 8; ++i) dec.decode(nullptr, frames);
+    std::fflush(stderr);
+    const int restored = dup2(saved_stderr, STDERR_FILENO);
+    close(saved_stderr);
+    REQUIRE(restored >= 0);
+    char log[2048];
+    const auto logged = read(diagnostics[0], log, sizeof(log));
+    close(diagnostics[0]);
+    CHECK(logged == 0);
+    CHECK(frames.empty());
+
+    // Seeking after EOF must re-enable decoding for replay/loop playback.
+    REQUIRE(av_seek_frame(fmt, aidx, 0, AVSEEK_FLAG_BACKWARD) >= 0);
+    dec.flush();
+    CHECK(!dec.eof());
+    while (frames.empty() && av_read_frame(fmt, pkt) >= 0) {
+        if (pkt->stream_index == aidx) dec.decode(pkt, frames);
+        av_packet_unref(pkt);
+    }
+    CHECK(!frames.empty());
+    CHECK(!dec.eof());
+
+    dec.decode(nullptr, frames);
+    CHECK(dec.eof());
+    REQUIRE(dec.open(fmt->streams[aidx]));
+    CHECK(!dec.eof());
 
     av_packet_free(&pkt);
     avformat_close_input(&fmt);

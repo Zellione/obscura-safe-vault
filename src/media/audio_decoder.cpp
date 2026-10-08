@@ -30,6 +30,7 @@ AudioDecoder::~AudioDecoder()
 
 void AudioDecoder::reset()
 {
+    eof_ = false;
     if (ctx_) {
         avcodec_free_context(&ctx_);
     }
@@ -40,6 +41,7 @@ void AudioDecoder::reset()
 
 bool AudioDecoder::open(const AVStream* stream)
 {
+    reset();
     if (!stream) {
         platform::safe_println(stderr, "[AudioDecoder] stream is null");
         return false;
@@ -97,7 +99,7 @@ bool AudioDecoder::open(const AVStream* stream)
 
 void AudioDecoder::decode(const AVPacket* pkt, std::vector<AudioFrame>& out)
 {
-    if (!ctx_ || !frame_) {
+    if (!ctx_ || !frame_ || eof_) {
         return;
     }
 
@@ -112,6 +114,7 @@ void AudioDecoder::decode(const AVPacket* pkt, std::vector<AudioFrame>& out)
         while ((ret = avcodec_receive_frame(ctx_, frame_)) == 0) {
             push_frame(out);
         }
+        eof_ = ret == AVERROR_EOF;
         if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
             platform::safe_println(stderr, "[AudioDecoder] receive_frame {} error: {} ({})",
                         context, ret, av_err2str(ret));
@@ -125,6 +128,7 @@ void AudioDecoder::decode(const AVPacket* pkt, std::vector<AudioFrame>& out)
     // this drain, send_packet would return AVERROR(EAGAIN) and (under the
     // OLD code) the packet would be silently dropped.
     drain("pre-send");
+    if (eof_) return;
 
     // Send the packet (nullptr = drain/flush the decoder).
     // AVERROR(EAGAIN) means the codec's input queue is full — drain, retry.
@@ -139,6 +143,10 @@ void AudioDecoder::decode(const AVPacket* pkt, std::vector<AudioFrame>& out)
         ++attempt;
     }
 
+    if (send_ret == AVERROR_EOF) {
+        eof_ = true;
+        return;
+    }
     if (send_ret < 0) {
         // Genuine failure (not EAGAIN, or EAGAIN past the retry cap). Log
         // the actual AVERROR + av_err2str — under the OLD code this branch
@@ -187,6 +195,7 @@ void AudioDecoder::push_frame(std::vector<AudioFrame>& out)
 
 void AudioDecoder::flush()
 {
+    eof_ = false;
     if (ctx_) {
         avcodec_flush_buffers(ctx_);
     }

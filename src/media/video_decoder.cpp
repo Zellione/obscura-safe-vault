@@ -507,6 +507,10 @@ std::optional<AudioFrame> VideoDecoder::next_audio_frame()
         return frame;
     }
 
+    // The final drain may have queued frames above. Once those are consumed,
+    // polling at EOF must not read the demuxer or send another drain packet.
+    if (audio_dec_.eof()) return std::nullopt;
+
     // Drain queued audio packets
     while (!aq_.empty()) {
         decode_audio_packet();

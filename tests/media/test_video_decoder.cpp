@@ -431,6 +431,23 @@ TEST(video_decoder_exposes_and_decodes_audio_from_tiny_av)
     
     CHECK(vframes > 0);
     CHECK(asamples > 0);
+
+    // Exhaust audio, then keep polling as the playback tick does at EOF.
+    for (int i = 0; i < 200 && dec.next_audio_frame(); ++i) {}
+    for (int i = 0; i < 8; ++i) CHECK(!dec.next_audio_frame());
+
+    // Both playback paths must reset EOF when seeking/looping.
+    REQUIRE(dec.seek(0.0));
+    bool resumed = false;
+    for (int i = 0; i < 100 && !resumed; ++i)
+        resumed = dec.next_audio_frame().has_value();
+    CHECK(resumed);
+    for (int i = 0; i < 200 && dec.next_audio_frame(); ++i) {}
+    REQUIRE(dec.seek_demux_only(0.0));
+    resumed = false;
+    for (int i = 0; i < 100 && !resumed; ++i)
+        resumed = dec.next_audio_frame().has_value();
+    CHECK(resumed);
 }
 
 TEST(video_decoder_has_audio_false_for_video_only)
