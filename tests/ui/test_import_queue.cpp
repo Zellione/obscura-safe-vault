@@ -80,6 +80,49 @@ TEST(import_queue_files_end_to_end)
     ziptest::cleanup_dir(temp_dir);
 }
 
+TEST(import_queue_directory_durability_and_empty_shutdown)
+{
+    const auto dir = ziptest::fresh_dir("test_import_queue_directory");
+    const auto path = dir / "vault.osv";
+    const std::vector<uint8_t> password{'p', 'w'};
+    vault::Vault v;
+    REQUIRE(vault::Vault::create_directory(path.string(), password, {}, ziptest::kTestKdf, v) ==
+            vault::VaultResult::Ok);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
+    ui::ImportQueue queue;
+    queue.begin_session(v, lane);
+    queue.end_session();
+    REQUIRE(lane.flush());
+    queue.begin_session(v, lane);
+    const auto bytes = ziptest::fake_jpeg(73);
+    const auto input = dir / "original.jpg";
+    std::ofstream(input, std::ios::binary)
+        .write(reinterpret_cast<const char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+    (void)queue.enqueue_files({input}, "photos");
+    pump_until_idle(queue);
+    const auto snapshot = queue.snapshot();
+    REQUIRE(snapshot.size() == 1);
+    CHECK(snapshot.front().state == ui::ImportTaskState::Done);
+    CHECK(snapshot.front().imported == 1);
+    queue.end_session();
+    REQUIRE(lane.flush());
+    lane.stop();
+    v.set_commit_router(nullptr);
+    v.lock();
+    vault::Vault reopened;
+    REQUIRE(ziptest::open_vault(path, reopened));
+    crypto::SecureBytes original;
+    const auto* node = reopened.resolve_node("photos/original.jpg");
+    REQUIRE(node);
+    REQUIRE(reopened.read_image(*node, original) == vault::VaultResult::Ok);
+    CHECK(std::ranges::equal(original.as_span(), bytes));
+    reopened.lock();
+    ziptest::cleanup_dir(dir);
+}
+
 // Test 1b: import_queue_cancel_queued_is_deterministic
 // Deterministic cancel test (doesn't race with fast pipeline).
 // Uses exclusive gate to park worker, ensuring task stays Queued until we release.

@@ -100,7 +100,7 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data, std::string
                                 std::to_underlying(format), file_data,
                                 &data_info) != v3::ReadStatus::Ok)
             return {IoError, {}};
-        img.meta.data_offset = 1;
+        img.meta.data_offset = v3::object_cache_identity(data_info.object_id, 1);
         img.meta.data_length = data_info.encrypted_length;
         if (!thumb.empty()) {
             v3::ObjectInfo thumb_info;
@@ -108,7 +108,7 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data, std::string
                                     std::to_underlying(format), thumb,
                                     &thumb_info) != v3::ReadStatus::Ok)
                 return {IoError, {}};
-            img.meta.thumb_offset = 1;
+            img.meta.thumb_offset = v3::object_cache_identity(thumb_info.object_id, 2);
             img.meta.thumb_length = thumb_info.encrypted_length;
         }
         img.meta.format = format;
@@ -258,7 +258,7 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data, std::string
                                     std::to_underlying(format), poster,
                                     &poster_info) != v3::ReadStatus::Ok)
                 return {IoError, {}};
-            vid.vmeta.poster_offset = 1;
+            vid.vmeta.poster_offset = v3::object_cache_identity(poster_info.object_id, 3);
             vid.vmeta.poster_length = poster_info.encrypted_length;
         }
         vid.vmeta.container = format;
@@ -273,6 +273,8 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data, std::string
                                       .count());
         vid.vmeta.chunk_size = video_info.frame_plain_limit;
         vid.vmeta.chunks.resize(video_info.frame_count);
+        for (uint32_t i = 0; i < video_info.frame_count; ++i)
+            vid.vmeta.chunks[i].sequence = i;
         return {Ok, std::move(vid)};
     }
 

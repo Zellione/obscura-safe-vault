@@ -384,3 +384,7 @@ Pure SDL-free view/sort/model helpers, layout geometry, settings state, search i
   included, so the review can remove either side. `ui::collect_scan_items`
   (dup_scan.h) gained a `scope_path` parameter (default empty = whole vault)
   that starts the walk at that gallery.
+
+Thumbnail texture keys use image thumbnail offsets or video poster offsets,
+including immutable-object-derived identities for directory vaults. Replacing
+a derived object changes its key; full-image keys remain original identities.

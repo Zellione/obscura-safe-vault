@@ -21,37 +21,11 @@ namespace platform {
 // core dumps enabled so developers can analyze crashes.
 void disable_core_dumps() noexcept;
 
-// Redirects `stream`'s underlying OS handle to `path` (append mode), so every
-// subsequent write to `stream` goes there instead. Returns false without
-// crashing if `path` cannot be opened (in which case `stream` is left in
-// whatever state the platform's freopen() failure leaves it in — callers
-// should not write to it further). Exposed as a pure function of an explicit
-// FILE* + path (not the process's real stdout/stderr) so it's unit-testable.
-bool redirect_stream_to_file(std::FILE* stream, const std::filesystem::path& path) noexcept;
-
-// Redirects the process's stdout/stderr to config_dir()/"console.log"
-// (Windows Release builds only; no-op elsewhere). A Release build runs as a
-// windowless (WindowedApp) subsystem process, so stdout/stderr start with no
-// valid OS handle at all — every write to them fails ("bad file
-// descriptor"), and C++23's std::print/std::println throw std::system_error
-// on such a failure (unlike old fprintf), which would crash the whole
-// process via std::terminate() the first time any of the many existing
-// platform::safe_println(stderr, "[Module] ...") diagnostics ran. Redirecting to a log
-// file (rather than discarding to the null device) also means those
-// diagnostics — previously invisible in a windowless build — become visible
-// for the first time. Call once, early, at app startup (before any
-// diagnostic print).
-void redirect_diagnostics_to_log_file() noexcept;
-
 // Best-effort: grow the amount of memory this process may page-lock so the
-// SecureBuffer/SecureBytes mlock/VirtualLock calls (crypto/secure_mem.h) can
+// SecureBuffer/SecureBytes mlock calls (crypto/secure_mem.h) can
 // actually succeed for decoded-image-sized buffers. Returns true when the
 // platform reports a lockable budget of at least `bytes` afterwards.
 //
-// Windows: VirtualLock's per-process cap is the *minimum working-set size*
-// (~200 KB by default — far below one decoded image), so raise it via
-// SetProcessWorkingSetSize(). Needs no privilege beyond the default
-// SeIncreaseWorkingSetPrivilege every user holds.
 // Linux: raise the soft RLIMIT_MEMLOCK to the hard limit (allowed without
 // privileges); anything beyond the hard limit needs ulimit/systemd config.
 //
@@ -61,10 +35,8 @@ bool grow_secure_mem_budget(size_t bytes) noexcept;
 
 // The page-lockable budget this process currently has, in bytes.
 //
-// Linux: the soft RLIMIT_MEMLOCK (the cap on mlock/VirtualLock). Reported as
+// Linux: the soft RLIMIT_MEMLOCK (the cap on mlock). Reported as
 // SIZE_MAX when the kernel says it is unlimited (RLIM_INFINITY).
-// Windows: the process minimum working-set size — VirtualLock's per-process
-// cap (see grow_secure_mem_budget).
 //
 // Returns 0 if the platform cannot report it. The UI uses this to show the
 // user how much memory can actually be held out of swap (Phase 6c).

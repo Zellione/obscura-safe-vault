@@ -52,6 +52,7 @@ TEST(v3_backup_is_deep_verified_complete_and_published_no_replace)
     node.type = NodeType::Image;
     node.display_name = "secret.jpg";
     node.media_format = 1;
+    node.original_size = 6;
     REQUIRE(opened.database->insert_node(node) == DbStatus::Ok);
     const std::array<uint8_t, 6> plaintext{1, 2, 3, 4, 5, 6};
     const ObjectWriteRequest request{.vault_id = header.vault_id,

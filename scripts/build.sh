@@ -17,7 +17,7 @@ cd "$REPO_ROOT"
 "$REPO_ROOT/scripts/check_submodules.sh"
 
 # Core count fallback for systems without nproc.
-NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+NPROC="$(nproc 2>/dev/null || echo 4)"
 
 CONFIG="Debug"
 USE_GMAKE=false

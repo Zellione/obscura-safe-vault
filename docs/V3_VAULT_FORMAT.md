@@ -1,6 +1,6 @@
 # V3 directory vault format
 
-Status: Phase 105 format contract. Production writing begins in later phases.
+Status: production directory format. Container version 3; metadata schema version 2.
 
 All integers are unsigned little-endian. All reserved bytes must be zero when written and rejected when a feature-bearing reader cannot safely ignore them. Every count, offset, and length is checked for overflow and against the limits below before allocation or I/O.
 
@@ -69,7 +69,7 @@ strings and terminators are normative bytes, not C strings.
 
 The pinned baseline is SQLCipher 4.19.0 with encrypted header, 4096-byte cipher pages, page HMAC enabled, raw-key API, in-memory temporary storage, memory security enabled, rollback journal, and `synchronous=FULL`. A later journal-mode change does not change the v3 vault format but must pass equivalent encrypted-artifact and crash tests.
 
-### Initial schema model
+### Schema model
 
 - `vault_meta`: exactly one row; schema version, logical root ID, application generation, settings and migration watermarks.
 - `nodes`: 16-byte primary ID, nullable parent, node type, display name, sibling order, favorite, timestamps, format/dimensions/duration/codec/original size. The root is the only row with no parent.
@@ -78,6 +78,21 @@ The pinned baseline is SQLCipher 4.19.0 with encrypted header, 4096-byte cipher 
 - category, template-field, tag-field-value, saved-search, and settings tables corresponding to every current index-v13 field.
 
 All connections enable foreign keys. Deleting an original node cannot cascade silently over an inconsistent object set. Tree-cycle validation is application-enforced inside the same writer transaction. Text/blob/count limits are checked both at the wrapper and with schema constraints where practical. The normative initial DDL is `vault::v3::SCHEMA_SQL` in `src/vault/v3_schema.h`; Phase 107 must change it only through a versioned migration. Phase 105 tests its foreign keys, identity/role/root/tag constraints, schema version, and gallery/tag query plans.
+
+Schema v2 upgrades v1 in one encrypted database transaction under the writer
+lease. It stores video durations in microseconds (v1 milliseconds are multiplied
+by 1000), allows case-distinct sibling names, and accepts tag display names up to
+65535 bytes. The 4096-tag limit applies per node, not to the entire vault.
+Node-tag assignments preserve display spelling and insertion order independently
+of canonical tag identity. Description and field-value rows preserve their
+original spelling and ordering too. Upgrades leave object files and the header
+unchanged. Older readers reject schema v2. Read-only v1 snapshots are upgraded
+in an in-memory SQLCipher copy for inspection/restore; the source stays unchanged.
+
+Verification requires each media node to reference its correctly typed original
+with matching logical size. Thumbnails and posters are optional; any present
+object must have a role compatible with its owner. Ordinary unlock rejects
+incomplete conversions and reports damaged quick-verification results explicitly.
 
 ## Object file (`.osvo`)
 

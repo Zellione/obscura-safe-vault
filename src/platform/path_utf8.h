@@ -62,10 +62,4 @@ namespace platform {
     return std::fopen(p.c_str(), mode);
 }
 
-// freopen counterpart.
-[[nodiscard]] inline std::FILE* freopen_path(const std::filesystem::path& p, const char* mode, std::FILE* stream)
-{
-    return std::freopen(p.c_str(), mode, stream);
-}
-
 } // namespace platform

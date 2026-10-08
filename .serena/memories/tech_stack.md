@@ -17,30 +17,30 @@
 ## Runtime deps (vendored git submodules under `vendor/`)
 | Library | Version | How compiled |
 |---|---|---|
-| SDL3 | 3.4.10 | cmake once via `setup.sh`; static lib at `vendor/SDL3/build/libSDL3.a` (Linux) or `vendor/SDL3/build/SDL3-static.lib` / `Release/SDL3-static.lib` (Windows) |
+| SDL3 | 3.4.10 | cmake once via `setup.sh`; static lib at `vendor/SDL3/build/libSDL3.a` |
 | Monocypher | 4.0.2 | single `monocypher.c` compiled by premake |
 | stb | head | header-only (`stb_image.h`, `stb_truetype.h`) |
 | libwebp | 1.4.0 | WebP decode; cmake → `vendor/codecs-prefix`. Phase 57 also links **libwebpdemux** (`WebPAnimDecoder`) for animated WebP — the same cmake build already produced `libwebpdemux.a`, so only the premake `links` line changed. It is NOT gated: unlike GIF (FFmpeg), animated WebP plays in every build |
 | libde265 | 1.0.15 | HEIC (HEVC) decode; cmake → `vendor/codecs-prefix` |
 | libaom | 3.14.1 | AVIF (AV1) *stills* decode via libheif, decoder-only; needs **nasm**; cmake → `vendor/codecs-prefix`. Phase 40: also linked a second time into FFmpeg as the `libaom-av1` decoder for AV1 *video* (see FFmpeg row) — one vendored copy, two independent consumers |
-| libheif | 1.23.2 | HEIC/AVIF container; one `decode_heif_from_memory` covers both (Phase 95 / OSV-AUD-002 bumped from the vulnerable 1.18.2). **Build note:** ≥ 1.19 ships the `plugin_option` mechanism and builds at **C++20**; `WITH_X264` and `WITH_OpenH264_DECODER` default ON and are explicitly disabled in `scripts/build_codecs.{sh,bat}` (else libheif pulls in an AVC encoder/decoder); `WITH_LIBDE265=ON` + `WITH_AOM_DECODER=ON` + `ENABLE_PLUGIN_LOADING=OFF` keep libde265/libaom statically baked in (applications need no `heif_init()`; entry points auto-init). libde265 1.0.15 + libaom 3.14.1 satisfy its `find_package` minimums — verified by undefined-symbol scan of `libheif.a`. Decode fixtures now include grid (GHSA-2vh6) and overlay (GHSA-hg7q) regressions |
-| FFmpeg/libav | 7.1.1 | Video & audio decode-only (H.264/H.265 + ProRes/DNxHD-DNxHR/MJPEG for `.mov` pro codecs, Phase 28; VP8/VP9 for `.webm`, Phase 38; AV1 for `.webm`/`.mov` + QTRLE/Cinepak for `.mov`, Phase 40; aac/opus/mp3/vorbis/flac/ac3 audio; mov/mp4/m4v + matroska/webm demux; libswscale for video, swresample linked as transitive dependency of audio decoders — we do NOT use swresample for audio conversion, SDL_AudioStream handles that); configure-built static → `vendor/codecs-prefix`; needs **nasm**; linked by `link_av()` (avformat/avcodec/swscale/swresample/avutil, **then `aom` a second time** — see gotcha below) under `OSV_VENDORED_AV` (Phase 15–16). **AV1 gotcha (Phase 40):** FFmpeg's own native `av1` decoder is a hwaccel-dispatch-only shim (`AVERROR(ENOSYS)` without a HW accelerator — confirmed by direct testing, not documented in FFmpeg's own `--enable-decoder` help text); real software AV1 decode requires `--enable-libaom --enable-decoder=...,libaom_av1,...` (configure component name is `libaom_av1`, **underscore** — derived from the `ff_libaom_av1_decoder` extern symbol — while the runtime/display decoder name is `libaom-av1`, **hyphen**; passing the hyphenated form to `--enable-decoder` silently no-ops with a `did not match anything` warning easy to miss in a long build log). `PKG_CONFIG_PATH=$CODEC_PREFIX/lib/pkgconfig` points configure at the `aom.pc` `build_codec aom` already installed (Windows needs the `pkgconf` MSYS2 package, see ci.yml). Because the image-codec chain (`heif → de265 → aom → webp → sharpyuv`) links `aom` *before* `avformat`/`avcodec` in `premake5.lua`, and GNU ld's static-archive resolution is single-pass (a library is never re-scanned once ld has moved past it), avcodec's new `aom_codec_*` references go unresolved unless `aom` is **also** listed again after the `link_av()` block — `link_codecs()`'s occurrence still satisfies libheif's needs, the second one satisfies avcodec's. Also: **`ninja` does not detect a rebuilt `vendor/codecs-prefix/lib/libavcodec.a` as a relink trigger** (it's a prebuilt external file, not a ninja-generated build edge) — after rebuilding the vendored codecs with a changed decoder list, `rm -rf build/` before `scripts/gen.sh && scripts/test.sh`, or the test binary silently keeps running against the stale `.a`. |
+| libheif | 1.23.2 | HEIC/AVIF container; one `decode_heif_from_memory` covers both (Phase 95 / OSV-AUD-002 bumped from the vulnerable 1.18.2). **Build note:** ≥ 1.19 ships the `plugin_option` mechanism and builds at **C++20**; `WITH_X264` and `WITH_OpenH264_DECODER` default ON and are explicitly disabled in `scripts/build_codecs.sh` (else libheif pulls in an AVC encoder/decoder); `WITH_LIBDE265=ON` + `WITH_AOM_DECODER=ON` + `ENABLE_PLUGIN_LOADING=OFF` keep libde265/libaom statically baked in (applications need no `heif_init()`; entry points auto-init). libde265 1.0.15 + libaom 3.14.1 satisfy its `find_package` minimums — verified by undefined-symbol scan of `libheif.a`. Decode fixtures now include grid (GHSA-2vh6) and overlay (GHSA-hg7q) regressions |
+| FFmpeg/libav | 7.1.1 | Video & audio decode-only (H.264/H.265 + ProRes/DNxHD-DNxHR/MJPEG for `.mov` pro codecs, Phase 28; VP8/VP9 for `.webm`, Phase 38; AV1 for `.webm`/`.mov` + QTRLE/Cinepak for `.mov`, Phase 40; aac/opus/mp3/vorbis/flac/ac3 audio; mov/mp4/m4v + matroska/webm demux; libswscale for video, swresample linked as transitive dependency of audio decoders — we do NOT use swresample for audio conversion, SDL_AudioStream handles that); configure-built static → `vendor/codecs-prefix`; needs **nasm**; linked by `link_av()` (avformat/avcodec/swscale/swresample/avutil, **then `aom` a second time** — see gotcha below) under `OSV_VENDORED_AV` (Phase 15–16). **AV1 gotcha (Phase 40):** FFmpeg's own native `av1` decoder is a hwaccel-dispatch-only shim (`AVERROR(ENOSYS)` without a HW accelerator — confirmed by direct testing, not documented in FFmpeg's own `--enable-decoder` help text); real software AV1 decode requires `--enable-libaom --enable-decoder=...,libaom_av1,...` (configure component name is `libaom_av1`, **underscore** — derived from the `ff_libaom_av1_decoder` extern symbol — while the runtime/display decoder name is `libaom-av1`, **hyphen**; passing the hyphenated form to `--enable-decoder` silently no-ops with a `did not match anything` warning easy to miss in a long build log). `PKG_CONFIG_PATH=$CODEC_PREFIX/lib/pkgconfig` points configure at the `aom.pc` `build_codec aom` already installed. Because the image-codec chain (`heif → de265 → aom → webp → sharpyuv`) links `aom` *before* `avformat`/`avcodec` in `premake5.lua`, and GNU ld's static-archive resolution is single-pass (a library is never re-scanned once ld has moved past it), avcodec's new `aom_codec_*` references go unresolved unless `aom` is **also** listed again after the `link_av()` block — `link_codecs()`'s occurrence still satisfies libheif's needs, the second one satisfies avcodec's. Also: **`ninja` does not detect a rebuilt `vendor/codecs-prefix/lib/libavcodec.a` as a relink trigger** (it's a prebuilt external file, not a ninja-generated build edge) — after rebuilding the vendored codecs with a changed decoder list, `rm -rf build/` before `scripts/gen.sh && scripts/test.sh`, or the test binary silently keeps running against the stale `.a`. |
 | nlohmann/json | v3.12.0 | Archive `meta.json` parsing (Phase 27). Header-only single-header MIT lib; include path `vendor/json/single_include` (no build step, no premake project). Used exception-free: `json::parse(..., allow_exceptions=false)` → discarded value on malformed input. Only consumer: `src/ui/meta_json.cpp` |
 | miniz | master commit `e78dfd2` | ZIP reader (Phase 17). Plain-C static lib compiled by premake from the modern split sources (`miniz.c`/`miniz_tdef.c`/`miniz_tinfl.c`/`miniz_zip.c`); the only release tags v112–v114 are ancient SVN snapshots, so pinned to a master commit. Built + consumed with `MINIZ_NO_ZLIB_COMPATIBLE_NAMES` (else its `compress`/`crc32`/`inflate` clash with the libz avformat links). `vendor/miniz-shim/miniz_export.h` supplies the one CMake-generated header so the submodule stays pristine; consumers include the umbrella `"miniz.h"` (not `miniz_zip.h`, which lacks `mz_alloc_func`/`MZ_BEST_SPEED`) |
-| zlib | 1.3.2 | gzip filter dep for libarchive (Phase 34). cmake → `vendor/codecs-prefix`; `-DZLIB_BUILD_SHARED=OFF -DZLIB_BUILD_TESTING=OFF`. Windows static-lib output name is `zs.lib` (`zlib_static_suffix="s"` under `if(WIN32)` in its own CMakeLists.txt) — `link_archive()` in premake5.lua branches on `system:windows` for this |
+| zlib | 1.3.2 | gzip filter dep for libarchive (Phase 34). cmake → `vendor/codecs-prefix`; `-DZLIB_BUILD_SHARED=OFF -DZLIB_BUILD_TESTING=OFF`. Linked as `z` on Linux. |
 | xz / liblzma | 5.8.3 | LZMA2 filter dep for libarchive, covers `.7z`/`.txz` (Phase 34). cmake → `vendor/codecs-prefix`; `-DXZ_SANDBOX=no` is required for `--asan` builds — xz's own Landlock-sandboxing configure check hard-errors on seeing `-fsanitize=` in CFLAGS otherwise. Static lib output name is `lzma` on every platform (no suffix quirk, unlike zlib) |
 | libarchive | 3.8.8 (BSD-2-Clause) | 7z/RAR/TAR read-only import (Phase 34). cmake → `vendor/codecs-prefix`, out-of-tree build dir `vendor/.libarchive-build` (NOT `vendor/libarchive/build`, which the submodule's own source tree already tracks — cmake helper modules that an out-of-tree build there would clobber). Finds zlib/liblzma via `CMAKE_PREFIX_PATH` (same pattern libheif uses for libde265/libaom); every optional codec/crypto backend disabled except zlib+lzma (no bzip2/lz4/lzo/zstd — bzip2 has no CMake build upstream, so `.tbz2` is out of scope; no OpenSSL/mbedTLS/Nettle/CNG; no libxml2/expat; no ACL/xattr/iconv; no bsdtar/bsdcpio/bsdcat/test binaries). Linked by `link_archive()` under `OSV_VENDORED_ARCHIVE`; static lib output name is `archive` on every platform |
 | SQLCipher | 4.19.0 (`c4b275a4`) | Phase 105 v3 encrypted-database validation, promoted to the production link in Phase 107. `scripts/build_sqlcipher.sh` builds an out-of-tree static `libsqlite3.a` in `vendor/.sqlcipher-build[-asan]`; both `osv` and `osv_tests` link it through `link_sqlcipher()`. Raw 32-byte keys use `sqlite3_key`; database/journal canaries, wrong key, corrupt page, reopen, and the initial production `v3_db.*` boundary are tested. |
 | OpenSSL | 3.5.8 LTS (`f4dc4d58`) | SQLCipher's pinned static crypto provider. `scripts/build_openssl.sh` produces `openssl-prefix[-asan]/lib/libcrypto.a` with no shared libs, TLS, apps, modules, engines, legacy provider, docs, or upstream tests. The final test link names this archive explicitly and `scripts/test.sh` rejects dynamic sqlite/sqlcipher/crypto/ssl dependencies. |
 
-Image codecs are built by `scripts/build_codecs.{sh,bat}` (shared by `setup.{sh,bat}` and CI)
+Image codecs are built by `scripts/build_codecs.sh` (shared by `setup.sh` and CI)
 and installed into `vendor/codecs-prefix/`; premake's `link_image_codecs()` links them in
 order `heif → de265 → aom → webpdemux → webp → sharpyuv` (demux before webp: static-archive
 resolution is single-pass and libwebpdemux depends on libwebp). The build passes
 `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` (libde265's pre-3.5 cmake_minimum under CMake 4.x).
 
 **FFmpeg (Phase 15–16)** is a sibling vendored submodule (`vendor/ffmpeg`) built via **configure**
-(not cmake) into the same `vendor/codecs-prefix` by `build_codecs.{sh,bat}`: decode-only
+(not cmake) into the same `vendor/codecs-prefix` by `build_codecs.sh`: decode-only
 (`--disable-everything` then opt-in h264/hevc/prores/dnxhd/mjpeg/vp8/vp9/libaom_av1/qtrle/cinepak
 decoders (pro `.mov` codecs Phase 28; `.webm` VP8/VP9 Phase 38; AV1 + legacy `.mov` codecs Phase 40);
 Phase 52 additions: mpeg1video/mpeg2video/mpeg4/msmpeg4v1/msmpeg4v2/msmpeg4v3/wmv1/wmv2/wmv3/vc1/h263/flv1/vp6/vp6a/vp6f/svq1/svq3/dvvideo/msvideo1/rpza/huffyuv/ffv1/theora/rv10/rv20/rv30/rv40 video decoders,
@@ -49,7 +49,7 @@ mov/mp4/matroska/avi/mpegps/mpegts/asf/flv/ogg/rm/mpegvideo demuxers
 (`mpegvideo` added Phase 85: it is the raw-ES PROBE demuxer that codec-identifies MPEG video
 inside a program stream — `mpegps` sets `request_probe` and defers to it, so without it raw
 `.mpg` probed as Unknown-codec; probe-only component, decode-only design unchanged; keep the
-Linux and Windows scripts' demuxer lists identical),
+decoder and demuxer lists aligned),
 parsers mpegvideo/mpeg4video/h263/vc1/mpegaudio,
 `--enable-libaom --enable-avfilter --enable-filter=yadif` (yadif deinterlacing),
 swscale + swresample; no encoders/muxers/protocols/network/programs).
@@ -112,7 +112,7 @@ conversion using its own resampler — swresample is a transitive dependency but
 
 **libarchive + zlib + xz (Phase 34)** extend archive import beyond ZIP/CBZ (miniz, unchanged) to
 `.7z`/`.rar`/`.tar`(`.gz`/`.xz`)/`.cbr`/`.cb7`/`.cbt`, cmake-built into the same `vendor/codecs-prefix`
-by `build_codecs.{sh,bat}`. `link_archive()` defines `OSV_VENDORED_ARCHIVE` only when
+by `build_codecs.sh`. `link_archive()` defines `OSV_VENDORED_ARCHIVE` only when
 `lib/libarchive.a` is present (same presence-gating pattern as `link_av()`), so a build without it
 still links — `src/ui/archive_import.*` is declared unconditionally and returns a graceful "not
 supported" outcome, and `.zip`/`.cbz` keep working via miniz regardless. `ArchiveReader`
@@ -128,7 +128,7 @@ vendored static libs.
 ## Crypto
 - AEAD: XChaCha20-Poly1305 (192-bit nonce, random per chunk)
 - KDF: Argon2id (via Monocypher)
-- RNG shim: `src/crypto/random.*` — `getrandom` (Linux), `BCryptGenRandom` (Windows)
+- RNG shim: `src/crypto/random.*` — `getrandom` (Linux)
 
 ## Platforms
 - Primary: Linux x86_64 (Arch). Windows support removed (Phase 101);
@@ -138,35 +138,12 @@ vendored static libs.
 App tries `assets/…` relative to cwd first, then `SDL_GetBasePath()` (packaged installs).
 
 ## CI
-`.github/workflows/` — ci.yml matrix covers Linux and Windows (macOS support dropped).
-
-Phase 105 caches the out-of-tree static OpenSSL + SQLCipher validation builds in
-the shared premake/SDL setup action. ASAN builds prefer their separately
-instrumented prefixes locally and safely fall back to the cached plain static
-probe in CI; SQLCipher is test-only until Phase 107.
-
-Release executables opt into exploit mitigations explicitly in `premake5.lua`:
-Linux uses PIE plus full RELRO/immediate binding (`-fPIE -pie
--Wl,-z,relro,-z,now`) in addition to stack protection and fortify; MSVC uses
-Control Flow Guard and CET compatibility (`/guard:cf /CETCOMPAT`). This avoids
-depending on host-distribution linker defaults.
-
-The Windows legs compile with `/MP` (`multiprocessorcompile "On"` in premake5.lua)
-and `/Z7` debug info (`debugformat "c7"` — no mspdbsrv serialisation, and the ccache
-prerequisite: ccache cannot cache `/Zi`). On top, ci.yml wires **ccache** for the app
-build: the REAL ccache.exe (NOT chocolatey's shim launcher — that re-launches with
-argv[0]=ccache and breaks masquerading with exit -1) is copied as `cl.exe` into a dir
-handed to MSBuild via `/p:CLToolPath`, with `/p:TrackFileAccess=false` (FileTracker is
-incompatible with a wrapped compiler) and `/p:UseMultiToolTask=true` (one cl.exe per
-source file — MSBuild's MTT replaces `/MP`, which ccache cannot cache). `.ccache` is
-cached per config (`ccache-win2022-<config>-<sha>` + restore-keys prefix), a "ccache
-stats" step after the build is the tell-tale if invocations ever start falling back to
-the real compiler. Measured (PR #155): warm-cache hit rate 505/505; Windows Debug
-12m29s → ~3m, Release 17m45s → ~3m warm (worst case on a cold cache ≈ the /MP-only
-9-14m). release.yml does NOT wire ccache (rare tag builds; it still benefits from /MP).
-release.yml runs on tag pushes (`v*`): rebuilds the two Release packages with OSV_VERSION
-from the tag (mirrors ci.yml's Release legs + cache keys — keep in sync), runs tests, then
-attaches packages + SHA256SUMS.txt to the tag's GitHub release (draft-created if absent).
+`.github/workflows/ci.yml` runs GCC/Clang Debug/Release on Linux, with
+separate ASAN, TSan, and no-FFmpeg jobs. SQLCipher and OpenSSL are cached static
+production dependencies; local sanitizers prefer separately instrumented builds.
+Release uses PIE, full RELRO/immediate binding, stack protection and fortify.
+`release.yml` builds the Linux release tarball for version tags and attaches it
+with SHA256SUMS.txt to the GitHub release.
 The ASAN job (Linux-only) builds vendored SDL3 (since Phase 4) and the image codecs (since
 Phase 9): running the C decoders under ASAN/UBSan on untrusted input is high value. nasm is
 installed on every leg for libaom.

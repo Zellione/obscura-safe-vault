@@ -92,7 +92,7 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
 
 ### Event handling (Phase 56)
 - `back_click.{h,cpp}` — `is_back_click(SDL_Event&)` detects right button-down; `make_back_key_event()` constructs a synthetic Escape key-down. `App::dispatch_event` translates every right button-down into an Escape and swallows the release, so the button mirrors Esc exactly everywhere (grid multi-selection clears first, fullscreen exits on first click, modals all inherit Esc handling). Pure helpers are testable without a window.
-- `App::pump_events` and `gfx::Window` — HiDPI mouse coordinate fixing. `pump_events` runs `SDL_ConvertEventToRenderCoordinates(renderer, &e)` on each SDL event before dispatching, converting button/motion/wheel positions from window points into render-pixel space. `Window::mouse_x()`/`mouse_y()` route `SDL_GetMouseState` through `SDL_RenderCoordinatesFromWindow`. Both conversions are identity at 1.0 density (Linux dev box) and scale at >1.0 (Windows). Hit-testing (tile clicks, strip hover, video seek bar) and edge-click navigation now land where the cursor is on all displays.
+- `App::pump_events` and `gfx::Window` — HiDPI mouse coordinate fixing. `pump_events` runs `SDL_ConvertEventToRenderCoordinates(renderer, &e)` on each SDL event before dispatching, converting button/motion/wheel positions from window points into render-pixel space. `Window::mouse_x()`/`mouse_y()` route `SDL_GetMouseState` through `SDL_RenderCoordinatesFromWindow`. Both conversions are identity at 1.0 density (Linux dev box) and scale at >1.0. Hit-testing (tile clicks, strip hover, video seek bar) and edge-click navigation now land where the cursor is on all displays.
 
 ### Session state
 - App groups all session-scoped UI state into one `SessionUi sessions_` member (cpp:S1820
@@ -186,12 +186,8 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   drawn, or the popup's scroll bound silently breaks.
 
 ## platform/
-- `path_utf8.h` (Phase 70) — header-only UTF-8↔path vocabulary: `utf8_to_path`,
-  `path_to_utf8` (no-throw), `path_to_utf8_generic`, `fopen_path`/`freopen_path`
-  (`_wfopen`/`_wfreopen` on Windows). Pure std — the ONE platform/ header includable
-  from any module (vault, gfx, ui, app). Exists because narrow `path::string()`/
-  `path{std::string}` go through the ANSI code page on Windows (throwing on CJK —
-  the Phase-70 import crash) and are now banned in src/ (see `mem:conventions`).
+- `path_utf8.h` — pure-std UTF-8/path vocabulary (`utf8_to_path`,
+  `path_to_utf8`, `path_to_utf8_generic`, `fopen_path`), includable from any module.
 - `paths.*`, `file_dialog.*` — config dirs, SDL file dialogs (`save_vault()`). Phase 111 adds
   `open_vault_directory()` / `Purpose::VaultDirectory` for v3 roots. Each open is
   tagged with a `Purpose` + `take_result(Purpose)` so one shared dialog polled by two handlers
@@ -200,9 +196,7 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   (dialog results, `vaults.list` lines) go through `platform::normalize_user_path` before they
   reach `fopen`. **Phase 72:** the dialog callbacks store their picked paths via
   `platform::normalize_external_path_utf8` (paths.h: `normalize_user_path` → `path_to_utf8`)
-  — the ONE sanctioned dialog→`std::string` conversion. They previously used
-  `norm->string()`, which on Windows throws for CJK names inside the SDL callback (the
-  Phase-72 import crash). Consumers convert the stored UTF-8 strings back with
+  — the sanctioned dialog→string boundary. Consumers convert back with
   `utf8_to_path`, never the narrow `fs::path` ctor. `config_dir()` decodes SDL_GetPrefPath's
   UTF-8 with `utf8_to_path` too. Whole-file reads always take an explicit byte ceiling and
   handle allocation failure; metadata imports are capped at 16 MiB. Keyfiles use the separate
@@ -210,29 +204,23 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   `crypto::SecureBytes`** (mlock'd best-effort), so every failure path (partial read,
   too-large file, allocation failure) wipes the bytes already read instead of releasing a
   plain vector. New keyfiles are claimed with one atomic exclusive-create
-  operation (never an exists-then-open check), are owner-only (`0600` on POSIX; protected
-  current-user DACL on Windows), and are flushed+synced before success is reported. Windows
-  marks a failed partial creation for deletion through the still-open handle; POSIX leaves the
-  owner-only short file in place rather than risk unlinking a concurrently replaced pathname.
+  operation (never an exists-then-open check), are owner-only (0600), and
+  flushed+synced before success. Failed partial creation leaves the owner-only
+  short file rather than unlinking a concurrently replaced pathname.
 - `folder_dialog.*` — export destination picker (same Phase-72 UTF-8 storage rule).
 - `atomic_file.*` (Phase 98 / OSV-AUD-005) — the ONLY sanctioned export sink.
   `create_new_file_within(dir, safe_component)` returns an already-open, exclusively-created
   `NewOutputFile` (move-only, RAII-closed; `display_path` for logs only, never reopened).
   Linux: holds the directory open and creates relative to its fd with
   `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS)` (openat `O_NOFOLLOW|O_EXCL` fallback;
-  `ELOOP` from the no-symlink resolve = collision → suffix). Windows: `CreateFileW(CREATE_NEW)`
-  then `GetFinalPathNameByHandleW` final-handle containment vs the directory's own resolved
-  path (intermediate-junction redirection discards the file). Collision naming
+  `ELOOP` from the no-symlink resolve = collision → suffix). Collision naming
   (`"name (n).ext"`) rides the exclusive create (10k bound) — there is no probe-then-open
   window; symlinks/reparse points at the candidate count as collisions and are suffixed past.
   Rejects separators/`.`/`..`/NUL/≥256-byte components up front. `inject_atomic_create_collision()`
   is the deterministic attacker-race seam. SDL-free, layering exception like path_utf8.h.
 - `locale_init.h` (Phase 72) — header-only `platform::init_locale()`: switches **LC_CTYPE
   only** (never LC_NUMERIC — decimal-comma corruption) to a UTF-8 locale; env locale with
-  `C.UTF-8` fallback on POSIX. **Deliberate NO-OP on Windows** — libarchive keeps the wide
-  name there regardless (ArchiveReader's wide fallback covers 7z/RAR), and any non-"C" CRT
-  locale makes libarchive (get_current_codepage reads setlocale) build an OEM(CP437)→locale
-  conversion for tar names, mangling raw UTF-8 bytes into valid-but-wrong UTF-8. Called first
+  `C.UTF-8` fallback. Called first
   in `app/main.cpp` and `tests/test_main.cpp`, before any threads. Exists because libarchive
   converts 7z/RAR entry names (UTF-16 in-header) through the current locale at parse time and
   returns NULL names under the default `"C"` locale (see ArchiveReader in `mem:module/ui`).
@@ -279,21 +267,14 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   Release dialog.
   `grow_secure_mem_budget(bytes)`: best-effort growth of the page-lockable budget, called
   once in `App::init()` (ALL configs, 256 MiB) before any SecureBuffer/SecureBytes exists —
-  Windows raises the minimum working-set size via `SetProcessWorkingSetSize` (VirtualLock's
-  cap; ~200 KB default meant every pixel-buffer lock silently failed), Linux raises soft
-  `RLIMIT_MEMLOCK` to the hard limit. Returns whether the platform now reports >= `bytes`
-  lockable. Windows caveat: VirtualLock does not protect against hibernation
-  (`hiberfil.sys`). The mlock-failure warning text comes from `crypto::mlock_fail_hint()`
-  (platform-appropriate advice, secure_mem.h). Also
-  `redirect_stream_to_file`/`redirect_diagnostics_to_log_file` (Windows Release only — a
-  windowless WindowedApp process has no valid stdout/stderr handle, so every
-  `std::println(stderr,...)` would throw `std::system_error` and terminate(); redirects both to
-  `config_dir()/console.log`).
+  raises soft RLIMIT_MEMLOCK to the hard limit. Reports whether the budget
+  reaches the request; hibernation remains outside mlock protection. The
+  warn-once advice comes from `crypto::mlock_fail_hint()`. Diagnostics go to
+  stderr; obsolete console redirect functions have been removed.
 - `error_log.*` — persistent best-effort error log: `log_error(tag,msg)` appends `[tag] msg`
   to stderr + `config_dir()/error.log`. `install_terminate_logger()` installs
   `std::set_terminate` so an uncaught exception logs `what()` before the process dies; called
   first in `App::init()`. Never logs decrypted plaintext or key material (invariant #5).
 - `safe_print.h` — `platform::safe_println<Args...>(stream,fmt,args...)` wraps `std::println`
-  in try/catch, swallowing any `std::system_error` from a failed write (Windows Release
-  windowless stdout/stderr). Every diagnostic print call site must go through this wrapper
+  in try/catch, swallowing failures from broken/closed streams. Every diagnostic print call site must go through this wrapper
   instead of raw `std::println`.

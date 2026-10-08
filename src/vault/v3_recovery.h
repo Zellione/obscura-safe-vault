@@ -7,10 +7,11 @@
 #include <cstdint>
 #include <span>
 #include <vector>
+#include "vault/op_progress.h"
 
 namespace vault::v3 {
 
-enum class RecoveryStatus : uint8_t { Ok, DatabaseError, FilesystemError, Corrupt };
+enum class RecoveryStatus : uint8_t { Ok, DatabaseError, FilesystemError, Corrupt, Cancelled };
 enum class VerifyDepth : uint8_t { Quick, Deep };
 enum class IntegrityFindingKind : uint8_t {
     MissingReferencedObject,
@@ -18,6 +19,7 @@ enum class IntegrityFindingKind : uint8_t {
     UnauthenticObject,
     MalformedObject,
     UnreferencedGarbage,
+    InvalidMediaReferences,
 };
 
 struct IntegrityFinding {
@@ -78,6 +80,7 @@ collect_garbage(const VaultRoot& root, const WriterLock& writer_lock, const Data
 // Findings contain opaque IDs only; user metadata and plaintext never enter diagnostics.
 [[nodiscard]] VerificationReport verify_vault(const VaultRoot& root, const Database& database,
                                               std::span<const uint8_t, crypto::KEY_SIZE> master_key,
-                                              const Id& vault_id, VerifyDepth depth) noexcept;
+                                              const Id& vault_id, VerifyDepth depth,
+                                              CancellationToken cancel = {}) noexcept;
 
 }  // namespace vault::v3

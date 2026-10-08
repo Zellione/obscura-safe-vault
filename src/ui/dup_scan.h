@@ -48,8 +48,7 @@ struct DupScanItem {
                                                           std::string_view scope_path = {});
 
 // Post-apply re-resolution (Phase 64). remove_media_batch ends in
-// auto_reclaim_space(), which on Windows can compact() — relocating every
-// surviving chunk — so the remaining groups' spans must be re-read from the
+// auto_reclaim_space(); remaining groups must be re-resolved from the
 // index before the next wave renders or fetches anything. MAIN-THREAD ONLY
 // (walks the index tree). Members whose node_path no longer resolves to a
 // media node of the same type are dropped; groups shrinking below 2 members

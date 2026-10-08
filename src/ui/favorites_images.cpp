@@ -31,7 +31,7 @@ void FavoritesImages::activate(const vault::SearchHit&, int index)
 SDL_Texture* FavoritesImages::thumb_texture(const vault::IndexNode& node)
 {
     if (node.meta.thumb_length == 0) return nullptr;
-    const uint64_t key = node.meta.data_offset;
+    const uint64_t key = node.meta.thumb_offset;
     if (SDL_Texture* t = cache_.get(key)) return t;
 
     if (failed_.contains(key) || worker_.pending(key)) return nullptr;

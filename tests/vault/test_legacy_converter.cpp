@@ -5,6 +5,7 @@
 #include "vault/legacy_converter.h"
 #include "vault/staging.h"
 #include "vault/v3_fs.h"
+#include "vault/v3_read_session.h"
 #include "vault/v3_recovery.h"
 #include "vault/vault.h"
 
@@ -235,14 +236,11 @@ TEST(legacy_converter_persists_stable_node_mapping_for_resume)
     REQUIRE(vault::convert_legacy_vault(source, request).status ==
             vault::LegacyConversionStatus::Cancelled);
 
-    vault::Vault partial;
-    REQUIRE(vault::Vault::open(platform::path_to_utf8(destination_path), partial) ==
-            vault::VaultResult::Ok);
-    REQUIRE(partial.unlock(DEST_PASSWORD, {}) == vault::VaultResult::Ok);
-    const auto* partial_root = partial.resolve_node("");
-    REQUIRE(partial_root != nullptr);
-    const auto first = partial_root->node_id;
-    partial.lock();
+    auto partial = vault::v3::ReadSession::open(destination_path);
+    REQUIRE(partial.session);
+    REQUIRE(partial.session->unlock(DEST_PASSWORD, {}) == vault::v3::ReadStatus::Ok);
+    const auto first = partial.session->root().node_id;
+    partial.session->lock();
 
     stop = false;
     const auto resumed = vault::convert_legacy_vault(source, request);

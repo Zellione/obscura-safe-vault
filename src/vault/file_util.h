@@ -67,24 +67,18 @@ namespace vault::fileutil {
 // chunk space IN PLACE — no temp copy, no offset rewrite, so no transient
 // doubling of disk use. Only whole filesystem blocks fully inside the range are
 // freed; partial blocks at the edges are merely zeroed, never the live data
-// outside the range. Returns false (a harmless no-op) on platforms or
-// filesystems without hole-punch support. Linux only for now.
+// outside the range. Returns false (a harmless no-op) on filesystems
+// without hole-punch support.
 [[nodiscard]] inline bool punch_hole(std::FILE* fp, uint64_t offset, uint64_t len) noexcept
 {
     if (len == 0) {
         return false;
     }
-#if defined(__linux__)
     if (std::fflush(fp) != 0) {  // flush stdio so the fd sees the bytes
         return false;
     }
     return ::fallocate(::fileno(fp), FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
                        static_cast<off_t>(offset), static_cast<off_t>(len)) == 0;
-#else
-    (void)fp;
-    (void)offset;
-    return false;
-#endif
 }
 
 // Truncate the file to exactly `new_size` bytes (flushing stdio first so no

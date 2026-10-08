@@ -18,7 +18,7 @@ TEST(thumb_key_carries_read_span_image)
     img.meta.thumb_offset = 4096;
     img.meta.thumb_length = 512;
     const ui::ThumbKey k = ui::thumb_key_for(img);
-    CHECK_EQ(k.key, 1000u);
+    CHECK_EQ(k.key, 4096u);
     CHECK_EQ(k.ref.offset, 4096u);
     CHECK_EQ(k.ref.length, 512u);
     CHECK(k.present);

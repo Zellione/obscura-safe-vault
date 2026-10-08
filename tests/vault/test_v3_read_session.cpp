@@ -462,7 +462,7 @@ TEST(v3_prestaged_image_persists_original_thumbnail_and_metadata)
     CHECK_BYTES_EQ(thumb_back.as_span(), jpeg);
 }
 
-TEST(v3_unattached_staged_object_becomes_garbage_without_blocking_later_commits)
+TEST(v3_unattached_staged_object_remains_readable_until_session_ends)
 {
     TempRoot temp;
     const crypto::KdfParams params{1, 8, 1};
@@ -479,12 +479,13 @@ TEST(v3_unattached_staged_object_becomes_garbage_without_blocking_later_commits)
                                              {}) == vault::v3::ReadStatus::Ok);
     crypto::SecureBytes abandoned_plain;
     CHECK(created.session->read_id(abandoned, vault::v3::ObjectRole::OriginalImage,
-                                   abandoned_plain) == vault::v3::ReadStatus::BadFormat);
+                                   abandoned_plain) == vault::v3::ReadStatus::Ok);
 
     auto root = created.session->root();
     auto live = vault::IndexNode::image("live.bin");
     live.node_id[0] = 0x5a;
     live.meta.format = vault::ImageFormat::Unknown;
+    live.meta.orig_size = bytes.size();
     REQUIRE(created.session->stage_object(live.node_id, vault::v3::ObjectRole::OriginalImage,
                                           static_cast<uint8_t>(live.meta.format),
                                           bytes) == vault::v3::ReadStatus::Ok);
@@ -495,6 +496,10 @@ TEST(v3_unattached_staged_object_becomes_garbage_without_blocking_later_commits)
     REQUIRE(created.session->read(root.children[0], vault::v3::ObjectRole::OriginalImage,
                                   roundtrip) == vault::v3::ReadStatus::Ok);
     CHECK_BYTES_EQ(roundtrip.as_span(), bytes);
+    created.session->lock();
+    REQUIRE(created.session->unlock(PASSWORD, {}) == vault::v3::ReadStatus::Ok);
+    CHECK(created.session->read_id(abandoned, vault::v3::ObjectRole::OriginalImage,
+                                   abandoned_plain) == vault::v3::ReadStatus::BadFormat);
 }
 
 TEST(v3_and_legacy_apply_the_same_user_visible_mutation_contract)

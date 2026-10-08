@@ -108,3 +108,12 @@ File operations, duplicate scanning, and migration jobs running on background th
   destructor (a bare jthread join would block, uncancelled, for the whole pass). The idle
   auto-lock is suppressed while the job is active (see module/app) — it used to fire
   mid-upgrade and tear the vault down under the coordinator.
+
+Directory import queue snapshots commit through the backend-aware CommitLane
+entry point (synchronous SQL transaction). Duplicate/migration reads dispatch
+explicit original-image/video-frame roles; zero-length v3 video span placeholders
+do not suppress authenticated frame reads.
+
+MigrationJob joins multi-frame originals directly in SecureBytes; no ordinary
+heap plaintext concatenation buffer remains. Conversion carries both job and
+progress cancellation flags through bounded copy/verification/digest loops.

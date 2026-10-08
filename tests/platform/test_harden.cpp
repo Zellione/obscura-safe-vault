@@ -42,46 +42,6 @@ TEST(disable_core_dumps_preserves_portal_access)
     CHECK_EQ(WEXITSTATUS(status), 0);
 }
 
-TEST(redirect_stream_to_file_succeeds_and_writes_land_in_the_file)
-{
-    fs::path p = fs::temp_directory_path() / "osv_redirect_stream.log";
-    std::error_code ec;
-    fs::remove(p, ec);
-
-    std::FILE* f = std::tmpfile();
-    REQUIRE(f != nullptr);
-
-    CHECK_TRUE(platform::redirect_stream_to_file(f, p));
-    std::fputs("hello\n", f);
-    std::fclose(f);
-
-    std::ifstream in(p, std::ios::binary);
-    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    CHECK_EQ(content, std::string("hello\n"));
-    fs::remove(p, ec);
-}
-
-TEST(redirect_stream_to_file_returns_false_for_an_unopenable_path)
-{
-    // A path inside a directory that doesn't exist can never be opened for
-    // writing; the function must report failure rather than crash. Targets
-    // the process's own stdin — a pre-existing global stream, exactly like
-    // the real stdout/stderr this function targets in production — rather
-    // than a freshly heap-allocated one: per POSIX, a stream's state after a
-    // failed freopen() is undefined, so deciding whether to fclose() a fresh
-    // allocation afterward is inherently unsafe.
-    // Nothing else in this test binary reads from stdin.
-    fs::path bad = fs::temp_directory_path() / "osv_no_such_dir_xyz" / "file.log";
-    CHECK_FALSE(platform::redirect_stream_to_file(stdin, bad));
-}
-
-TEST(redirect_diagnostics_to_log_file_call)
-{
-    // POSIX logs go directly to stderr; the function is a no-op and must be
-    // callable without crashing (called unconditionally from App::init()).
-    platform::redirect_diagnostics_to_log_file();
-}
-
 // grow_secure_mem_budget() must report success for a small request: 1 MiB is
 // below the Linux RLIMIT_MEMLOCK default (8 MiB).
 TEST(grow_secure_mem_budget_small_request_succeeds)

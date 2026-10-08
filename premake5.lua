@@ -53,9 +53,7 @@ local san_suffix = _OPTIONS["asan"] and "-asan" or (_OPTIONS["tsan"] and "-tsan"
 -- falls back to a system SDL3 install.
 -- ---------------------------------------------------------------------------
 local function link_sdl3()
-    -- Linux only (Phase 101): cmake names the static lib libSDL3.a on every
-    -- supported platform (Ninja/Make); the Windows SDL3-static.lib + VS
-    -- generator variants are gone.
+    -- Linux cmake builds the static library as libSDL3.a.
     local sdl3_build = path.join(os.getcwd(), "vendor/SDL3/build")
     if os.isfile(path.join(sdl3_build, "libSDL3.a")) then
         includedirs { "vendor/SDL3/include" }
@@ -104,17 +102,10 @@ local function link_image_codecs()
         includedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
         -- Static-link order matters: dependents before dependencies
-        -- (heif → de265, aom ; webp → sharpyuv). The lib filenames differ by
-        -- platform: on Unix `-lNAME` finds `libNAME.a`, but MSVC links the name
-        -- verbatim and cmake keeps the `lib` prefix on libde265/libwebp/libsharpyuv
-        -- (heif/aom have none), so Windows needs the prefixed names.
-        -- We link libheif statically; without this its headers declare the API
-        -- as __declspec(dllimport) on MSVC (no-op elsewhere), which breaks the link.
+        -- (heif → de265, aom; webp → sharpyuv).
         defines { "OSV_VENDORED_CODECS", "LIBHEIF_STATIC_BUILD" }
         -- libwebpdemux (Phase 57) provides WebPAnimDecoder for animated WebP and
         -- depends on libwebp, so it must precede it in the static link order.
-        -- Linux-only (Phase 101): the lib-de265 / libwebp / libsharpyuv prefixes
-        -- were a Windows cmake quirk and are no longer needed.
         links { "heif", "de265", "aom", "webpdemux", "webp", "sharpyuv" }
     end
 end
@@ -262,16 +253,7 @@ local function link_archive()
     if cmake_static_lib(prefix, "archive") then
         includedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
-        -- archive.h's __LA_DECL macro defaults every archive_*/archive_entry_*
-        -- declaration to __declspec(dllimport) on Windows unless the consuming
-        -- translation unit defines LIBARCHIVE_STATIC (a no-op on other
-        -- platforms) -- without it MSVC expects an import library for a
-        -- symbol that only exists in the static lib, failing with
-        -- unresolved __imp_archive_* at link time. Same pattern as
-        -- LIBHEIF_STATIC_BUILD above for libheif's own dllexport/dllimport guard.
         defines     { "OSV_VENDORED_ARCHIVE", "LIBARCHIVE_STATIC" }
-        -- Linux-only (Phase 101): zlib's "zs" Windows-only static suffix is
-        -- gone; zlib + liblzma + libarchive all use their canonical Linux names.
         links { "archive", "lzma", "z" }
     end
 end

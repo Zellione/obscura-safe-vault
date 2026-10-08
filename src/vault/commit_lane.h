@@ -4,7 +4,8 @@
 // full-snapshot index blobs in generation order, coalescing: only the newest
 // pending blob is ever written (each blob is a complete snapshot, so skipping
 // stale ones is always safe). All disk work happens under the vault's write
-// mutex via index_io::commit_plain_blob.
+// mutex via index_io::commit_plain_blob for legacy files. Directory snapshots
+// use synchronous transactional commits on the tree-owning caller thread.
 
 #include <atomic>
 #include <condition_variable>
@@ -34,7 +35,8 @@ public:
     // unique_ptr and never moves it while a CommitLane is bound.
     void start(Vault& v);
 
-    // MAIN THREAD: serialize the tree NOW (cheap, memory-only) and hand the
+    // MAIN THREAD: directory vaults commit transactionally before returning.
+    // For legacy vaults, serialize the tree NOW (cheap, memory-only) and hand the
     // blob to the lane, replacing any not-yet-written pending blob. Returns
     // false if serialization failed or the lane has failed (failed() true).
     [[nodiscard]] bool enqueue_snapshot();

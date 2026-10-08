@@ -227,6 +227,10 @@ static const char* unlock_error_message(vault::VaultResult r)
         return "Could not read/write the vault file.";
     case Busy:
         return "Vault is busy in another process.";
+    case IncompleteConversion:
+        return "Conversion incomplete. Open the original vault and resume conversion.";
+    case Damaged:
+        return "Vault is damaged: missing or inconsistent media. Restore a verified backup.";
     case UnsupportedVersion:
         return "Vault was created by a newer unsupported version.";
     case AlreadyExists:

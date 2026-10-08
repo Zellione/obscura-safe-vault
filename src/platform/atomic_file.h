@@ -10,13 +10,12 @@
 // Contract of create_new_file_within:
 //   * ATOMIC collision handling — the exclusive create itself is the existence
 //     test, so there is no window in which another process's file gets
-//     truncated (O_EXCL / CREATE_NEW are the arbiter, not a preceding stat).
-//   * NO symlink following — RESOLVE_NO_SYMLINKS + O_NOFOLLOW / final-handle
-//     reparse containment; a link at the candidate name simply counts as a
+//     truncated (O_EXCL is the arbiter, not a preceding stat).
+//   * NO symlink following — RESOLVE_NO_SYMLINKS + O_NOFOLLOW; a link at the candidate name simply
+//   counts as a
 //     collision and is suffixed past.
 //   * CONTAINMENT — creation happens relative to an open directory (Linux
-//     openat2 RESOLVE_BENEATH / openat on a dirfd; Windows CREATE_NEW then a
-//     GetFinalPathNameByHandleW prefix check), so a swap of the directory name
+//     openat2 RESOLVE_BENEATH / openat on a dirfd), so a swap of the directory name
 //     itself cannot redirect the write, and `safe_component` must be one plain
 //     filename (the helper rejects any separator / "." / ".." / NUL up front).
 //   * The caller receives an already-open handle it writes into and then drops

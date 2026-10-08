@@ -35,20 +35,11 @@
   `tests/gfx/test_text.cpp::font_atlas_renders_ui_typography` — that test is the guard.
 
 ## Paths are UTF-8 (Phase 70)
-- A `std::string` holding a filesystem path is **UTF-8 by definition**. The narrow
-  conversions `path::string()`, `path::generic_string()`, and `fs::path{std::string}`
-  are **banned in `src/`** — on Windows they round-trip through the ANSI code page:
-  `string()` THROWS `std::system_error` for unmappable chars (the Phase-70 import
-  crash), the narrow ctor mis-decodes SDL's UTF-8 dialog strings, and
-  `fopen(path.string())` cannot open non-ANSI names at all.
-- Use `src/platform/path_utf8.h`: `platform::utf8_to_path(sv)`, `platform::path_to_utf8(p)`
-  (no-throw; ill-formed native names degrade to a placeholder), `path_to_utf8_generic(p)`
-  (forward-slash form — vaults.list lines), `fopen_path(p, mode)` / `freopen_path(p, mode, stream)`
-  (`_wfopen`/`_wfreopen` on Windows).
-- **Layering exception:** `platform/path_utf8.h` is a pure-std vocabulary header (no SDL,
-  no OS handles beyond `_wfopen`) and is includable from ANY module — including `src/vault/`
-  and `src/gfx/` — like a std header. `std::fopen` may appear only in `crypto/random.cpp`
-  (`/dev/urandom` literal, POSIX-only) and inside `path_utf8.h` itself.
+- Filesystem path strings are UTF-8. Keep conversions at `platform/path_utf8.h`:
+  `utf8_to_path`, `path_to_utf8`, `path_to_utf8_generic`, and `fopen_path`.
+- External dialog/registry paths must pass `normalize_user_path` validation.
+- `path_utf8.h` is a pure-std vocabulary header includable from any module.
+  Keep direct `std::fopen` limited to it and the RNG's `/dev/urandom` literal.
 
 ## Module boundaries
 - `src/crypto/` wraps Monocypher — no SDL or UI deps.
@@ -78,16 +69,7 @@
   orphaned_chunks` cleared `AUTO_COMPACT_MIN_WASTE` by under 4% (272286 vs 262144) that
   way. Use incompressible bytes (`job_incompressible`, fixed-seed splitmix64) so stored
   size tracks raw size, and leave a multiple of margin.
-- **A test that has never run on Windows is not a passing test.** When an MSVC leg is
-  red for a build reason, every test in it is unverified, and fixing the build can
-  expose real failures that were hidden for a whole phase. Do not read "MSVC was
-  already failing" as "MSVC is fine".
-- **Deletion leaves different state per platform** — see `mem:module/vault`
-  `auto_reclaim_space`. A test that deletes media and then asserts on `wasted_bytes()`
-  must keep the waste under the auto-reclaim gate (`waste * AUTO_COMPACT_WASTE_RATIO
-  < size`), or it silently asserts Linux-only behaviour.
-
-## Build configurations (beyond MSVC-vs-libstdc++ source differences)
+## Build configurations
 - An `inline` function defined in a header must be *included*, never hand-forward-declared
   in a `.cpp`. A non-inline declaration links at `-O0` only by luck — off the weak
   out-of-line copies other TUs emit — and fails every Release build with an undefined

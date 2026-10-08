@@ -13,14 +13,6 @@
 namespace vault::v3 {
 namespace {
 
-uint64_t cache_identity(const Id& id, uint8_t role) noexcept
-{
-    uint64_t value = 1469598103934665603ULL ^ role;
-    for (const uint8_t byte : id)
-        value = (value ^ byte) * 1099511628211ULL;
-    return value == 0 ? role : value;
-}
-
 bool valid_media_values(const NodeRecord& record) noexcept
 {
     const auto value_or_unknown = [](const std::optional<int>& value, int maximum) {
@@ -31,7 +23,8 @@ bool valid_media_values(const NodeRecord& record) noexcept
     if (record.type == NodeType::Video)
         return value_or_unknown(record.media_format, std::to_underlying(VideoContainer::RM)) &&
                value_or_unknown(record.codec, std::to_underlying(VideoCodec::RV40)) &&
-               record.duration_ms.value_or(0) <= std::numeric_limits<uint64_t>::max() / 1000;
+               record.duration_us.value_or(0) <=
+                   static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
     return !record.media_format.has_value() && !record.codec.has_value();
 }
 
@@ -73,36 +66,12 @@ IndexNode node_from_record(const NodeRecord& record)
         node.vmeta.codec = static_cast<VideoCodec>(record.codec.value_or(0xff));
         node.vmeta.width = record.width.value_or(0);
         node.vmeta.height = record.height.value_or(0);
-        node.vmeta.duration_us = record.duration_ms.value_or(0) * 1000;
+        node.vmeta.duration_us = record.duration_us.value_or(0);
         node.vmeta.orig_size = record.original_size.value_or(0);
         node.vmeta.created_ts = record.created_ts;
         node.vmeta.chunk_size = VIDEO_OBJECT_FRAME_PLAIN;
     }
     return node;
-}
-
-void apply_object_markers(IndexNode& node, const std::vector<ObjectRecord>& objects)
-{
-    using enum ObjectRole;
-    for (const auto& object : objects) {
-        if (object.node_id != node.node_id) continue;
-        if (node.is_image() && object.role == Thumbnail) {
-            node.meta.thumb_offset = cache_identity(node.node_id, 2);
-            node.meta.thumb_length = object.encrypted_length;
-        } else if (node.is_image() && object.role == OriginalImage) {
-            node.meta.data_offset = cache_identity(node.node_id, 1);
-            node.meta.data_length = object.encrypted_length;
-        } else if (node.is_video() && object.role == Poster) {
-            node.vmeta.poster_offset = cache_identity(node.node_id, 3);
-            node.vmeta.poster_length = object.encrypted_length;
-        } else if (node.is_video() && object.role == OriginalVideo) {
-            node.vmeta.orig_size = object.plaintext_length;
-            node.vmeta.chunk_size = object.frame_plain_limit;
-            node.vmeta.chunks.resize(object.frame_count);
-        }
-    }
-    for (auto& child : node.children)
-        apply_object_markers(child, objects);
 }
 
 bool load_settings(const Database& database, VaultSettings& settings) noexcept
@@ -200,6 +169,11 @@ ReadStatus ReadSession::unlock(std::span<const uint8_t> password, std::span<cons
     if (unlocked_) return ReadStatus::Ok;
     session_lock_ = root_handle_.try_writer_lock();
     if (!session_lock_) return ReadStatus::Busy;
+    if (std::array<uint8_t, V3_HEADER_SIZE> raw{};
+        !root_handle_.read_header(raw) || parse_v3_header(raw, header_) != HeaderStatus::Ok) {
+        session_lock_.reset();
+        return ReadStatus::BadFormat;
+    }
     const auto unwrapped = unwrap_v3_master_key(header_, password, keyfile, master_key_);
     if (unwrapped == HeaderStatus::AuthenticationFailed) {
         session_lock_.reset();
@@ -272,7 +246,7 @@ bool ReadSession::materialize() noexcept
             return false;
     }
     objects_ = std::move(refs.value);
-    apply_object_markers(root_, objects_);
+    rebuild_object_index();
     if (!load_settings(*database_, settings_)) return false;
     auto searches = database_->saved_searches();
     if (searches.status != DbStatus::Ok) return false;
@@ -281,31 +255,58 @@ bool ReadSession::materialize() noexcept
     return true;
 }
 
+void ReadSession::rebuild_object_index()
+{
+    std::map<Id, IndexNode*> nodes;
+    std::function<void(IndexNode&)> gather = [&](IndexNode& node) {
+        nodes.try_emplace(node.node_id, &node);
+        for (auto& child : node.children)
+            gather(child);
+    };
+    gather(root_);
+    object_index_.clear();
+    for (const auto& object : objects_) {
+        const auto found = nodes.find(object.node_id);
+        if (found == nodes.end()) continue;
+        auto& node = *found->second;
+        const auto format = node.is_image() ? std::to_underlying(node.meta.format)
+                                            : std::to_underlying(node.vmeta.container);
+        object_index_.try_emplace(std::pair{object.node_id, object.role}, object.object_id,
+                                  header_.vault_id, object.node_id, object.role, format,
+                                  object.plaintext_length, object.encrypted_length,
+                                  object.frame_plain_limit, object.frame_count);
+        using enum ObjectRole;
+        if (node.is_image() && object.role == Thumbnail) {
+            node.meta.thumb_offset = object_cache_identity(object.object_id, 2);
+            node.meta.thumb_length = object.encrypted_length;
+        } else if (node.is_image() && object.role == OriginalImage) {
+            node.meta.data_offset = object_cache_identity(object.object_id, 1);
+            node.meta.data_length = object.encrypted_length;
+        } else if (node.is_video() && object.role == Poster) {
+            node.vmeta.poster_offset = object_cache_identity(object.object_id, 3);
+            node.vmeta.poster_length = object.encrypted_length;
+        } else if (node.is_video() && object.role == OriginalVideo) {
+            node.vmeta.chunk_size = object.frame_plain_limit;
+            node.vmeta.chunks.resize(object.frame_count);
+            for (uint32_t i = 0; i < object.frame_count; ++i)
+                node.vmeta.chunks[i].sequence = i;
+        }
+    }
+    // Imports can have published objects whose nodes have not yet reached the
+    // main thread. Retain them until a snapshot actually attaches their owner.
+    std::erase_if(staged_objects_,
+                  [&nodes](const auto& object) { return nodes.contains(object.node_id); });
+    std::erase_if(staged_index_,
+                  [&nodes](const auto& entry) { return nodes.contains(entry.first.first); });
+}
+
 std::optional<ObjectInfo> ReadSession::object_for(const Id& node_id, ObjectRole role) const noexcept
 {
     const std::lock_guard lock(state_mutex_);
-    const auto it = std::ranges::find_if(objects_, [&](const ObjectRecord& object) {
-        return object.node_id == node_id && object.role == role;
-    });
-    if (it == objects_.end()) return std::nullopt;
-    const IndexNode* owner = nullptr;
-    std::function<void(const IndexNode&)> find_owner = [&](const IndexNode& node) {
-        if (owner) return;
-        if (node.node_id == node_id) {
-            owner = &node;
-            return;
-        }
-        for (const auto& child : node.children)
-            find_owner(child);
-    };
-    find_owner(root_);
-    if (!owner) return std::nullopt;
-    const uint8_t media_format = owner->is_image() ? std::to_underlying(owner->meta.format)
-                                                   : std::to_underlying(owner->vmeta.container);
-    return ObjectInfo{
-        it->object_id,  header_.vault_id,     it->node_id,          it->role,
-        media_format,   it->plaintext_length, it->encrypted_length, it->frame_plain_limit,
-        it->frame_count};
+    if (const auto staged = staged_index_.find({node_id, role}); staged != staged_index_.end())
+        return staged->second;
+    const auto found = object_index_.find({node_id, role});
+    return found == object_index_.end() ? std::nullopt : std::optional{found->second};
 }
 
 ReadStatus ReadSession::read(const IndexNode& node, ObjectRole role,
@@ -330,52 +331,40 @@ ReadStatus ReadSession::read_id(const Id& node_id, ObjectRole role,
     return ReadStatus::BadFormat;
 }
 
+ReadStatus ReadSession::read_video_frame(const Id& node_id, uint32_t sequence,
+                                         crypto::SecureBytes& out) const noexcept
+{
+    if (!unlocked_) return ReadStatus::IoError;
+    const auto info = object_for(node_id, ObjectRole::OriginalVideo);
+    if (!info || sequence >= info->frame_count) return ReadStatus::BadFormat;
+    auto opened = ObjectReader::open(root_handle_, master_key_.as_span(), *info);
+    if (opened.status == ObjectStatus::AuthenticationFailed)
+        return ReadStatus::AuthenticationFailed;
+    if (opened.status != ObjectStatus::Ok || !opened.reader) return ReadStatus::BadFormat;
+    const auto status = opened.reader->read_frame(sequence, out);
+    if (status == ObjectStatus::Ok) return ReadStatus::Ok;
+    return status == ObjectStatus::AuthenticationFailed ? ReadStatus::AuthenticationFailed
+                                                        : ReadStatus::BadFormat;
+}
+
 std::optional<uint64_t>
 ReadSession::object_plaintext_length(const Id& node_id, ObjectRole role) const noexcept
 {
-    const std::lock_guard lock(state_mutex_);
-    const auto found = std::ranges::find_if(objects_, [&](const ObjectRecord& object) {
-        return object.node_id == node_id && object.role == role;
-    });
-    return found == objects_.end() ? std::nullopt
-                                   : std::optional<uint64_t>{found->plaintext_length};
+    const auto object = object_for(node_id, role);
+    return object ? std::optional{object->plaintext_length} : std::nullopt;
 }
 
 ReadStatus ReadSession::digest_object(const Id& node_id, ObjectRole role,
                                       std::span<const uint8_t> digest_key,
-                                      std::span<uint8_t> digest) const noexcept
+                                      std::span<uint8_t> digest,
+                                      CancellationToken cancel) const noexcept
 {
-    const std::lock_guard lock(state_mutex_);
     if (!unlocked_ || digest.empty() || digest.size() > 64 || digest_key.empty() ||
         digest_key.size() > 64)
         return ReadStatus::IoError;
-    const auto object = std::ranges::find_if(objects_, [&](const ObjectRecord& candidate) {
-        return candidate.node_id == node_id && candidate.role == role;
-    });
-    if (object == objects_.end()) return ReadStatus::BadFormat;
-    const IndexNode* owner = nullptr;
-    std::function<void(const IndexNode&)> find_owner = [&](const IndexNode& node) {
-        if (owner) return;
-        if (node.node_id == node_id) {
-            owner = &node;
-            return;
-        }
-        for (const auto& child : node.children)
-            find_owner(child);
-    };
-    find_owner(root_);
-    if (!owner || owner->is_gallery()) return ReadStatus::BadFormat;
-    const uint8_t media_format = owner->is_image() ? std::to_underlying(owner->meta.format)
-                                                   : std::to_underlying(owner->vmeta.container);
-    const ObjectInfo info{object->object_id,
-                          header_.vault_id,
-                          object->node_id,
-                          object->role,
-                          media_format,
-                          object->plaintext_length,
-                          object->encrypted_length,
-                          object->frame_plain_limit,
-                          object->frame_count};
+    const auto object = object_for(node_id, role);
+    if (!object) return ReadStatus::BadFormat;
+    const auto& info = *object;
     auto opened = ObjectReader::open(root_handle_, master_key_.as_span(), info);
     if (opened.status == ObjectStatus::AuthenticationFailed)
         return ReadStatus::AuthenticationFailed;
@@ -385,6 +374,10 @@ ReadStatus ReadSession::digest_object(const Id& node_id, ObjectRole role,
     crypto_blake2b_keyed_init(&hash, digest.size(), digest_key.data(), digest_key.size());
     crypto::SecureBytes frame;
     for (uint32_t i = 0; i < info.frame_count; ++i) {
+        if (cancel.requested()) {
+            crypto_wipe(&hash, sizeof(hash));
+            return ReadStatus::IoError;
+        }
         if (const auto status = opened.reader->read_frame(i, frame);
             status != ObjectStatus::Ok) {
             crypto_wipe(&hash, sizeof(hash));
@@ -397,11 +390,12 @@ ReadStatus ReadSession::digest_object(const Id& node_id, ObjectRole role,
     return ReadStatus::Ok;
 }
 
-VerificationReport ReadSession::verify(VerifyDepth depth) const noexcept
+VerificationReport ReadSession::verify(VerifyDepth depth, CancellationToken cancel) const noexcept
 {
     const std::lock_guard lock(state_mutex_);
     if (!unlocked_ || !database_) return {};
-    return verify_vault(root_handle_, *database_, master_key_.as_span(), header_.vault_id, depth);
+    return verify_vault(root_handle_, *database_, master_key_.as_span(), header_.vault_id, depth,
+                        cancel);
 }
 
 GarbageCollectionResult ReadSession::garbage_collect(uint64_t grace_seconds) noexcept
@@ -495,14 +489,13 @@ ReadStatus ReadSession::commit_metadata(const IndexNode& root, const VaultSettin
     if (const auto status = database_->sync_metadata(root, settings, searches, staged_objects_);
         status != DbStatus::Ok)
         return map_db(status);
-    staged_objects_.clear();
     root_ = root;
     settings_ = settings;
     saved_searches_.assign(searches.begin(), searches.end());
     auto refs = database_->object_references();
     if (refs.status != DbStatus::Ok) return map_db(refs.status);
     objects_ = std::move(refs.value);
-    apply_object_markers(root_, objects_);
+    rebuild_object_index();
     return ReadStatus::Ok;
 }
 
@@ -520,6 +513,7 @@ ReadStatus ReadSession::stage_object(const Id& node_id, ObjectRole role, uint8_t
         staged_objects_.emplace_back(written.info.object_id, node_id, role,
                                      written.info.encrypted_length, written.info.plaintext_length,
                                      written.info.frame_plain_limit, written.info.frame_count, 0);
+        staged_index_.insert_or_assign(std::pair{node_id, role}, written.info);
     } catch (...) {
         // The published immutable object stays unreferenced and is safe for later GC.
         return ReadStatus::IoError;
@@ -545,6 +539,7 @@ ReadStatus ReadSession::stage_object_stream(const Id& node_id, ObjectRole role,
         staged_objects_.emplace_back(written.info.object_id, node_id, role,
                                      written.info.encrypted_length, written.info.plaintext_length,
                                      written.info.frame_plain_limit, written.info.frame_count, 0);
+        staged_index_.insert_or_assign(std::pair{node_id, role}, written.info);
     } catch (...) {
         return ReadStatus::IoError;
     }
@@ -562,6 +557,9 @@ ReadStatus ReadSession::change_password(std::span<const uint8_t> old_password,
         temporary_lock = root_handle_.try_writer_lock();
         if (!temporary_lock) return ReadStatus::Busy;
     }
+    if (std::array<uint8_t, V3_HEADER_SIZE> current{};
+        !root_handle_.read_header(current) || parse_v3_header(current, header_) != HeaderStatus::Ok)
+        return ReadStatus::BadFormat;
     crypto::SecureBuffer<crypto::KEY_SIZE> verified;
     const auto checked = unwrap_v3_master_key(header_, old_password, old_keyfile, verified);
     if (checked == HeaderStatus::AuthenticationFailed) return ReadStatus::AuthenticationFailed;
@@ -583,7 +581,9 @@ void ReadSession::lock() noexcept
     const std::lock_guard state_lock(state_mutex_);
     database_.reset();
     objects_.clear();
+    object_index_.clear();
     staged_objects_.clear();
+    staged_index_.clear();
     root_ = IndexNode::gallery("");
     saved_searches_.clear();
     settings_ = VaultSettings{};

@@ -67,11 +67,12 @@ convert_legacy_vault(Vault& source, const LegacyConversionRequest& request) noex
 // fixed-size object frames.
 [[nodiscard]] LegacyConversionStatus
 copy_legacy_video_object(Vault& source, const IndexNode& source_node, v3::ReadSession& destination,
-                         const IndexNode& destination_node) noexcept;
+                         const IndexNode& destination_node, CancellationToken cancel = {}) noexcept;
 
-[[nodiscard]] LegacyConversionStatus
-digest_legacy_original(Vault& source, const IndexNode& source_node,
-                       std::span<const uint8_t> digest_key,
-                       std::span<uint8_t> digest) noexcept;
+[[nodiscard]] LegacyConversionStatus digest_legacy_original(Vault& source,
+                                                            const IndexNode& source_node,
+                                                            std::span<const uint8_t> digest_key,
+                                                            std::span<uint8_t> digest,
+                                                            CancellationToken cancel = {}) noexcept;
 
 }  // namespace vault

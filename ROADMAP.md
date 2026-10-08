@@ -7,6 +7,13 @@
 
 ---
 
+## Phase 110–115 audit follow-up
+
+Remediation is tracked in [AUDIT.md](AUDIT.md): queued directory durability,
+original/frame reads, live cache identities, lossless schema-v2 conversion,
+lease-protected header refresh, conversion gating/cancellation, verification,
+production facade benchmarks, and Linux-only cleanup. Validation is in progress.
+
 ## Phase index
 
 | # | Name | Status | Summary |

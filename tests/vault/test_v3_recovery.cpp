@@ -45,7 +45,7 @@ ObjectRecord object(uint8_t first)
     return result;
 }
 
-std::optional<Database> make_database(const fs::path& path)
+std::optional<Database> make_database(const fs::path& path, uint64_t original_size = 17)
 {
     auto opened = Database::create(path, KEY, ROOT);
     if (!opened.database) return std::nullopt;
@@ -55,6 +55,7 @@ std::optional<Database> make_database(const fs::path& path)
     node.type = NodeType::Image;
     node.display_name = "image.jpg";
     node.media_format = 1;
+    node.original_size = original_size;
     if (opened.database->insert_node(node) != DbStatus::Ok) return std::nullopt;
     return std::move(*opened.database);
 }
@@ -142,7 +143,7 @@ TEST(v3_deep_verify_authenticates_referenced_objects_and_classifies_garbage)
     TempDir temp;
     auto root = VaultRoot::create(temp.path / "vault.osv");
     REQUIRE(root.has_value());
-    auto made = make_database(temp.path / "db");
+    auto made = make_database(temp.path / "db", 5);
     REQUIRE(made.has_value());
     auto db = std::move(*made);
 
@@ -180,7 +181,7 @@ TEST(v3_deep_verify_reports_unauthentic_referenced_object_without_deleting_it)
     TempDir temp;
     auto root = VaultRoot::create(temp.path / "vault.osv");
     REQUIRE(root.has_value());
-    auto made = make_database(temp.path / "db");
+    auto made = make_database(temp.path / "db", 4);
     REQUIRE(made.has_value());
     auto db = std::move(*made);
 
