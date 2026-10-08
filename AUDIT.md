@@ -37,11 +37,14 @@ Branch: `fix/audit-110-115`. Original findings below retain the audited baseline
 - Actual migration-job regressions: **22 tests, 0 failed**; additional real-video
   migration regression passes in Release, Debug and ASAN with multiple original frames.
 - Final Release/no-AV rechecks passed with **2392 / 2196 tests, 0 failed**.
-- CI and SonarCloud: [PR #239](https://github.com/Zellione/obscura-safe-vault/pull/239), initial CI passed; SonarCloud reported 10 maintainability findings.
-  Applied explicit captures, narrower variable scopes, map insertion cleanup and
-  extracted image staging. Post-cleanup Debug and ASAN: **2392 tests, 0 failed**
-  each. Re-scan cleared all 10 original findings and requested direct map-value
-  construction; that follow-up is applied, with final CI/SonarCloud pending.
+- CI: the full GCC/Clang Debug/Release, no-FFmpeg, ASAN/UBSan and TSan matrix
+  passed on `cddd17a` ([run](https://github.com/Zellione/obscura-safe-vault/actions/runs/37797657173)).
+  Current branch checks are attached to [PR #239](https://github.com/Zellione/obscura-safe-vault/pull/239).
+- SonarCloud re-scan of final code `b46d581`: **0 issues, 0 accepted issues,
+  0 security hotspots**, quality gate passed; **84.2% new-code coverage**,
+  **0.3% duplication**. Both the PR report and unresolved-issues API confirm zero.
+  The original 10 maintainability findings and the map-construction follow-up
+  are resolved. Debug and ASAN rechecks each passed **2392 tests**.
 - Scale results above use synthetic small objects on this machine. They do not
   establish the former 250k-media responsiveness claim; the opt-in production
   benchmark now supports that measurement rather than substituting SQL timings.
