@@ -271,11 +271,10 @@ void ReadSession::rebuild_object_index()
         auto& node = *found->second;
         const auto format = node.is_image() ? std::to_underlying(node.meta.format)
                                             : std::to_underlying(node.vmeta.container);
-        object_index_.try_emplace(std::pair{object.node_id, object.role},
-                                  ObjectInfo{object.object_id, header_.vault_id, object.node_id,
-                                             object.role, format, object.plaintext_length,
-                                             object.encrypted_length, object.frame_plain_limit,
-                                             object.frame_count});
+        object_index_.try_emplace(std::pair{object.node_id, object.role}, object.object_id,
+                                  header_.vault_id, object.node_id, object.role, format,
+                                  object.plaintext_length, object.encrypted_length,
+                                  object.frame_plain_limit, object.frame_count);
         using enum ObjectRole;
         if (node.is_image() && object.role == Thumbnail) {
             node.meta.thumb_offset = object_cache_identity(object.object_id, 2);

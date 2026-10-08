@@ -40,7 +40,8 @@ Branch: `fix/audit-110-115`. Original findings below retain the audited baseline
 - CI and SonarCloud: [PR #239](https://github.com/Zellione/obscura-safe-vault/pull/239), initial CI passed; SonarCloud reported 10 maintainability findings.
   Applied explicit captures, narrower variable scopes, map insertion cleanup and
   extracted image staging. Post-cleanup Debug and ASAN: **2392 tests, 0 failed**
-  each; clean CI/SonarCloud re-scan pending.
+  each. Re-scan cleared all 10 original findings and requested direct map-value
+  construction; that follow-up is applied, with final CI/SonarCloud pending.
 - Scale results above use synthetic small objects on this machine. They do not
   establish the former 250k-media responsiveness claim; the opt-in production
   benchmark now supports that measurement rather than substituting SQL timings.
