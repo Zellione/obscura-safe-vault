@@ -18,7 +18,7 @@ provides domain-separated keyed-BLAKE2b database/per-object key derivation into
 `SecureBuffer` plus canonical 66-byte object-frame AD; `v3_detect.*` classifies
 legacy files versus v3 directories while rejecting symlink/odd shapes (advisory
 only—the Phase 106 descriptor-relative open is authoritative); `v3_schema.h`
-freezes schema v1 DDL; and `v3_transaction_model.h` models publish-before-
+freezes schema v2 DDL; and `v3_transaction_model.h` models publish-before-
 reference crash states. `v3_sqlcipher_key.*` converts a derived 32-byte key to
 SQLCipher's required 67-byte raw keyspec inside a wipe-on-release
 `SecureBuffer`, avoiding SQL interpolation and SQLCipher's password KDF. The
@@ -39,7 +39,7 @@ Phase 107 adds `v3_db.*`, the production-linked, move-only
 SQLCipher boundary: it applies the raw derived key without SQL interpolation,
 enables cipher memory security, rollback journal + FULL synchronous durability,
 foreign keys, defensive/untrusted-schema modes and bounded SQLite limits before
-accepting the connection. Create installs frozen schema v1 plus the root/meta
+accepting the connection. Create installs schema v2 plus the root/meta
 rows transactionally; open verifies the key immediately, rejects unsupported
 versions, and runs an integrity check. SQLite handles and rows stay private and
 failures map to `DbStatus`. Prepared repositories cover nodes/search, immutable
@@ -105,8 +105,8 @@ serialize, and rewrap headers, while `VaultRoot::replace_header` stages, syncs, 
 directory-syncs password changes. `ReadSession` now owns a writable descriptor-pinned database,
 serializes state/object staging, and commits a full logical snapshot with staged object refs in
 one SQL transaction. `Database::sync_metadata` increments the generation with the mutation,
-preserves live immutable refs, drops dead refs, and ignores published-but-unattached objects so
-they are recoverable garbage. `staging.*` writes each original/thumbnail/poster independently;
+preserves live immutable refs, drops dead refs, and retains published-but-unattached objects in the session until their owner
+is attached; abandoned objects remain recoverable garbage. `staging.*` writes each original/thumbnail/poster independently;
 the existing import queue attaches them in bounded commits. V3 same-vault moves preserve node
 and object IDs through metadata-only relocation; cross-vault transfer follows the existing
 secure-buffer staging path and therefore mints fresh destination identities. Gallery/media CRUD,
@@ -161,7 +161,7 @@ reported as authentication failure. The source bytes remain unchanged on every
 tested success and failure path.
 
 ### file_util.h — position-independent size query (PR #109, durability)
-`fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
+`fileutil::file_size` MUST be position-independent (`fstat` on the fd), NEVER
 `seek_end`. WHY: `write_header` does `seek_to(fp_,0)` then `fwrite` as two separately-locked
 stdio calls; `Vault::wasted_bytes` calls `file_size(fp_)` on the MAIN thread WITHOUT
 `write_mutex_`, concurrently with the commit lane. A seek-based size query landing between the
@@ -177,7 +177,7 @@ seek0-writer/size-reader race that misplaces writes on the old impl).
 Also in file_util.h (PR #119): `fileutil::punch_hole(fp, off, len)` — Linux
 `fallocate(FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE)` (a no-op returning false elsewhere) —
 and `fileutil::file_allocated_bytes` (`st_blocks * 512`, physical size for sparse-aware waste
-measurement). Phase 60 adds `fileutil::truncate_file(fp, new_size)` (fflush + ftruncate/_chsize_s); the rename
+measurement). Phase 60 adds `fileutil::truncate_file(fp, new_size)` (fflush + ftruncate); the rename
 fault-injection family, `wipe_and_remove`/`wipe_file_contents`, and `sync_dir_of` were deleted with
 the copy-rewrite compact (sync fault-injection `inject_sync_failure` remains — the compact
 crash-sweep test uses it). See the reclamation note below.
@@ -200,8 +200,7 @@ Two ways to reclaim orphaned chunk space (deleted chunks + the superseded index 
   reopens to a valid partially-compacted vault; rerun resumes; cancel keeps progress (returns
   Ok); an idempotent short-circuit makes compacting a tight vault a true no-op. Progress is
   MiB-moved (done <= total). Invalidates IndexNode pointers. Still the manual `Shift+C` path
-  (gated on `queue_.busy()`) and the non-Linux auto-reclaim fallback — Windows deletes no
-  longer spike 2x disk. Helpers: file-local `collect_units`/`stream_move`/`execute_pass_moves`
+  (gated on `queue_.busy()`). Helpers: file-local `collect_units`/`stream_move`/`execute_pass_moves`
   + `MoveExecState` (S107 cap). DELETED with the copy-rewrite: `relocate_node_chunks`, rename
   fault-injection (`rename_file`/`inject_rename_failure`), `wipe_and_remove`/
   `wipe_file_contents`, `sync_dir_of`, and the `.compact`/`.old` 3-step rename dance.
@@ -274,8 +273,7 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   bytes; `ui::export_*` turns it back into a real path. `dest_dir / name` does NOT contain
   — an ABSOLUTE name discards `dest_dir` (CWE-22). The sink is therefore ATOMIC (Phase 98):
   `platform::create_new_file_within(dest_dir, sanitize_node_name(name))` claims the file with
-  an exclusive no-follow create (Linux openat2 RESOLVE_BENEATH|NO_SYMLINKS / openat O_NOFOLLOW,
-  Windows CREATE_NEW + final-handle containment) and `export_one_media` writes to the returned
+  an exclusive no-follow create (Linux openat2 RESOLVE_BENEATH|NO_SYMLINKS / openat O_NOFOLLOW) and `export_one_media` writes to the returned
   handle only. `export_path_within` (weakly_canonical + lexically_relative, fails closed)
   remains as a post-create invariant assertion because vaults already on disk can carry
   hostile names — ingress validation alone is not enough.
@@ -585,3 +583,25 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
 - `tests/vault/test_v3_bench.cpp` is an opt-in Release regression gate at
   1k/50k/250k nodes. `test_v3_mutation.cpp` additionally cold-reopens after
   subprocess fault exits.
+
+## Directory audit remediation
+
+- Schema v2 migrates encrypted v1 databases transactionally under the writer lease.
+  Durations are microseconds; sibling names are case-sensitive. Tags accept u16
+  byte lengths with a per-node 4096 limit, preserving node spelling/order and
+  settings description/value order. Application-owned tag temporaries are secure.
+- `CommitLane::enqueue_snapshot` commits directory snapshots synchronously through
+  `Vault::commit_index`; only legacy blobs run on the file-writing worker.
+- `ReadSession` indexes immutable object info by `(node_id, role)`, including
+  staged objects for reads before a queue commit. Marker construction indexes
+  nodes once instead of scanning all references for each node. Cache markers use
+  immutable object IDs, changing on replacement. Video chunk markers preserve sequence.
+- `read_thumb_span` is the role-aware any-thread reader despite its historical
+  name: Data reads the original image, Video reads one authenticated frame.
+- Ordinary `Vault::unlock` rejects incomplete conversion with `IncompleteConversion`
+  and damaged quick reports with `Damaged`; low-level `ReadSession` permits recovery
+  inspection and exposes `quick_open_report`. Converter-only unlock permits resume.
+- Unlock and password rotation re-read the on-disk header under the writer lease.
+- Quick/deep verification requires correctly typed originals matching logical size;
+  derived objects remain optional. Conversion checks cancellation during streamed
+  copies, deep verification frames, and original digest loops.

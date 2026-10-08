@@ -522,3 +522,7 @@ sub-galleries as siblings) combine in either mode; the F1 line reads
   and a viewer strip-edge badge that relocates to the window's bottom-right in
   fullscreen (strip + header hidden there). Formatting via `ui::position_label`
   ("" hides the counter when the listing is empty).
+
+Directory unlock reports incomplete conversion with an instruction to reopen
+the original legacy source and resume. Missing/inconsistent media references
+produce an explicit damaged-vault message instead of entering the gallery.

@@ -146,22 +146,15 @@ bool read_item(const vault::Vault& v, const Item& it, crypto::SecureBytes& out)
     if (it.refs.size() == 1) {
         return vault::read_thumb_span(v, it.refs[0], out) == vault::VaultResult::Ok;
     }
-    std::vector<uint8_t> joined;          // wiped below via SecureBytes copy
-    joined.reserve(static_cast<size_t>(it.bytes));
+    crypto::SecureBytes joined;
+    if (!joined.reserve(static_cast<size_t>(it.bytes))) return false;
     crypto::SecureBytes chunk;
     for (const vault::ChunkRef& ref : it.refs) {
-        if (vault::read_thumb_span(v, ref, chunk) != vault::VaultResult::Ok) {
-            crypto_wipe(joined.data(), joined.size());
+        if (vault::read_thumb_span(v, ref, chunk) != vault::VaultResult::Ok ||
+            !joined.append(chunk.as_span()))
             return false;
-        }
-        joined.insert(joined.end(), chunk.data(), chunk.data() + chunk.size());
     }
-    if (!out.resize(joined.size())) {
-        crypto_wipe(joined.data(), joined.size());
-        return false;
-    }
-    std::ranges::copy(joined, out.span().begin());
-    crypto_wipe(joined.data(), joined.size());
+    out = std::move(joined);
     return true;
 }
 

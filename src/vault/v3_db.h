@@ -42,7 +42,7 @@ struct NodeRecord {
     std::optional<int> media_format;
     std::optional<uint32_t> width;
     std::optional<uint32_t> height;
-    std::optional<uint64_t> duration_ms;
+    std::optional<uint64_t> duration_us;
     std::optional<int> codec;
     std::optional<uint64_t> original_size;
     std::optional<uint8_t> sort_key;
@@ -158,6 +158,7 @@ public:
     search_nodes(std::string_view term) const noexcept;
     [[nodiscard]] DbStatus insert_object(const ObjectRecord& object) noexcept;
     [[nodiscard]] DbResult<std::vector<ObjectRecord>> object_references() const noexcept;
+    [[nodiscard]] DbResult<std::vector<Id>> incomplete_media_nodes() const noexcept;
     // Phase 109 mutation primitives. The object reference and generation change are
     // committed in one SQL transaction; callers must publish the immutable file first.
     [[nodiscard]] DbStatus commit_object_create(ObjectRecord object) noexcept;

@@ -17,7 +17,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+NPROC="$(nproc 2>/dev/null || echo 4)"
 ASAN=false
 
 for arg in "$@"; do
@@ -178,11 +178,7 @@ build_codec osv_vaapi_shim "$REPO_ROOT/vendor/vaapi-shim" \
 # (hyphen, VideoDecoder::open() matches on AV_CODEC_ID_AV1, not the name
 # string, so this distinction is configure-only).
 #
-# VAAPI (Phase 43 Part 2): a hwaccel *dispatch registration* flag, just like
-# Windows' --enable-d3d11va (scripts/build_ffmpeg_windows.sh) -- not a new
-# system dependency. FFmpeg's hwcontext_vaapi.c and the vaapi_*.c decode glue
-# reference real libva/libva-drm symbols directly (unlike hwcontext_d3d11va.c,
-# which LoadLibrary/GetProcAddress's d3d11.dll/dxgi.dll itself), so those
+# VAAPI dispatch references libva/libva-drm symbols directly. These
 # symbols are provided by vendor/vaapi-shim's own internal
 # dlopen("libva.so.2")/dlsym() forwarding instead -- see
 # docs/superpowers/specs/2026-07-17-hardware-video-decode-design.md. The

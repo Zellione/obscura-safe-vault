@@ -226,3 +226,9 @@ cold-open recovery copy if the active slot is torn or damaged. See
 Index tree serialisation (`IndexNode`, tags, favorites, video metadata,
 saved searches, sort keys, tag descriptions) and the framed-chunk compression codec: `mem:core`
 (vault/ section — `index.*`, `chunk_codec.*`, `index_io.*`).
+
+Directory SQL schema v2 (container format remains v3) persists microsecond
+durations, case-sensitive sibling names, u16-length tags and per-node tag
+spelling/order. Description/value rows retain spelling and order. Existing v1
+databases upgrade transactionally under the writer lease; object bytes and
+header are unchanged. See `docs/V3_VAULT_FORMAT.md`.

@@ -1,5 +1,7 @@
+#include <sqlite3.h>
 #include "test_framework.h"
 #include "vault/v3_db.h"
+#include "vault/v3_sqlcipher_key.h"
 
 #include <array>
 #include <cstdint>
@@ -226,6 +228,84 @@ TEST(v3_db_deep_integrity_and_lossless_maintenance_preserve_rows)
     REQUIRE(found.status == vault::v3::DbStatus::Ok);
     REQUIRE(found.value.has_value());
     CHECK(found.value->display_name == "preserved.jpg");
+    opened.database.reset();
+    fs::remove_all(dir);
+}
+
+TEST(v3_db_migrates_v1_transactionally_and_preserves_encrypted_content)
+{
+    const auto dir = db_temp_dir();
+    const auto path = dir / "vault.db";
+    std::ifstream schema_file(std::filesystem::path(OSV_VAULT_FIXTURE_DIR) / "v3_schema_v1.sql");
+    const std::string schema{std::istreambuf_iterator<char>{schema_file}, {}};
+    REQUIRE(!schema.empty());
+    sqlite3* raw = nullptr;
+    REQUIRE(sqlite3_open(path.c_str(), &raw) == SQLITE_OK);
+    auto key = vault::v3::sqlcipher_raw_keyspec(DB_KEY);
+    REQUIRE(sqlite3_key(raw, key.data(), static_cast<int>(key.size())) == SQLITE_OK);
+    REQUIRE(sqlite3_exec(raw, schema.c_str(), nullptr, nullptr, nullptr) == SQLITE_OK);
+    REQUIRE(sqlite3_exec(raw,
+                         "INSERT INTO vault_meta(singleton,schema_version,root_node_id) "
+                         "VALUES(1,1,X'01000000000000000000000000000001');"
+                         "INSERT INTO nodes(node_id,node_type,display_name,sibling_order) "
+                         "VALUES(X'01000000000000000000000000000001',0,'root',0);"
+                         "INSERT INTO "
+                         "nodes(node_id,parent_id,node_type,display_name,sibling_order,duration_ms,"
+                         "original_size,media_format) "
+                         "VALUES(X'02000000000000000000000000000002',X'"
+                         "01000000000000000000000000000001',2,'old-video',0,1234,4,0);"
+                         "INSERT INTO tags VALUES(1,'Blue','blue');"
+                         "INSERT INTO node_tags VALUES(X'02000000000000000000000000000002',1);",
+                         nullptr, nullptr, nullptr) == SQLITE_OK);
+    REQUIRE(sqlite3_close(raw) == SQLITE_OK);
+    const auto encrypted_before = [&] {
+        std::ifstream input(path, std::ios::binary);
+        return std::string{std::istreambuf_iterator<char>{input}, {}};
+    }();
+    auto snapshot = vault::v3::Database::open(path, DB_KEY, false);
+    REQUIRE(snapshot.database);
+    CHECK(snapshot.database->find_node(CHILD_ID).value->duration_us == 1'234'000);
+    snapshot.database.reset();
+    std::ifstream unchanged(path, std::ios::binary);
+    const std::string encrypted_after{std::istreambuf_iterator<char>{unchanged}, {}};
+    CHECK(encrypted_before == encrypted_after);
+    auto migrated = vault::v3::Database::open(path, DB_KEY, true);
+    REQUIRE(migrated.database);
+    CHECK(vault::v3::database_deep_healthy(*migrated.database));
+    auto video = migrated.database->find_node(CHILD_ID);
+    REQUIRE(video.value);
+    CHECK(video.value->duration_us == 1'234'000);
+    auto tags = migrated.database->node_tags(CHILD_ID);
+    REQUIRE(tags.value.size() == 1);
+    CHECK(tags.value[0] == "Blue");
+    vault::v3::NodeRecord sibling = *video.value;
+    sibling.node_id[0] = 9;
+    sibling.display_name = "OLD-VIDEO";
+    sibling.sibling_order = 1;
+    REQUIRE(migrated.database->insert_node(sibling) == vault::v3::DbStatus::Ok);
+    REQUIRE(migrated.database->add_tag(2, std::string(1024, 'x'), std::string(1024, 'x')) ==
+            vault::v3::DbStatus::Ok);
+    migrated.database.reset();
+    auto reopened = vault::v3::Database::open(path, DB_KEY, false);
+    REQUIRE(reopened.database);
+    CHECK(vault::v3::database_deep_healthy(*reopened.database));
+    CHECK_FALSE(contains_text(path, "old-video"));
+    reopened.database.reset();
+    fs::remove_all(dir);
+}
+
+TEST(v3_db_tag_limit_is_per_node_and_failed_sync_rolls_back)
+{
+    const auto dir = db_temp_dir();
+    auto opened = vault::v3::Database::create(dir / "vault.db", DB_KEY, ROOT_ID);
+    REQUIRE(opened.database);
+    auto root = vault::IndexNode::gallery("");
+    root.node_id = ROOT_ID;
+    for (size_t i = 0; i <= vault::INDEX_MAX_TAGS; ++i)
+        root.tags.emplace_back("tag-" + std::to_string(i));
+    CHECK(opened.database->sync_metadata(root, {}, {}) == vault::v3::DbStatus::Constraint);
+    CHECK(opened.database->node_tags(ROOT_ID).value.empty());
+    CHECK(vault::v3::database_deep_healthy(*opened.database));
     opened.database.reset();
     fs::remove_all(dir);
 }

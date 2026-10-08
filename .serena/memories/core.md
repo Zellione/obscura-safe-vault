@@ -2,7 +2,7 @@
 
 Linux-only encrypted photo gallery. New vaults use the v3 `.osv` directory
 format (SQLCipher metadata plus independently encrypted immutable objects).
-Legacy single-file vaults open read-only until the Phase 115 converter.
+Legacy single-file vaults open read-only and are migrated by the copy-based converter.
 Application-owned decrypted data lives only in `mlock`'d, wipe-on-release heap;
 opaque codec/driver buffers are minimized and surfaced as a degraded F1 status (Phase 97).
 Plaintext is never written to disk except the one gated deviation (`ui::export.*`). Galleries freely nest and may hold any mix of images,

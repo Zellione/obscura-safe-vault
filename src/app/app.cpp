@@ -65,22 +65,9 @@ namespace app {
 
 bool App::init()
 {
-    // A Windows Release build runs as a windowless (WindowedApp) subsystem
-    // process, so stdout/stderr start with no valid OS handle at all — every
-    // write to them fails, and C++23's std::print/std::println throw
-    // std::system_error on such a failure (unlike old fprintf), which would
-    // crash the whole process the first time any of the many existing
-    // std::println(stderr, "[Module] ...") diagnostics ran. Redirect both to
-    // a log file before anything else can print, so every diagnostic in the
-    // app — previously invisible in a windowless build — becomes visible
-    // instead of throwing (no-op on Linux/Debug, which keep a console).
-#ifdef NDEBUG
-    platform::redirect_diagnostics_to_log_file();
-#endif
-
     // Log-before-die: an uncaught exception anywhere (e.g. std::bad_alloc from
     // an STL container) would otherwise call std::terminate() and vanish with
-    // zero trace, since Release is a windowless app with no console. Install
+    // no persistent trace. Install
     // this first, before anything else can throw.
     platform::install_terminate_logger();
 
@@ -93,10 +80,8 @@ bool App::init()
 #endif
 
     // Grow the page-lockable budget BEFORE anything allocates a SecureBuffer/
-    // SecureBytes: on Windows VirtualLock is capped by the minimum working-set
-    // size (~200 KB by default — below a single decoded image, so every pixel
-    // buffer silently degraded to swappable memory); on Linux this raises the
-    // soft RLIMIT_MEMLOCK to the hard limit. 256 MiB covers the viewer's
+    // SecureBytes: raise the soft RLIMIT_MEMLOCK to the hard limit.
+    // 256 MiB covers the viewer's
     // decoded image + the thumbnail strip; larger buffers keep the documented
     // warn-once best-effort behaviour. All build configs: this is not a
     // debugging tradeoff like the core-dump gate above.
@@ -1075,14 +1060,8 @@ bool App::pump_events(bool animating)
         }
     } else if (window_.is_visible()) {
         // Heartbeat woke with no event: redraw anyway (a static frame; nothing
-        // changed). On Windows with G-SYNC + Auto HDR, letting the swapchain go
-        // fully idle (zero presents) lets the display renegotiate refresh rate /
-        // tone-mapping for a static scene; the burst of frames the next
-        // mouse-move triggers then reads as a visible brightness pulse when that
-        // negotiation snaps back. Presenting on every ~250ms heartbeat keeps
-        // cadence bounded instead of falling to zero. Skipped when the window
-        // isn't actually on screen (minimized/hidden/occluded) — nothing to fix
-        // there, so don't burn GPU on it.
+        // changed). Keep presentation cadence bounded at the ~250ms heartbeat.
+        // Hidden/minimized windows skip this work.
         should_redraw = true;
     }
     return should_redraw;

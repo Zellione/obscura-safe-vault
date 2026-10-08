@@ -944,17 +944,27 @@ load_slot_with_recovery(std::FILE* fp, Header& header,
 
 }  // namespace
 
-VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uint8_t> keyfile)
+VaultResult Vault::unlock_directory(std::span<const uint8_t> password,
+                                    std::span<const uint8_t> keyfile, bool conversion)
 {
     using enum VaultResult;
-    if (v3_) {
         switch (v3_->unlock(password, keyfile)) {
-        case v3::ReadStatus::Ok:
+        case v3::ReadStatus::Ok: {
+            const auto marker = v3_->conversion_marker();
+            if (marker.status != v3::DbStatus::Ok || (marker.value && !conversion)) {
+                v3_->lock();
+                return marker.status == v3::DbStatus::Ok ? IncompleteConversion : BadFormat;
+            }
+            if (!conversion && v3_->quick_open_report().has_corruption()) {
+                v3_->lock();
+                return Damaged;
+            }
             root_ = v3_->root();
             settings_ = v3_->settings();
             saved_searches_ = v3_->saved_searches();
             unlocked_ = true;
             return Ok;
+        }
         case v3::ReadStatus::AuthenticationFailed:
             return AuthFailed;
         case v3::ReadStatus::UnsupportedVersion:
@@ -966,7 +976,12 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
         default:
             return IoError;
         }
-    }
+}
+
+VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uint8_t> keyfile)
+{
+    using enum VaultResult;
+    if (v3_) return unlock_directory(password, keyfile, false);
     if (fp_ == nullptr) {
         return IoError;
     }
@@ -1271,18 +1286,28 @@ ChunkRef video_chunk_ref(const IndexNode& node, size_t index) noexcept
 VaultResult read_thumb_span(const Vault& v, const ChunkRef& ref, crypto::SecureBytes& out)
 {
     using enum VaultResult;
-    if (ref.length == 0) return InvalidArg;
-
     // Phase 58: Use dedicated thumb_fp_ + mutex for thread-safe background reads.
     const std::lock_guard lk(v.thumb_mutex_);
     if (!v.unlocked_) return Locked;
 
     if (v.v3_) {
-        const auto role = ref.domain == crypto::ChunkDomain::Poster ? v3::ObjectRole::Poster
-                                                                    : v3::ObjectRole::Thumbnail;
-        const auto status = v.v3_->read_id(ref.node_id, role, out);
-        return map_v3_read_status(status);
+        using enum crypto::ChunkDomain;
+        switch (ref.domain) {
+        case Data:
+            return map_v3_read_status(
+                v.v3_->read_id(ref.node_id, v3::ObjectRole::OriginalImage, out));
+        case Video:
+            return map_v3_read_status(v.v3_->read_video_frame(ref.node_id, ref.sequence, out));
+        case Thumb:
+            return map_v3_read_status(v.v3_->read_id(ref.node_id, v3::ObjectRole::Thumbnail, out));
+        case Poster:
+            return map_v3_read_status(v.v3_->read_id(ref.node_id, v3::ObjectRole::Poster, out));
+        default:
+            return InvalidArg;
+        }
     }
+
+    if (ref.length == 0) return InvalidArg;
 
     crypto::ChunkTag tag;
     tag.domain = ref.domain;
@@ -1397,7 +1422,7 @@ VaultResult apply_video_probe(Vault& v, std::string_view node_path, const VideoP
                                     std::to_underlying(n->vmeta.container), probe.poster_jpeg,
                                     &info) != v3::ReadStatus::Ok)
                 return IoError;
-            n->vmeta.poster_offset = 1;
+            n->vmeta.poster_offset = v3::object_cache_identity(info.object_id, 3);
             n->vmeta.poster_length = info.encrypted_length;
             return Ok;
         }
@@ -1434,7 +1459,7 @@ VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
                                 std::to_underlying(n->meta.format), thumb_jpeg,
                                 &info) != v3::ReadStatus::Ok)
             return IoError;
-        n->meta.thumb_offset = 1;
+        n->meta.thumb_offset = v3::object_cache_identity(info.object_id, 2);
         n->meta.thumb_length = info.encrypted_length;
         return Ok;
     }
@@ -1469,7 +1494,7 @@ VaultResult apply_video_poster(Vault& v, std::string_view node_path,
                                 std::to_underlying(n->vmeta.container), poster_jpeg,
                                 &info) != v3::ReadStatus::Ok)
             return IoError;
-        n->vmeta.poster_offset = 1;
+        n->vmeta.poster_offset = v3::object_cache_identity(info.object_id, 3);
         n->vmeta.poster_length = info.encrypted_length;
         return Ok;
     }
@@ -2716,14 +2741,9 @@ void Vault::auto_reclaim_space()
                                                           waste * AUTO_COMPACT_WASTE_RATIO < size) {
         return;
     }
-#if defined(__linux__)
     // In-place hole punching: reclaims the disk blocks without the transient
     // second copy compact() writes, so a delete never briefly doubles disk use.
     (void)vault_reclaim(*this);
-#else
-    // No portable hole-punch: fall back to in-place compact (no disk spike).
-    (void)compact();
-#endif
 }
 
 // --- persistence ----------------------------------------------------------

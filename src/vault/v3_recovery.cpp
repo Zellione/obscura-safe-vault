@@ -5,6 +5,13 @@
 #include <map>
 
 namespace vault::v3 {
+#ifdef OSV_VAULT_FIXTURE_DIR
+thread_local std::function<void(uint32_t)> verification_frame_checkpoint;
+void test_only_verification_frame_checkpoint(std::function<void(uint32_t)> callback)
+{
+    verification_frame_checkpoint = std::move(callback);
+}
+#endif
 
 bool VerificationReport::has_corruption() const noexcept
 {
@@ -114,7 +121,8 @@ bool is_unreadable(const ReconciliationReport& reconciled, const ObjectId& id) n
 
 void authenticate_object(const VaultRoot& root, const Database& database,
                          std::span<const uint8_t, crypto::KEY_SIZE> master_key, const Id& vault_id,
-                         const ObjectRecord& object, VerificationReport& report) noexcept
+                         const ObjectRecord& object, VerificationReport& report,
+                         CancellationToken cancel) noexcept
 {
     bool valid_format = false;
     const auto media_format = media_format_for(database, object, valid_format);
@@ -137,6 +145,13 @@ void authenticate_object(const VaultRoot& root, const Database& database,
         return;
     }
     for (uint32_t frame = 0; frame < object.frame_count; ++frame) {
+#ifdef OSV_VAULT_FIXTURE_DIR
+        if (verification_frame_checkpoint) verification_frame_checkpoint(frame);
+#endif
+        if (cancel.requested()) {
+            report.status = RecoveryStatus::Cancelled;
+            return;
+        }
         crypto::SecureBytes plaintext;
         if (const auto status = opened.reader->read_frame(frame, plaintext);
             status != ObjectStatus::Ok) {
@@ -151,13 +166,14 @@ void authenticate_object(const VaultRoot& root, const Database& database,
 bool authenticate_references(const VaultRoot& root, const Database& database,
                              std::span<const uint8_t, crypto::KEY_SIZE> master_key,
                              const Id& vault_id, const ReconciliationReport& reconciled,
-                             VerificationReport& report) noexcept
+                             VerificationReport& report, CancellationToken cancel) noexcept
 {
     const auto references = database.object_references();
     if (references.status != DbStatus::Ok) return false;
     for (const auto& object : references.value) {
         if (is_unreadable(reconciled, object.object_id)) continue;
-        authenticate_object(root, database, master_key, vault_id, object, report);
+        authenticate_object(root, database, master_key, vault_id, object, report, cancel);
+        if (report.status == RecoveryStatus::Cancelled) return true;
     }
     return true;
 }
@@ -166,7 +182,8 @@ bool authenticate_references(const VaultRoot& root, const Database& database,
 VerificationReport verify_vault(const VaultRoot& root,
                                 const Database& database,  // NOSONAR cpp:S3776
                                 std::span<const uint8_t, crypto::KEY_SIZE> master_key,
-                                const Id& vault_id, VerifyDepth depth) noexcept
+                                const Id& vault_id, VerifyDepth depth,
+                                CancellationToken cancel) noexcept
 {
     VerificationReport report;
     report.status = RecoveryStatus::Ok;
@@ -183,6 +200,13 @@ VerificationReport verify_vault(const VaultRoot& root,
         return report;
     }
     report.referenced_bytes = reconciled.referenced_bytes;
+    const auto incomplete = database.incomplete_media_nodes();
+    if (incomplete.status != DbStatus::Ok) {
+        report.status = RecoveryStatus::DatabaseError;
+        return report;
+    }
+    for (const auto& id : incomplete.value)
+        report.findings.push_back({IntegrityFindingKind::InvalidMediaReferences, id});
     report.garbage_bytes = reconciled.garbage_bytes;
     report.garbage_objects = reconciled.garbage.size();
     for (const auto& id : reconciled.missing)
@@ -192,8 +216,8 @@ VerificationReport verify_vault(const VaultRoot& root,
     for (const auto& garbage : reconciled.garbage)
         report.findings.push_back({IntegrityFindingKind::UnreferencedGarbage, garbage.id});
 
-    if (depth == VerifyDepth::Deep &&
-        !authenticate_references(root, database, master_key, vault_id, reconciled, report)) {
+    if (depth == VerifyDepth::Deep && !authenticate_references(root, database, master_key, vault_id,
+                                                               reconciled, report, cancel)) {
         report.status = RecoveryStatus::DatabaseError;
         return report;
     }

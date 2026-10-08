@@ -6,14 +6,14 @@
 using ui::thumb_key_for;
 using vault::IndexNode;
 
-TEST(thumb_key_image_with_thumbnail_uses_data_offset)
+TEST(thumb_key_image_with_thumbnail_uses_thumb_offset)
 {
     IndexNode n = IndexNode::image("a.jpg");
     n.meta.data_offset  = 111;
     n.meta.thumb_offset = 222;
     n.meta.thumb_length = 20;
     const auto k = thumb_key_for(n);
-    CHECK_EQ(k.key, static_cast<uint64_t>(111));
+    CHECK_EQ(k.key, static_cast<uint64_t>(222));
     CHECK_EQ(k.ref.offset, static_cast<uint64_t>(222));
     CHECK_EQ(k.ref.length, static_cast<uint64_t>(20));
     CHECK(k.present);

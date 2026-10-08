@@ -10,8 +10,7 @@
 
 namespace platform {
 
-// Longest path we will hand to fopen(). Generous next to PATH_MAX (4096 on
-// Linux) and Windows' extended-length limit (32767), but a bound nonetheless.
+// Longest path we will hand to fopen(), bounded by the Linux PATH_MAX.
 inline constexpr size_t MAX_USER_PATH_BYTES = 4096;
 
 // Normalize a path that arrived from OUTSIDE the program — a native file dialog
@@ -37,10 +36,7 @@ inline constexpr size_t MAX_USER_PATH_BYTES = 4096;
 // normalize_user_path, rendered back as UTF-8 — the ONE sanctioned way an
 // externally-chosen path becomes a stored std::string (project convention: a
 // std::string holding a path is UTF-8 by definition). The dialog callbacks
-// MUST use this instead of path::string(): on Windows the latter converts
-// through the ANSI code page and throws std::system_error for a CJK filename,
-// which — unhandled inside the SDL dialog callback — was the Phase 72
-// "import of archives and files crashes on Japanese/Chinese names" bug.
+// use this boundary to reject malformed external paths before storing them.
 [[nodiscard]] std::optional<std::string> normalize_external_path_utf8(std::string_view raw);
 
 // Per-user data directory (created if needed). Empty path on failure.
@@ -93,11 +89,10 @@ enum class OwnerOnlyCreate {
 };
 
 // Atomically claim a brand-new file that is readable/writable ONLY by the
-// current user — 0600 on POSIX (independent of umask), a current-user-only
-// DACL on Windows — the same owner-only guarantee write_new_keyfile gives a
+// current user — 0600 (independent of umask), the same guarantee write_new_keyfile gives a
 // keyfile. A vault is the same class of secret: if it ever appears on disk
 // with group/other read permission, a local attacker can copy it before the
-// owner notices. CREATE_NEW / O_EXCL make creation race-free and refuse to
+// owner notices. O_EXCL make creation race-free and refuse to
 // truncate an existing file.
 [[nodiscard]] OwnerOnlyCreate create_owner_only_file(const std::filesystem::path& path,
                                                      std::FILE*& out);

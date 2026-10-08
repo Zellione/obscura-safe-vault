@@ -57,16 +57,18 @@ class CommitLane;
 
 enum class VaultResult {
     Ok,
-    IoError,             // open/read/write/fsync failure
-    BadFormat,           // not a valid .osv / unparseable header or index
-    AuthFailed,          // wrong password/keyfile, or tampered/undecryptable chunk
-    Locked,              // operation needs an unlocked vault
-    NotFound,            // gallery / image path does not exist
-    AlreadyExists,       // gallery / image name already taken
-    InvalidArg,          // bad argument or leaf-invariant violation
-    CryptoError,         // RNG / KDF failure
-    Busy,                // another process holds the required vault resource
-    UnsupportedVersion,  // valid vault from a newer unsupported format/schema
+    IoError,               // open/read/write/fsync failure
+    BadFormat,             // not a valid .osv / unparseable header or index
+    AuthFailed,            // wrong password/keyfile, or tampered/undecryptable chunk
+    Locked,                // operation needs an unlocked vault
+    NotFound,              // gallery / image path does not exist
+    AlreadyExists,         // gallery / image name already taken
+    InvalidArg,            // bad argument or leaf-invariant violation
+    CryptoError,           // RNG / KDF failure
+    Busy,                  // another process holds the required vault resource
+    IncompleteConversion,  // resume using the original legacy source
+    Damaged,               // quick verification detected damaged media references
+    UnsupportedVersion,    // valid vault from a newer unsupported format/schema
 };
 
 // Video chunk size (1 MiB plaintext split).
@@ -228,11 +230,13 @@ public:
     friend LegacyConversionReport convert_legacy_vault(Vault&,
                                                        const LegacyConversionRequest&) noexcept;
     friend class LegacyConverter;
-    friend LegacyConversionStatus
-    copy_legacy_video_object(Vault&, const IndexNode&, v3::ReadSession&, const IndexNode&) noexcept;
+    friend LegacyConversionStatus copy_legacy_video_object(Vault&, const IndexNode&,
+                                                           v3::ReadSession&, const IndexNode&,
+                                                           CancellationToken) noexcept;
     friend LegacyConversionStatus digest_legacy_original(Vault&, const IndexNode&,
-                                                          std::span<const uint8_t>,
-                                                          std::span<uint8_t>) noexcept;
+                                                         std::span<const uint8_t>,
+                                                         std::span<uint8_t>,
+                                                         CancellationToken) noexcept;
 
     // Phase 99: true when this vault's index blob + master-key wrap are sealed
     // with the context-bound AEAD (header FLAG_CONTEXT_BOUND_CHUNKS). A clear
@@ -472,6 +476,8 @@ public:
     friend VaultResult vault_reclaim(Vault& v);
 
 private:
+    [[nodiscard]] VaultResult unlock_directory(std::span<const uint8_t> password,
+                                               std::span<const uint8_t> keyfile, bool conversion);
     // Best-effort space reclamation after a delete, gated on AUTO_COMPACT_*:
     // in-place hole punching where supported (no disk spike), else a full
     // compact(). Shared by remove_image / remove_gallery.
@@ -573,11 +579,10 @@ using vault::ChunkRef;
 [[nodiscard]] ChunkRef image_data_chunk_ref(const IndexNode& node) noexcept;
 [[nodiscard]] ChunkRef video_chunk_ref(const IndexNode& node, size_t index) noexcept;
 
-// Decrypt a thumbnail/poster chunk by its ChunkRef into mlock'd memory. Used by
-// gallery cover montages (Phase 19) and the any-thread span readers (Phase 58),
-// which reference descendant nodes' thumbnail spans without holding the nodes.
-// InvalidArg if length is 0; Locked if the vault is locked; AuthFailed on
-// tamper/corruption.
+// Any-thread authenticated reader for thumbnail, poster, original image, or
+// original video frame, selected explicitly by ChunkRef::domain. Directory
+// reads use node identity and video sequence; legacy reads require a nonzero
+// physical span. Locked if the vault is locked; AuthFailed on authentication failure.
 [[nodiscard]] VaultResult read_thumb_span(const Vault& v, const ChunkRef& ref,
                                           crypto::SecureBytes& out);
 

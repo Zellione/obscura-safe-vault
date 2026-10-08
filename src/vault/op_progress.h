@@ -4,6 +4,18 @@
 
 namespace vault {
 
+// Some operations accept both a dedicated job cancel flag and UI progress.
+// Carry both through inner loops so either caller can stop bounded frame work.
+struct CancellationToken {
+    const std::atomic_bool* job = nullptr;
+    const std::atomic_bool* progress = nullptr;
+
+    [[nodiscard]] bool requested() const noexcept
+    {
+        return (job && job->load()) || (progress && progress->load());
+    }
+};
+
 // Thread-safe progress + cooperative-cancel handle shared between a long-running
 // bulk vault operation on a worker thread and a UI poller (Phase 25). The worker
 // stores `total` (item count) before the first item and bumps `done` after each;

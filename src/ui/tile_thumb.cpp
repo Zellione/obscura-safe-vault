@@ -20,9 +20,8 @@ namespace ui {
 ThumbKey thumb_key_for(const vault::IndexNode& node)
 {
     const vault::ChunkRef r = vault::media_thumb_chunk_ref(node);
-    // Texture-cache identity: an image keys off its DATA chunk (the original's
-    // root), a video off its poster chunk — unchanged from pre-Phase-99.
-    const uint64_t key = node.is_video() ? node.vmeta.poster_offset : node.meta.data_offset;
+    // Derived-object identity changes whenever a thumbnail/poster is replaced.
+    const uint64_t key = node.is_video() ? node.vmeta.poster_offset : node.meta.thumb_offset;
     return {key, r, r.length > 0};
 }
 

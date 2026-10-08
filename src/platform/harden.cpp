@@ -3,11 +3,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
-#include <filesystem>
 #include "platform/safe_print.h"
 
-#include "platform/paths.h"
-#include "platform/path_utf8.h"
 
 #include <sys/resource.h>  // setrlimit
 
@@ -24,19 +21,6 @@ void disable_core_dumps() noexcept
     if (setrlimit(RLIMIT_CORE, &zero_core) != 0) {
         platform::safe_println(stderr, "[Platform] setrlimit(RLIMIT_CORE, 0) failed");
     }
-}
-
-bool redirect_stream_to_file(std::FILE* stream, const std::filesystem::path& path) noexcept
-{
-    // Binary mode: text mode on Windows translates '\n' to "\r\n", which
-    // would make the on-disk line endings platform-dependent (mirrors
-    // error_log.cpp / theme_pref.cpp's own file writes).
-    return platform::freopen_path(path, "ab", stream) != nullptr;
-}
-
-void redirect_diagnostics_to_log_file() noexcept
-{
-    // POSIX logs go directly to stderr; nothing to redirect.
 }
 
 bool grow_secure_mem_budget(size_t bytes) noexcept

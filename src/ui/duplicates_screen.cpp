@@ -423,8 +423,7 @@ void DuplicatesScreen::apply_marked_batch()
     totals_.applied_bytes += doomed_bytes;
     ++totals_.waves_applied;
     review_.finish_wave();
-    // auto_reclaim_space may have relocated (Windows compact) or freed-for-
-    // reuse the surviving chunks: re-read every remaining span from the index,
+    // Re-resolve survivors after deletion: read remaining spans from the index,
     // and drop the offset-keyed texture/failure memos before anything fetches.
     refresh_review_members(vault_, review_);
     failed_.clear();

@@ -26,6 +26,19 @@ bool CommitLane::enqueue_snapshot()
     if (!running()) return false;  // Lane thread is not running; reject work
     if (failed()) return false;
 
+    // Directory metadata already has a transactional durability interface. Keep
+    // this on the tree-owning caller thread; the legacy worker only understands
+    // single-file index blobs and must never touch a directory session.
+    if (v_->v3_) {
+        if (stopping_.load()) return false;
+        if (v_->commit_index() != VaultResult::Ok) {
+            failed_.store(true);
+            platform::log_error("Vault", "commit lane: directory metadata write failed");
+            return false;
+        }
+        return true;
+    }
+
     // Serialize the index tree (main-thread-only, no lock needed for tree).
     // This happens OUTSIDE mu_ since the tree is not protected by header_mutex_.
     IndexIoContext ctx{

@@ -55,3 +55,11 @@ Make directory vaults the default for newly created vaults only after feature pa
 ## Acceptance criterion
 
 New vaults default to v3; the measured performance budgets and full test/sanitizer/fuzz/crash suites pass; the security review has no unresolved high/medium issue; documentation reflects the directory model; legacy vaults still open read-only; and the owner has merged the cutover PR.
+
+## Audit correction
+
+The original benchmark below measures SQL repository operations, not facade
+unlock/import/thumbnail reads. Its results do not establish production
+large-vault responsiveness. The phase 110–115 follow-up adds a production
+facade benchmark with two objects per media and indexed reference reads;
+current measurements and limits are tracked in [AUDIT.md](../../AUDIT.md).
