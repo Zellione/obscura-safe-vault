@@ -16,6 +16,10 @@ production facade benchmarks, and Linux-only cleanup. Validation is in progress.
 
 ## Phase index
 
+Audio EOF follow-up: prevent repeated drain packets and diagnostics after playback
+ends; preserve buffered audio and reset EOF on seek/reopen. See the
+[Phase 103 follow-up](docs/roadmap/phase-103-audio-eagain.md#eof-follow-up).
+
 | # | Name | Status | Summary |
 |---|---|---|---|
 | 0 | Skeleton & minimal window | ✅ | Project structure, build system, a compilable app that opens a window. → [details](docs/roadmap/phase-00-skeleton.md) |

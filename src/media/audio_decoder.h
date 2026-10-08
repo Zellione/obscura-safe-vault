@@ -40,6 +40,7 @@ public:
     [[nodiscard]] int  channels()    const noexcept { return channels_; }
     [[nodiscard]] int  sample_rate() const noexcept { return sample_rate_; }
     [[nodiscard]] bool valid()       const noexcept { return ctx_ != nullptr; }
+    [[nodiscard]] bool eof()         const noexcept { return eof_; }
 
 private:
     void reset();
@@ -53,6 +54,7 @@ private:
     int             channels_    = 0;
     int             sample_rate_ = 0;
     AVRational      time_base_   = {0, 1};
+    bool            eof_         = false;
 };
 
 }  // namespace media

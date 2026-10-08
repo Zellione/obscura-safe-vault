@@ -128,9 +128,12 @@ Files: `video_byte_source.h`, `video_source.*`, `video_object_source.*`, `chunk_
   `display_dims()` helper computes anamorphic-corrected width (round(coded_width * SAR_num / SAR_den))
   for DVD/DV clips with non-square pixels (SAR read via `av_guess_sample_aspect_ratio()`).
   VideoMeta stores display dims (not coded dims) for detail panel + thumbnail poster.
-- `AudioDecoder` owns an `AVStream*`, decodes planar PCM → interleaved F32 in
+- `AudioDecoder` owns its codec context and borrows stream parameters, decodes planar PCM → interleaved F32 in
   `AudioFrame{samples,channels,sample_rate,pts_seconds}`. Phase 52 added decoders for
   legacy formats (MP2, WMA v1/v2, Cook, RealAudio 144/288, PCM s16le/u8, ADPCM ms/ima_wav).
+  `eof()` latches codec EOF until flush/seek or reopen. Repeated decode/drain calls
+  after EOF are no-ops; `VideoDecoder::next_audio_frame()` consumes buffered output
+  before checking EOF and then avoids further demux/drain work.
 - `anim_decoder.h` (Phase 57, NOT gated) — `AnimFrame{rgba,width,height,delay_s}`
   (was `GifFrame`) + the abstract `AnimDecoder` (`open`/`next_frame`/`rewind`/
   `width`/`height`/`frames_decoded`) and `kMinFrameDelay` (20 ms). Pulls in

@@ -84,6 +84,29 @@ FFmpeg 7.1.1 doesn't expose a knob for that).
   audio and stop/loop normally instead of looping with no audio and
   ~hundreds of `[AudioDecoder] avcodec_send_packet failed` lines.
 
+## EOF follow-up
+
+The playback tick continues polling `VideoDecoder::next_audio_frame()` after
+audio ends. Each poll previously read EOF again and sent another null packet
+to `AudioDecoder`. FFmpeg rejects repeated drain packets with `AVERROR_EOF`
+(`-541478725`), which the generic send-error branch incorrectly logged as a
+failure. This was repeated work across playback ticks, not an unbounded retry
+inside `AudioDecoder::decode()` (that retry handles only EAGAIN and is capped).
+
+`AudioDecoder` now remembers terminal EOF and treats it as normal completion.
+Further decode calls return immediately. `next_audio_frame()` returns any
+already-buffered output first, then stops polling the demuxer/decoder at EOF.
+Flush on either seek path and reopening the codec reset this state.
+
+Regression coverage captures repeated-drain diagnostics in an in-memory pipe
+(the silence assertion failed before the fix), checks no duplicate samples,
+and verifies decoding resumes after seek. Decoder state checks cover reopen;
+the encrypted-video integration test covers repeated end-of-playback polling
+and both synchronous and worker-demux seek paths.
+
+Local validation: Debug, Release, and ASan/UBSan/LSan each pass all 2,394 tests.
+LeakSanitizer required execution outside the sandbox to complete its exit checks.
+
 ## Files touched
 
 - `src/media/audio_decoder.cpp` — the fix (single function, `AudioDecoder::decode()`).
