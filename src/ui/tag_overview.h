@@ -5,11 +5,13 @@
 #include <string>
 #include <vector>
 
+#include "ui/import_tag_dialog.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "ui/tag_fields_form.h"
-#include "ui/tag_overview_model.h"   // ui::TagTally, TagSort
+#include "ui/tag_json_parse.h"
+#include "ui/tag_overview_model.h"  // ui::TagTally, TagSort
 #include "ui/template_editor.h"
 #include "ui/text_input_model.h"
 #include "ui/widgets.h"
@@ -57,6 +59,7 @@ private:
     // update() and applied in one settings commit.
     void open_tag_dict_picker();
     void import_tag_dict(const std::string& path);
+    void finish_tag_dict(const ImportTagReview& review);
     void render_import_summary(gfx::Renderer& r, float win_w, float win_h);
 
     // Ctrl+X → Y/N confirm → Vault::prune_tags with the junk-tag predicate
@@ -87,6 +90,8 @@ private:
     // without stealing the bare letter keys (E opens the description prompt).
     bool                  filtering_ = false;
 
+    ImportTagDialog import_tags_{win_};
+    TagDictParseResult pending_dict_;
     std::string error_;
 
     // Phase 55: the summary modal (dict import / junk-tag cleanup). Non-empty

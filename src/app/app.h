@@ -16,13 +16,14 @@
 #include "ui/gallery_session_state.h"
 #include "ui/help_popup.h"
 #include "ui/import_queue.h"
+#include "ui/import_tag_dialog.h"
+#include "ui/migration_job.h"
 #include "ui/screen.h"
 #include "ui/second_vault.h"
 #include "ui/settings_model.h"
-#include "ui/migration_job.h"
-#include "vault/vault.h"
-#include "vault/migration.h"
 #include "vault/commit_lane.h"
+#include "vault/migration.h"
+#include "vault/vault.h"
 
 namespace ui { class ImageViewer; }
 
@@ -224,6 +225,8 @@ private:
         bool need_begin_session = false;
     };
     ImportUi                           import_ui_;
+    ui::ImportTagDialog import_tags_{window_};
+    std::optional<ui::DatasetTagReview> pending_import_tags_;
 };
 
 } // namespace app

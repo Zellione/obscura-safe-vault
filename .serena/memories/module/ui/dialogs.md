@@ -162,3 +162,8 @@ Modal dialogs: transfer/combine operations, file pickers, rename/tag editing, se
   SDL_StartTextInput/StopTextInput need a Window), and `draw_settings_overlay`. Theme rows
   apply live and persist exactly as the retired ThemePicker did. Not in `osv_tests`. **Phase 66:**
   Security section displays and cycles the default cross-vault keep-open mode via Up/Down.
+
+- `import_tag_dialog.*`: shared detached import metadata review (dataset App overlay,
+  GalleryGrid text lists, TagOverview dictionaries). Selection, optional cleanup,
+  rename and existing-tag picker; pure `import_tag_dialog_layout` derives row pitch
+  from font height. See `mem:module/ui/import` for collection and commit boundaries.

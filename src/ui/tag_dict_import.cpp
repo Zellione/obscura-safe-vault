@@ -1,4 +1,6 @@
 #include "ui/tag_dict_import.h"
+#include "ui/import_tag_review.h"
+#include "ui/tag_list_parse.h"
 
 #include <algorithm>
 #include <array>
@@ -98,6 +100,34 @@ TagDictImportSummary apply_tag_dict(VaultSettings& s, const TagDictParseResult& 
     }
 
     return sum;
+}
+
+TagDictImportSummary apply_reviewed_tag_dict(VaultSettings& settings,
+                                             const TagDictParseResult& parsed,
+                                             const ImportTagReview& review)
+{
+    TagDictParseResult filtered;
+    filtered.malformed_skipped = parsed.malformed_skipped;
+    filtered.fields_truncated = parsed.fields_truncated;
+    filtered.over_cap_skipped = parsed.over_cap_skipped;
+    std::vector<std::string> seen;
+    for (size_t i = 0; i < std::min(parsed.entries.size(), review.rows().size()); ++i) {
+        const auto& row = review.rows()[i];
+        const auto key = review.target(i);
+        if (!row.selected || !tag_has_renderable_text(key)) continue;
+        if (std::ranges::any_of(seen, [&](const auto& old) { return tag_ci_equal(old, key); }))
+            continue;
+        seen.push_back(key);
+        // Mapping reuses the destination's metadata; incoming aliases cannot overwrite it.
+        if (row.replacement) continue;
+        const auto colon = key.find(':');
+        TagDictEntry entry = parsed.entries[i];
+        entry.category = colon == std::string::npos ? "" : key.substr(0, colon);
+        entry.name = colon == std::string::npos ? key : key.substr(colon + 1);
+        if (entry.name.empty() || entry.category.size() > vault::INDEX_MAX_CATEGORY_BYTES) continue;
+        filtered.entries.push_back(std::move(entry));
+    }
+    return apply_tag_dict(settings, filtered);
 }
 
 std::vector<std::string> tag_dict_summary_lines(const TagDictImportSummary& s)

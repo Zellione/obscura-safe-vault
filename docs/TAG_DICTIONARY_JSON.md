@@ -80,3 +80,36 @@ registered, and fields that were shortened. Press any key to dismiss it.
 The overview lists tags that something in the vault **carries**. A description imported
 for a tag nothing uses yet is stored and kept safe, but only appears on the overview
 once that tag is actually applied to something.
+
+## Review before import (Phase 117)
+
+After picking a dictionary, a review shows each source key and proposed imported
+key. Nothing is saved until confirmation. The same review is available for text
+tag lists and media dataset metadata.
+
+- `C`: toggle removal of `<...>` and `(...)` annotations and their contents.
+  Nested groups are removed, whitespace is collapsed, and square brackets remain.
+  An unmatched opening delimiter removes the remaining suffix; stray closing
+  delimiters are removed. Cleanup defaults off and can be toggled back.
+- `Space` or click: include/exclude the selected source tag. `A` / `N` select all /
+  none of the currently filtered rows. `/` filters source and destination names.
+- `R`: rename the incoming key (including `category:` when needed).
+- `E`: choose a tag already in the vault. Type to search, use Up/Down, then Enter.
+  The vocabulary includes tags on content, dictionary descriptions, and custom
+  field values. Mapping preserves the destination's existing metadata.
+- Enter confirms the review. Esc cancels tag import. Inside an editing field,
+  Enter accepts that edit and Esc returns to the review.
+
+Explicit renames and replacements take precedence over cleanup. Empty cleaned
+names are skipped. Case-insensitive collisions coalesce in source order; the
+first selected dictionary entry wins. Unselected tags do not create categories
+or update descriptions. Ordinary dictionary imports retain the existing rule
+that a non-empty description updates an existing description; explicit replacement
+uses the destination unchanged.
+
+For archive datasets, tags from nested archives are collected into one review per
+import task after discovery finishes. Folder imports read the root `meta.json`.
+Media is imported independently: cancelling this review keeps imported media and
+skips its pending tags. Pending reviews are session-only and are discarded when
+the vault locks or the application exits. If saving fails partway, already saved
+tags remain; the review allows retrying or cancelling the remaining assignments.

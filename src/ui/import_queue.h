@@ -2,6 +2,7 @@
 
 #include "crypto/secure_mem.h"
 #include "ui/import_model.h"
+#include "ui/import_tag_review.h"
 #include "ui/volume_set.h"
 #include "vault/commit_lane.h"
 #include "vault/index.h"
@@ -28,6 +29,17 @@ struct ArchivePassword;
 
 struct ZipEntry;      // ui/zip_plan.h
 struct ZipPlacement;  // ui/zip_plan.h
+
+struct DatasetTagAssignment {
+    std::string gallery;
+    std::string tag;
+};
+struct DatasetTagReview {
+    uint64_t task_id = 0;
+    std::vector<DatasetTagAssignment> assignments;
+    std::string display_name;
+    [[nodiscard]] std::vector<std::string> tags() const;
+};
 
 // App-owned background import pipeline (Phase 50). One worker thread runs
 // tasks FIFO; per image file, decode+thumbnail runs on a small pool while
@@ -94,6 +106,10 @@ public:
     // batch policy, enqueue lane snapshots when due. Returns the number of
     // records applied (callers refresh screens when > 0).
     int drain(double dt);
+    // Completed tasks expose their metadata separately; media is already imported.
+    [[nodiscard]] std::optional<DatasetTagReview> take_tag_review();
+    [[nodiscard]] bool apply_tag_review(const DatasetTagReview& pending,
+                                        const ImportTagReview& review);
 
     // ---- observation (main thread / render) ----
     [[nodiscard]] bool busy() const;                 // running or queued work
@@ -220,6 +236,7 @@ private:
 
     // Record queue for main thread to drain
     std::deque<StagedRecord> records_;
+    std::vector<DatasetTagReview> pending_tags_;  // main-thread-only
 
     // Batch commit policy
     BatchCommitPolicy policy_;

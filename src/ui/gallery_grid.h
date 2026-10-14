@@ -10,20 +10,22 @@
 #include <vector>
 
 #include "image/decode_worker.h"
-#include "ui/combine_dialog.h"
-#include "ui/cover_cache.h"
-#include "ui/consent_dialog.h"
-#include "ui/volume_set_dialog.h"
-#include "ui/delete_summary.h"
-#include "ui/batch_delete.h"
-#include "ui/detail_panel.h"
-#include "ui/failure_list_dialog.h"
-#include "ui/file_op_job.h"
-#include "ui/dual_session_state.h"
-#include "ui/gallery_session_state.h"
-#include "ui/gallery_view.h"
 #include "ui/anim_model.h"
 #include "ui/anim_playback.h"
+#include "ui/batch_delete.h"
+#include "ui/combine_dialog.h"
+#include "ui/consent_dialog.h"
+#include "ui/cover_cache.h"
+#include "ui/delete_summary.h"
+#include "ui/detail_panel.h"
+#include "ui/dual_session_state.h"
+#include "ui/failure_list_dialog.h"
+#include "ui/file_op_job.h"
+#include "ui/gallery_session_state.h"
+#include "ui/gallery_view.h"
+#include "ui/import_queue.h"
+#include "ui/import_tag_dialog.h"
+#include "ui/listing_remap.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
 #include "ui/rename_dialog.h"
@@ -34,10 +36,9 @@
 #include "ui/tag_editor.h"
 #include "ui/text_input_model.h"
 #include "ui/transfer_dialog.h"
+#include "ui/volume_set_dialog.h"
 #include "ui/widgets.h"
 #include "ui/zip_plan.h"
-#include "ui/import_queue.h"
-#include "ui/listing_remap.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
@@ -202,6 +203,8 @@ void toggle_select();          // toggle the current item in the export selectio
     // update()'s cognitive complexity (S3776) down. vault_busy / handle_job_input (Phase 25)
     // are free friends for the same reasons (Phase 50: imports drain asynchronously).
     friend void poll_file_job(GalleryGrid& g);          // drain a finished export/delete job
+    friend bool handle_import_tag_review(GalleryGrid& g, const SDL_Event& e);
+    friend void begin_tag_list_review(GalleryGrid& g, const std::vector<std::string>& paths);
     friend bool vault_busy(const GalleryGrid& g);       // any worker owns the vault(s)?
     friend bool handle_job_input(GalleryGrid& g, const SDL_Event& e);  // job-active Esc→cancel gate
     friend void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);  // Shift+C compact confirm
@@ -260,6 +263,7 @@ void toggle_select();          // toggle the current item in the export selectio
     // Phase 53: confirms importing a detected multi-volume set.
     VolumeSetDialog         volume_dialog_;
     SearchOverlay           search_;
+    ImportTagDialog import_tags_{win_};
     TagEditor               tag_editor_;
     QuickSwitch             quick_switch_;   // declared before transfer_ so it copies
     TransferDialog          transfer_;       // the active path before transfer_ moves it

@@ -187,7 +187,7 @@ Import infrastructure: archive handling, plan building, vault population, import
   **Phase 53:** gained a `tag_gallery(vault, gallery_path, tag)` PURE VIRTUAL — deliberately not a defaulted
   no-op, because that is exactly how `StagingSink` silently dropped every meta.json tag on queued imports
   while the synchronous path kept working. `StagingSink`'s `StagedRecord` gained a `tag` field so tags survive
-  until the main-thread drain applies them.
+  until the main-thread drain collects them for review (only confirmation applies them).
 - **Retired:** `ZipImportJob` (entire class), `FileOpJob::start_import` (method); executors (zip_import, archive_import, etc.)
   reused by queue unchanged. GalleryGrid `Z` key now enqueues instead of launching a legacy job.
 
@@ -196,3 +196,27 @@ Import infrastructure: archive handling, plan building, vault population, import
   ImportTaskKind::Folder: `scan_folder(task.source)` -> archive-style ZipEntry list -> `build_zip_plan` -> stage each
   file (decrypt-to-memory, no temp file) -> attach gallery tree. Bytes read into mlock'd SecureBytes.
   Main-thread-only invariant: tree untouched by worker (attach/commit only on queue drain).
+
+## Import tag review
+
+- `import_tag_review.*`: detached `ImportTagReview` rows (source, selected,
+  optional explicit destination, replacement flag). Optional annotation cleanup
+  removes nested angle/parenthesis groups, normalizes whitespace, skips empty
+  cleaned names, and leaves explicit renames/mappings intact. Case-insensitive
+  de-duplication on output; replacement only accepts the supplied existing vocabulary.
+- `import_tag_dialog.*`: shared modal with include/exclude, all/none of filtered
+  rows, reversible cleanup, rename, searchable existing-tag selection. Two columns
+  independently elide source and destination. `import_tag_vocabulary` combines
+  content tags, descriptions, and custom fields. Owners apply only `take_result()`;
+  cancelling produces no result. Text-input focus is restored to the previous owner.
+- `ImportQueue` stages dataset tag assignments in main-thread `pending_tags_`,
+  never applying them in `drain`. `take_tag_review` yields a finished task only
+  after all of its staged records drain. App hosts its review and calls
+  `apply_tag_review` for confirmed rows; destinations remain tied to the original
+  gallery paths. Media imports normally, independently of tag confirmation.
+  Abort/session teardown discards unreviewed metadata. Folder imports collect
+  root `meta.json` through the same sink as archive imports.
+- Text lists open the modal in GalleryGrid before `apply_tag_list`; dictionaries
+  open it in TagOverviewScreen before `apply_reviewed_tag_dict`. Explicit dictionary
+  replacements preserve existing descriptions/fields; collisions use first selected
+  source order. No source file is modified and no new vault format is introduced.

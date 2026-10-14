@@ -946,7 +946,27 @@ struct App::OverlayDispatch {
         return true;
     }
 
-    // Lock-confirm modal (lowest priority: key events only; Phase 50)
+    // Dataset tags are applied only after explicit review confirmation.
+    static bool import_tags(App& app, const SDL_Event& e)
+    {
+        if (!app.import_tags_.active()) return false;
+        app.import_tags_.handle_event(e);
+        if (auto result = app.import_tags_.take_result()) {
+            if (app.pending_import_tags_ &&
+                !app.import_ui_.queue.apply_tag_review(*app.pending_import_tags_, *result)) {
+                app.import_tags_.open(std::move(*result),
+                                      "Review dataset tags: " +
+                                          app.pending_import_tags_->display_name);
+                app.import_tags_.set_error(
+                    "Could not save all tags. Retry or cancel remaining tags.");
+            } else if (app.screen_)
+                app.screen_->on_vault_changed();
+        }
+        if (!app.import_tags_.active()) app.pending_import_tags_.reset();
+        if (app.screen_) app.screen_->mark_dirty();
+        return true;
+    }
+
     static bool lock_confirm(App& app, const SDL_Event& e)
     {
         if (!app.import_ui_.lock_confirm.open) return false;
@@ -971,9 +991,11 @@ bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
     if (D::help(app, e)) return true;
     if (app.maintenance_ui_.running) return true;
     if (D::clipboard_confirm(app, e)) return true;
+    if (D::lock_confirm(app, e)) return true;
+    if (D::import_tags(app, e)) return true;
     if (D::settings(app, e)) return true;
     if (D::migration(app, e)) return true;
-    return D::lock_confirm(app, e);
+    return false;
 }
 
 void App::dispatch_event(const SDL_Event& e)
@@ -1147,6 +1169,8 @@ bool App::apply_nav()
             ui::open_settings(overlays_.settings, ui::SettingsSection::VaultOps);
             return false;
         case ToUnlock:
+            import_tags_.close();
+            pending_import_tags_.reset();
             import_ui_.queue.end_session();          // Phase 50: flush before switch
             import_ui_.lane.reset();                 // Phase 73: reset CommitLane after session
             // Phase 66: switching to the warm vault promotes its already-unlocked
@@ -1167,6 +1191,8 @@ bool App::apply_nav()
             second_.session.wipe();                          // Phase 66: locking up means locking everything
             sessions_.dual.reset();                // Phase 78: fresh dual-pane state on lock
             sessions_.gallery.reset();                     // Phase 39 Part 2: fresh session on lock
+            import_tags_.close();
+            pending_import_tags_.reset();
             import_ui_.queue.end_session();          // Phase 50: flush before lock
             if (vault_state_.active) {
                 vault_state_.active->lock();                // Phase 73: lock stops the lane
@@ -1229,6 +1255,8 @@ bool App::maybe_auto_lock(double dt)
     if (screen_) screen_->on_exit();
     sessions_.dual.reset();                       // Phase 78: fresh dual-pane state on idle lock
     sessions_.gallery.reset();                                  // Phase 39 Part 2: fresh session on idle lock
+    import_tags_.close();
+    pending_import_tags_.reset();
     import_ui_.queue.end_session();                       // Phase 50: flush before lock
     vault_state_.active->lock();                       // Phase 73: lock stops the lane
     import_ui_.lane.reset();                           // then destroy it
@@ -1342,6 +1370,18 @@ void App::update(double dt)  // NOSONAR cpp:S3776 -- ordered lifecycle coordinat
         screen_->on_vault_changed();
         screen_->mark_dirty();
     }
+    if (vault_state_.active && !import_tags_.active() && !maintenance_ui_.running &&
+        !(migration_ui_.job && migration_ui_.job->active()) &&
+        !(screen_ && screen_->blocks_idle_lock()) && !overlays_.settings.open &&
+        !migration_ui_.offer_open && !migration_ui_.result_open && !import_ui_.lock_confirm.open) {
+        if (auto pending = import_ui_.queue.take_tag_review()) {
+            import_tags_.open(ui::ImportTagReview(pending->tags(),
+                                                  ui::import_tag_vocabulary(*vault_state_.active)),
+                              "Review dataset tags: " + pending->display_name);
+            pending_import_tags_ = std::move(pending);
+            if (screen_) screen_->mark_dirty();
+        }
+    }
 }
 
 void App::render_frame()  // NOSONAR cpp:S3776 -- ordered overlay composition
@@ -1393,6 +1433,7 @@ void App::render_frame()  // NOSONAR cpp:S3776 -- ordered overlay composition
         }
 
         // Phase 50: render lock_confirm modal after migration/settings so it stays on top
+        import_tags_.render(r, font_, w, h);
         if (import_ui_.lock_confirm.open) {
             using namespace gfx::theme;
 
@@ -1498,6 +1539,8 @@ void App::shutdown()
     // and leaves the watermark unstamped, so the upgrade is re-offered).
     if (migration_ui_.job) migration_ui_.job->abort_and_join();
     if (screen_) { screen_->on_exit(); screen_.reset(); }
+    import_tags_.close();
+    pending_import_tags_.reset();
     import_ui_.queue.end_session();        // Phase 50: flush before lock (blocking, acceptable at shutdown)
     second_.session.wipe();                        // Phase 66: wipe warm slot before vault teardown
     if (vault_state_.active) {

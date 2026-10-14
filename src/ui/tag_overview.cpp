@@ -122,6 +122,8 @@ void TagOverviewScreen::on_enter()
 
 void TagOverviewScreen::on_exit()
 {
+    import_tags_.close();
+    pending_dict_ = {};
     SDL_StopTextInput(win_.sdl_window());
 }
 
@@ -170,15 +172,25 @@ void TagOverviewScreen::import_tag_dict(const std::string& path)
     const auto bytes = platform::read_file(path, platform::MAX_METADATA_IMPORT_BYTES);
     if (!bytes) { error_ = "Could not read the tag dictionary."; return; }
 
-    const TagDictParseResult parsed = parse_tag_dict_json(*bytes);
+    TagDictParseResult parsed = parse_tag_dict_json(*bytes);
     if (parsed.entries.empty() && parsed.malformed_skipped == 0 &&
         parsed.over_cap_skipped == 0) {
         error_ = "That file holds no tag entries.";
         return;
     }
 
+    std::vector<std::string> tags;
+    for (const auto& entry : parsed.entries)
+        tags.push_back(entry.key());
+    pending_dict_ = std::move(parsed);
+    import_tags_.open(ImportTagReview(std::move(tags), import_tag_vocabulary(vault_)),
+                      "Review dictionary tags");
+}
+
+void TagOverviewScreen::finish_tag_dict(const ImportTagReview& review)
+{
     auto       settings = vault::vault_settings(vault_);
-    const auto summary  = apply_tag_dict(settings, parsed);
+    const auto summary = apply_reviewed_tag_dict(settings, pending_dict_, review);
     // One commit for the whole file, not one per entry. It can fail, and a
     // failed commit must never be reported as a successful import.
     if (vault::set_vault_settings(vault_, std::move(settings)) != vault::VaultResult::Ok) {
@@ -300,6 +312,13 @@ void TagOverviewScreen::handle_key_down_in_browse_mode(const SDL_KeyboardEvent& 
 
 void TagOverviewScreen::handle_event(const SDL_Event& e)
 {
+    if (import_tags_.active()) {
+        import_tags_.handle_event(e);
+        if (auto result = import_tags_.take_result()) finish_tag_dict(*result);
+        if (!import_tags_.active()) pending_dict_ = {};
+        mark_dirty();
+        return;
+    }
     if (quick_switch_.active()) {
         (void)quick_switch_.handle_event(e);
         if (std::string p; quick_switch_.consume_choice(p))
@@ -429,6 +448,7 @@ void TagOverviewScreen::render(gfx::Renderer& r)
 
     render_prune_confirm(r, W, H);
     render_import_summary(r, W, H);
+    import_tags_.render(r, font_, W, H);
 }
 
 void TagOverviewScreen::render_prune_confirm(gfx::Renderer& r, float win_w, float win_h)
