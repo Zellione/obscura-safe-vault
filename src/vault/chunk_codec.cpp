@@ -64,7 +64,8 @@ uint8_t* buf_data(crypto::WipingBytes& b) noexcept { return b.data(); }
 
 uint8_t* buf_data(crypto::SecureBytes& b) noexcept { return b.data(); }
 
-void* secure_codec_alloc(void*, size_t count, size_t size) noexcept
+// miniz mandates void* in its C allocator/deallocator callback signatures.
+void* secure_codec_alloc(void*, size_t count, size_t size) noexcept  // NOSONAR cpp:S5008
 {
     if (size != 0 && count > std::numeric_limits<size_t>::max() / size) return nullptr;
     try {
@@ -74,7 +75,7 @@ void* secure_codec_alloc(void*, size_t count, size_t size) noexcept
     }
 }
 
-void secure_codec_free(void*, void* allocation) noexcept
+void secure_codec_free(void*, void* allocation) noexcept  // NOSONAR cpp:S5008
 {
     crypto::SecureAllocator<uint8_t>{}.deallocate(static_cast<uint8_t*>(allocation), 0);
 }
@@ -92,9 +93,10 @@ bool transform(std::span<const uint8_t> input, std::span<uint8_t> output, bool c
     stream.avail_out = static_cast<mz_uint32>(output.size());
     stream.zalloc = secure_codec_alloc;
     stream.zfree = secure_codec_free;
-    const int initialized =
-        compress ? mz_deflateInit(&stream, MZ_DEFAULT_LEVEL) : mz_inflateInit(&stream);
-    if (initialized != MZ_OK) return false;
+    if (const int initialized =
+            compress ? mz_deflateInit(&stream, MZ_DEFAULT_LEVEL) : mz_inflateInit(&stream);
+        initialized != MZ_OK)
+        return false;
     const int result = compress ? mz_deflate(&stream, MZ_FINISH) : mz_inflate(&stream, MZ_FINISH);
     const bool complete = result == MZ_STREAM_END && stream.avail_in == 0;
     produced = static_cast<size_t>(stream.total_out);
@@ -114,7 +116,7 @@ size_t try_deflate(std::span<const uint8_t> payload, std::span<uint8_t> dst) noe
     // Store-if-smaller: framed deflate must be <= 95% of framed raw.
     const uint64_t framed_deflate = DEFLATE_HDR + static_cast<uint64_t>(comp_len);
     const uint64_t framed_raw     = RAW_HDR + payload.size();
-    return framed_deflate * 100 <= framed_raw * 95 ? static_cast<size_t>(comp_len) : 0;
+    return framed_deflate * 100 <= framed_raw * 95 ? comp_len : 0;
 }
 
 // Shared encode over any byte sink with resize(n)+data(). `Buf` is
@@ -165,14 +167,15 @@ bool decode_impl(std::span<const uint8_t> framed, Buf& out) noexcept
     if (framed[0] != METHOD_DEFLATE || framed.size() < DEFLATE_HDR + 1) return false;
 
     const uint64_t orig_len = get_u64le(framed.data() + 1);
-    const uint64_t comp_len = framed.size() - DEFLATE_HDR;
     // Bomb guard: bound the claimed output BEFORE allocating it.
-    if (orig_len > comp_len * MAX_INFLATE_RATIO + INFLATE_SLACK) return false;
+    if (const uint64_t comp_len = framed.size() - DEFLATE_HDR;
+        orig_len > comp_len * MAX_INFLATE_RATIO + INFLATE_SLACK)
+        return false;
     if (orig_len > MZ_LEN_MAX || orig_len == 0) return false;
 
     if (!resize_buf(out, static_cast<size_t>(orig_len))) return false;
-    size_t dst_len = 0;
-    if (!transform(framed.subspan(DEFLATE_HDR), {buf_data(out), static_cast<size_t>(orig_len)},
+    if (size_t dst_len = 0;
+        !transform(framed.subspan(DEFLATE_HDR), {buf_data(out), static_cast<size_t>(orig_len)},
                    false, dst_len) ||
         dst_len != orig_len) {
         (void)resize_buf(out, 0);  // SecureBytes: wipes the partial plaintext
