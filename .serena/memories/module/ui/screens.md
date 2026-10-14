@@ -63,10 +63,8 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
 - `favorites_screen.*` update() mirrors GalleryGrid's one-shot scroll-follow: `bool
   follow_scroll_` set by the arrow-key nav cases, applied (ensure_visible) then cleared by
   update(), which otherwise only clamps — per-frame following fights the wheel (snap-back
-  jitter). No Center mode: entering always lands on index 0 at scroll 0. NOTE:
-  `FavoritesImages::update` (also inherited by TagImages) overrides the base and MUST call
-  `FavoritesScreen::update(dt)` first — dropping that call silently loses all scroll
-  clamping/following for both image grids (that exact bug shipped for a while).
+  jitter). No Center mode: entering always lands on index 0 at scroll 0.
+  The base also pumps its thumbnail worker; all favorites/tag screens inherit update().
 - `favorites_screen.*` render clips scrolled tiles to below OY (the fixed header) and draws a
   BORDER hairline there — without the clip a scrolled tile paints over the title/[F1]/status.
   Covers all four subclasses. `tag_overview.*` paginates (rows never scroll partially), so it
@@ -76,11 +74,15 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   (S/M/L/XL/XXL only) and live-saves the shared setting + pref with a "View: <label>" status.
   `on_gallery_view_changed` applies F2 changes without reconstructing the screen. F1 gains
   `L — Cycle grid size`.
-- `favorites_images.*` — flat grid of favorited images across the vault; opens a
+- `favorites_images.*` — flat grid of favorited images/videos across the vault; opens a
   favorites-scoped viewer (ToFavoriteViewer: prev/next iterate the favorites set, Esc returns
   to the grid). `favorites_screen.*` is the shared base (grid/selection/badge) with
-  `handle_extra_key`/`extra_hint`/`show_favorite_badge`/`go_back` virtuals used by the tag
-  views. **Phase 68:** the base gains a `SelectionModel` (Space toggles, Enter still opens,
+  `handle_extra_key`/`show_favorite_badge`/`go_back` virtuals used by the tag
+  views. The base takes the shared TextureCache and owns a DecodeWorker, failed-key set,
+  and CoverCache; draw_tile_content delegates to draw_tile_thumb for image thumbnails,
+  video posters/play badges, and gallery covers/montages. Fetch/decrypt/decode is async;
+  reload clears cover and failure caches, and update uploads completed decodes.
+  tests/ui/test_tile_thumb.cpp exercises the actual screen draw hooks headlessly. **Phase 68:** the base gains a `SelectionModel` (Space toggles, Enter still opens,
   Ctrl+A select-all-or-clear; cleared by reload()) + B/X/M over the selection via an owned
   `CollectionBatchOps ops_` — B routes `batch_favorite_target` → `set_favorites_batch` then
   reload() (unfavorited tiles vanish); X/M go through ops_ (per-parent grouping from

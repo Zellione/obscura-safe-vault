@@ -540,3 +540,7 @@ successful authentication. Conversion is optional; Escape from its idle form ret
 to this choice. Existing read-only badges and mutation guards remain in effect.
 F2 Playback has Auto-play videos and one Video decoding row: Hardware (with fallback)
 or Software. Ctrl+Shift+H toggles that choice for the next clip; Ctrl+Shift+F is retired.
+
+Favorites and tagged-collection tiles share gallery-grid thumbnails: image
+thumbnails, video posters with play badges, and representative gallery covers or
+sub-gallery montages. Empty galleries retain the folder icon.

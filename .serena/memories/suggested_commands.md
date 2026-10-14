@@ -38,6 +38,7 @@ build/bin/Release/osv
 scripts/test.sh           # build + run all tests (Debug)
 build/bin/Debug/osv_tests <substring>   # run only tests whose name contains <substring>
                                         # (Phase 80: for valgrind/gdb single-test runs)
+build/bin/Debug/osv_tests favorite_     # includes headless favorites screen rendering regressions
 scripts/test.sh --asan    # AddressSanitizer + UBSan + LSan
 scripts/test.sh --release
 scripts/test.sh --tsan    # ThreadSanitizer (mutually exclusive with --asan)

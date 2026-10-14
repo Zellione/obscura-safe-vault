@@ -2,9 +2,13 @@
 
 #include <SDL3/SDL.h>
 
+#include <unordered_set>
 #include <vector>
 
+#include "image/decode_worker.h"
+
 #include "ui/collection_ops.h"
+#include "ui/cover_cache.h"
 #include "ui/detail_model.h"
 #include "ui/detail_panel.h"
 #include "ui/gallery_view.h"
@@ -15,7 +19,12 @@
 #include "ui/selection_model.h"
 #include "vault/vault.h"   // vault::SearchHit
 
-namespace gfx { class Window; class FontAtlas; class Renderer; }
+namespace gfx {
+class Window;
+class FontAtlas;
+class Renderer;
+class TextureCache;
+}  // namespace gfx
 namespace vault { class Vault; }
 namespace platform { class VaultRegistry; class FileDialog; class FolderDialog; }
 
@@ -26,8 +35,8 @@ namespace ui {
 // Shared scaffolding for the two Phase 13 favorites screens: a flat grid of
 // favorited nodes (`SearchHit`s) with keyboard/mouse selection, a header, and a
 // gold favorite badge on every tile. Subclasses supply the item list, the
-// per-tile content (thumbnail vs folder glyph), the activation action, and the
-// labels — this base owns only the common SDL plumbing + grid layout.
+// activation action and labels; this base owns the shared thumbnail pipeline,
+// SDL plumbing and grid layout.
 class FavoritesScreen : public Screen {
 public:
     // App-owned collaborators for the Phase 68 batch operations (B/X/M over the
@@ -45,7 +54,8 @@ public:
     };
 
     FavoritesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                    platform::VaultRegistry& registry, const CollectionOps& ops);
+                    gfx::TextureCache& cache, platform::VaultRegistry& registry,
+                    const CollectionOps& ops);
 
     void on_enter() override;
     void on_vault_changed() override;  // Phase 50: re-fetch favorites after tree reallocation
@@ -62,8 +72,7 @@ public:
 protected:
     // Subclass hooks.
     [[nodiscard]] virtual std::vector<vault::SearchHit> fetch() const = 0;
-    virtual void draw_tile_content(gfx::Renderer& r, const vault::SearchHit& hit,
-                                   const SDL_FRect& box) = 0;
+    void draw_tile_content(gfx::Renderer& r, const vault::SearchHit& hit, const SDL_FRect& box);
     // Open the focused favorite. `index` is its position in the favorites list
     // (used by the images screen to open the viewer over the whole set).
     virtual void activate(const vault::SearchHit& hit, int index) = 0;
@@ -101,6 +110,7 @@ protected:
     [[nodiscard]] bool batch_ops_busy() const noexcept { return ops_.busy(); }
 
 private:
+    bool pump_thumbs();
     void open_selected();
     // The SDL_EVENT_KEY_DOWN half of handle_event, split out to keep each
     // function under the S3776 cognitive-complexity cap.
@@ -116,6 +126,12 @@ private:
     void start_transfer();           // M: per-parent groups + gallery subtrees
     void start_delete_selection();   // Del: batch delete
 
+    struct Thumbnails {
+        gfx::TextureCache& cache;
+        image::DecodeWorker worker{image::decode_wake_event()};
+        std::unordered_set<uint64_t> failed;
+        CoverCache covers;
+    };
     gfx::Window&    win_;
     gfx::FontAtlas& font_;
     vault::Vault&   vault_;
@@ -153,6 +169,7 @@ private:
     // move/copy) + the multi-selection they act on.
     CollectionBatchOps ops_;
     SelectionModel     sel_;
+    Thumbnails thumbs_;  // destroyed first: joins thumbnail fetches before other teardown
 
     friend bool current_detail_open(const FavoritesScreen& s);
     // Phase 68/93 single-letter selection shortcuts (Shift+I, L, Space, Ctrl+A,

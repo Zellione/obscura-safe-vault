@@ -2,17 +2,14 @@
 
 #include <utility>
 
-#include "gfx/renderer.h"
-#include "gfx/theme.h"
 #include "vault/vault_search.h"
 
 namespace ui {
 
 TagGalleries::TagGalleries(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                           platform::VaultRegistry& registry, std::string tag,
-                           const CollectionOps& ops)
-    : FavoritesScreen(win, font, vault, registry, ops),
-      tag_(std::move(tag))
+                           gfx::TextureCache& cache, platform::VaultRegistry& registry,
+                           std::string tag, const CollectionOps& ops)
+    : FavoritesScreen(win, font, vault, cache, registry, ops), tag_(std::move(tag))
 {
     title_ = "Galleries tagged '" + tag_ + "'";
     hint_  = "No galleries carry the tag '" + tag_ + "'.";
@@ -21,16 +18,6 @@ TagGalleries::TagGalleries(gfx::Window& win, gfx::FontAtlas& font, vault::Vault&
 std::vector<vault::SearchHit> TagGalleries::fetch() const
 {
     return vault::VaultSearch(vault_ref()).galleries_with_tag(tag_);
-}
-
-void TagGalleries::draw_tile_content(gfx::Renderer& r, const vault::SearchHit&,
-                                     const SDL_FRect& box)
-{
-    // Folder glyph, matching the gallery grid + favorites-galleries tiles.
-    const float ix = box.w * 0.18f;
-    r.draw_round_rect({box.x + ix, box.y + box.h * 0.28f,
-                       box.w - 2 * ix, box.h * 0.48f},
-                      gfx::theme::RADIUS_SMALL, gfx::theme::FOLDER);
 }
 
 void TagGalleries::activate(const vault::SearchHit& hit, int /*index*/)

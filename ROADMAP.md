@@ -16,6 +16,10 @@ production facade benchmarks, and Linux-only cleanup. Validation is in progress.
 
 ## Phase index
 
+Favorites thumbnail follow-up: share gallery-grid thumbnail rendering for image,
+video, and gallery favorites (including tagged collections). See the
+[Phase 13 follow-up](docs/roadmap/phase-13-favorites.md#thumbnail-consistency-follow-up).
+
 Empty-gallery transfer follow-up: `M` can pull from another vault into an empty
 vault or gallery, defaulting to Copy. See the
 [Phase 75 follow-up](docs/roadmap/phase-75-pull-transfers-tag-persistence-bigger-thumbs.md#empty-gallery-pull-follow-up).

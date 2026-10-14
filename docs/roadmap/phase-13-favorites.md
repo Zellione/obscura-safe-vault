@@ -45,3 +45,17 @@ image in the viewer.
 >   mode" — an explicit image set with a per-image full path and an exit target — so it
 >   is no longer tied to a single `gallery_path_`. Favorited galleries navigate the
 >   normal grid.
+
+
+### Thumbnail consistency follow-up
+
+Favorites and tagged collections use the same thumbnail renderer as the gallery
+grid: images show their thumbnail, videos show their poster with a play badge,
+and galleries show a representative descendant cover or sub-gallery montage.
+Empty galleries retain the folder icon. Thumbnail fetch/decrypt/decode runs on
+the screen's worker, with completed textures uploaded during update. Reloading
+the listing clears cover resolution and failed-thumbnail caches.
+
+Headless software-renderer regression tests exercise the actual favorites
+screen draw path for images, video posters, nested gallery covers, and a gallery
+that gains its first cover after a listing refresh.
