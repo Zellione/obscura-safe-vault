@@ -110,6 +110,12 @@ void CommitLane::stop() noexcept
     if (thread_.joinable()) {
         thread_.join();
     }
+
+    // App can destroy the lane while keeping the vault open (for example while
+    // choosing another vault). Never leave its router pointing at freed storage.
+    // Clear only our binding: a replacement lane may already own the router.
+    if (v_ && v_->commit_router_ == this) v_->commit_router_ = nullptr;
+    v_ = nullptr;
 }
 
 bool CommitLane::running() const noexcept

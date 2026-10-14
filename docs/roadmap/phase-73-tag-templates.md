@@ -292,3 +292,17 @@ fields sheet exactly when a brand-new tag of that category is added; searching a
 stored field value (bare or `field:value`) finds every carrier of the owning
 tag; and adding a tag to a 50+ item selection keeps the UI responsive (one
 commit, fsync off the UI thread), verified by the pinned sync-count test.
+
+## Commit-lane lifetime follow-up
+
+The close-hang stack stopped in `Vault::lock()` → `CommitLane::stop()` while
+acquiring the lane mutex. The navigation teardown could destroy the App-owned
+lane while the active vault retained its raw commit-router pointer. Stopping a
+lane now drains and joins its worker, detaches its router only if it still owns
+that binding, and releases its own vault pointer. Destruction uses the same
+path. Stopping the lane does not lock the vault or remove cross-vault transfers.
+
+Regression coverage exercises lane stop/destruction before vault move/lock,
+and v3 Copy and Move through the transfer dialog with a live import session and
+a second vault retained for the session. The latter checks normal shutdown and
+reopens both vaults to verify the copied data and source retention/removal.
