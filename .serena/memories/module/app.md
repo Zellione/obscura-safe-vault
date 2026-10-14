@@ -283,3 +283,11 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
 - `safe_print.h` — `platform::safe_println<Args...>(stream,fmt,args...)` wraps `std::println`
   in try/catch, swallowing failures from broken/closed streams. Every diagnostic print call site must go through this wrapper
   instead of raw `std::println`.
+
+
+Dataset metadata review: App owns `ImportTagDialog` and a detached
+`DatasetTagReview` batch. After queue drain, completed dataset tag batches open
+when no exclusive vault operation is active. The overlay owns input until
+confirmed/cancelled; confirmation calls `ImportQueue::apply_tag_review`, reports
+failures with a retryable modal, and refreshes the screen. Every import-session
+teardown clears the modal and its pending batch before vault lock/switch.

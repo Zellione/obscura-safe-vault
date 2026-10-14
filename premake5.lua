@@ -506,6 +506,8 @@ project "osv_tests"
         "src/ui/folder_scan.cpp",
         "src/ui/import_common.cpp",
         "src/ui/import_model.cpp",
+        "src/ui/import_tag_review.cpp",
+        "src/ui/import_tag_dialog.cpp",
         "src/ui/import_queue.cpp",
         "src/ui/zip_encoding.cpp",
         "src/ui/zip_import.cpp",

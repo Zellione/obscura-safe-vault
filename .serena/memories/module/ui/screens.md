@@ -133,7 +133,7 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   reusing the settings-overlay pattern; description drawn via `ui::fit_text`. **Phase 55:**
   holds a `platform::FileDialog&` (passed by App); `Ctrl+I` (modifier chord — bare letters
   belong to the filter/prompt) opens a `Purpose::TagJson` pick, `update()` drains it,
-  `import_tag_dict()` reads + parses + applies + does the ONE `set_vault_settings` commit
+  `import_tag_dict()` reads + parses and opens the shared import-tag review; confirmation applies the selected mappings with ONE `set_vault_settings` commit
   and only then shows the summary modal (`import_summary_`, non-empty exactly while up,
   any key dismisses, owns every key while up). A failed commit sets `error_` and shows no
   modal — a failed write is never reported as a successful import. **Phase 56:** prompt geometry

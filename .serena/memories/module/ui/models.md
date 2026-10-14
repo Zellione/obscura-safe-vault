@@ -392,3 +392,8 @@ Pure SDL-free view/sort/model helpers, layout geometry, settings state, search i
 Thumbnail texture keys use image thumbnail offsets or video poster offsets,
 including immutable-object-derived identities for directory vaults. Replacing
 a derived object changes its key; full-image keys remain original identities.
+
+- `import_tag_review.*`: pure import source rows, reversible annotation cleanup,
+  selection, validated rename, existing-vocabulary mapping, and case-insensitive
+  deduplication. `apply_reviewed_tag_dict` filters/remaps dictionary entries before
+  `apply_tag_dict`, preserving explicit replacement destinations' metadata.

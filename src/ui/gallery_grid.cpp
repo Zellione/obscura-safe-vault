@@ -71,7 +71,7 @@ constexpr float COL_DATE = 120;
 // Returns {added, skipped} by comparing the node's tag count before/after, so
 // no UI-side case-folding is needed. Kept free (not a GalleryGrid member) to
 // keep the class under the S1448 method cap (Phase 21).
-struct TagImportCounts { int added = 0; int skipped = 0; };
+struct TagImportCounts { int added = 0; int skipped = 0; int failed = 0; };
 TagImportCounts apply_tag_list(vault::Vault& v, const std::string& target,
                                const std::vector<std::string>& tags)
 {
@@ -86,24 +86,15 @@ TagImportCounts apply_tag_list(vault::Vault& v, const std::string& target,
     };
 
     const size_t before = tag_count();
-    for (const auto& t : tags) (void)v.add_tag(target, t);
+    int failed = 0;
+    for (const auto& t : tags) {
+        const auto result = v.add_tag(target, t);
+        if (result != vault::VaultResult::Ok && result != vault::VaultResult::AlreadyExists) ++failed;
+    }
     const size_t after = tag_count();
 
     const auto added = static_cast<int>(after - before);
-    return {added, static_cast<int>(tags.size()) - added};
-}
-
-// Read, parse, and apply a picked tag-list file onto `target`. Returns a status
-// summary (or sets `error` and returns ""). Free (not a member) so update()'s
-// pump stays a flat call site under the S134 nesting limit (Phase 21).
-std::string apply_tag_list_file(vault::Vault& v, const std::string& target,
-                                const std::vector<std::string>& picked, std::string& error)
-{
-    if (target.empty() || picked.empty()) return {};
-    auto bytes = platform::read_file(picked.front(), platform::MAX_METADATA_IMPORT_BYTES);
-    if (!bytes) { error = "Could not read tag list."; return {}; }
-    const auto counts = apply_tag_list(v, target, ui::parse_tag_list(*bytes));
-    return std::format("Tag import: {} added, {} skipped", counts.added, counts.skipped);
+    return {added, static_cast<int>(tags.size()) - added - failed, failed};
 }
 
 // The grid's fixed chrome: an opaque header band (breadcrumb, [F1] Help, and the
@@ -249,6 +240,7 @@ void GalleryGrid::on_enter()
 
 void GalleryGrid::on_exit()
 {
+    import_tags_.close();
     // The current path's selection is about to go stale (Phase 40 Part 2) —
     // covers leaving to the viewer or to a different screen entirely.
     session_.record(nav_.path(), nav_.selected());
@@ -1205,6 +1197,17 @@ bool GalleryGrid::handle_compact_confirm_key(const SDL_Event& e)
 // ifs, so the same logic costs far less cognitive complexity).
 bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
 {
+    if (import_tags_.active()) {
+        import_tags_.handle_event(e);
+        if (auto result = import_tags_.take_result()) {
+            const auto counts = apply_tag_list(vault_, naming_.tag_target, result->selected_tags());
+            status_ = std::format("Tag import: {} added, {} skipped, {} failed", counts.added, counts.skipped, counts.failed);
+            refresh();
+        }
+        if (!import_tags_.active()) naming_.tag_target.clear();
+        mark_dirty();
+        return true;
+    }
     if (search_.active()) {
         if (search_.handle_event(e)) {
             Nav nav = search_.take_nav();
@@ -1842,10 +1845,11 @@ void poll_pending_pickers(GalleryGrid& g)
         // not key material or decrypted vault content — so reading it is invariant-safe.
         if (auto res = g.dialogs_.file.take_result(platform::FileDialog::Purpose::TagList)) {
             if (!res->empty()) {
-                g.status_ = apply_tag_list_file(g.vault_, g.naming_.tag_target, *res, g.error_);
-                g.refresh();
+                const auto bytes = platform::read_file(res->front(), platform::MAX_METADATA_IMPORT_BYTES);
+                if (bytes) g.import_tags_.open(ImportTagReview(parse_tag_list(*bytes), import_tag_vocabulary(g.vault_)));
+                else g.error_ = "Could not read tag list.";
             }
-            g.naming_.tag_target.clear();
+            if (!g.import_tags_.active()) g.naming_.tag_target.clear();
             g.mark_dirty();
         }
     }
@@ -2135,6 +2139,7 @@ void GalleryGrid::render(gfx::Renderer& r)
 
     search_.render(r, font_, W, H);
     tag_editor_.render(r, font_, W, H);
+    import_tags_.render(r, font_, W, H);
     rename_.render(r, font_, W, H);
     combine_.render(r, font_, W, H);
     transfer_.render(r, font_, W, H);

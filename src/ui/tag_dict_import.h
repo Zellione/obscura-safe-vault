@@ -18,6 +18,7 @@
 namespace vault { struct VaultSettings; }
 
 namespace ui {
+class ImportTagReview;
 
 // What an import did. The three parse-side counters are carried through from
 // TagDictParseResult so the summary modal has every number in one place.
@@ -56,6 +57,9 @@ struct TagDictImportSummary {
 // how the vault de-duplicates tags everywhere else.
 [[nodiscard]] TagDictImportSummary apply_tag_dict(vault::VaultSettings&     s,
                                                   const TagDictParseResult& parsed);
+
+[[nodiscard]] TagDictImportSummary apply_reviewed_tag_dict(vault::VaultSettings& settings,
+    const TagDictParseResult& parsed, const ImportTagReview& review);
 
 // The summary modal's body text, one line per outcome. The three "what changed"
 // counts are always listed (an import that changed nothing must say so plainly);

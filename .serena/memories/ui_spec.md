@@ -544,3 +544,18 @@ or Software. Ctrl+Shift+H toggles that choice for the next clip; Ctrl+Shift+F is
 Favorites and tagged-collection tiles share gallery-grid thumbnails: image
 thumbnails, video posters with play badges, and representative gallery covers or
 sub-gallery montages. Empty galleries retain the folder icon.
+
+
+## Import tag review
+
+Dataset metadata, text tag lists, and JSON dictionaries use a shared source /
+imported-tag modal. C toggles annotation cleanup (default off); Space/click toggles
+inclusion; A/N affects all/none of filtered rows; / filters; R renames; E searches
+and picks an existing tag. Up/Down/PageUp/PageDown navigate. Enter confirms the
+review; Esc skips tags. Editing Enter/Esc accepts/leaves that edit first.
+
+Dataset review appears after background discovery, one task at a time, including
+nested/multipart archive tags. Media is already imported and is retained when
+skipping tags. Folder datasets read root meta.json. Unreviewed tags never reach
+the vault and are discarded on session teardown. Mapping preserves destination
+metadata; cleanup never changes explicit edits. Empty results are skipped.

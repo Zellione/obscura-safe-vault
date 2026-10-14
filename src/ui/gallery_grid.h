@@ -32,6 +32,7 @@
 #include "ui/secure_text_input.h"
 #include "ui/selection_model.h"
 #include "ui/tag_editor.h"
+#include "ui/import_tag_dialog.h"
 #include "ui/text_input_model.h"
 #include "ui/transfer_dialog.h"
 #include "ui/widgets.h"
@@ -260,6 +261,7 @@ void toggle_select();          // toggle the current item in the export selectio
     // Phase 53: confirms importing a detected multi-volume set.
     VolumeSetDialog         volume_dialog_;
     SearchOverlay           search_;
+    ImportTagDialog import_tags_{win_};
     TagEditor               tag_editor_;
     QuickSwitch             quick_switch_;   // declared before transfer_ so it copies
     TransferDialog          transfer_;       // the active path before transfer_ moves it

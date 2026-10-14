@@ -276,6 +276,12 @@ colour) and stores per-tag **descriptions**. It populates the vocabulary only â€
 no images or galleries. File format, worked examples and per-field rules:
 [docs/TAG_DICTIONARY_JSON.md](docs/TAG_DICTIONARY_JSON.md).
 
+Tag files and dataset metadata open a review before their tags are saved:
+`C` optionally strips `<...>` and `(...)`, Space selects tags, `R` renames,
+and `E` maps to an existing tag. Enter confirms; Esc skips the tag import.
+For datasets, media imports first and stays imported if you skip its tags.
+Nested archive tags share one review; folder imports read root `meta.json`.
+
 ---
 
 ## Advanced search
