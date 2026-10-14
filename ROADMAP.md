@@ -16,6 +16,10 @@ production facade benchmarks, and Linux-only cleanup. Validation is in progress.
 
 ## Phase index
 
+Legacy conversion destination follow-up: choose a parent folder for the converted
+`.osv` directory while keeping the original file unchanged. See the
+[Phase 114 follow-up](docs/roadmap/phase-114-directory-cutover.md#conversion-destination-picker-follow-up).
+
 Vault-close follow-up: detach stopped commit lanes from their vaults before lane
 destruction, and cover v3 copy/move with a warm second vault through shutdown.
 See the [Phase 73 follow-up](docs/roadmap/phase-73-tag-templates.md#commit-lane-lifetime-follow-up).

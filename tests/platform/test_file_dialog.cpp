@@ -1,10 +1,12 @@
 #include "test_framework.h"
 
+#include "gfx/text.h"
+#include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/vault_registry.h"
-#include "gfx/window.h"
-#include "gfx/text.h"
+#include "ui/unlock_screen.h"
 #include "ui/vault_manager.h"
+#include "vault/vault.h"
 
 #include <filesystem>
 #include <string>
@@ -43,6 +45,50 @@ struct FileDialogTestPeer {
 using platform::FileDialog;
 using Peer = platform::FileDialogTestPeer;
 using Purpose = platform::FileDialog::Purpose;
+
+namespace ui {
+struct UnlockScreenTestPeer {
+    static void choose_destination(UnlockScreen& screen)
+    {
+        screen.conversion_mode_ = true;
+        const auto button = screen.layout().other_btn;
+        SDL_Event event{};
+        event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+        event.button.button = SDL_BUTTON_LEFT;
+        event.button.x = button.x + 1;
+        event.button.y = button.y + 1;
+        screen.handle_event(event);
+    }
+    static const std::filesystem::path& destination(const UnlockScreen& screen)
+    {
+        return screen.destination_path_;
+    }
+};
+}  // namespace ui
+
+TEST(legacy_conversion_destination_uses_folder_picker_and_keeps_source_name_separate)
+{
+    FileDialog dialog;
+    Peer::use_parent_picker(dialog);
+    Peer::parent_picker_calls = 0;
+    gfx::Window window;
+    gfx::FontAtlas font;
+    vault::Vault vault;
+    ui::UnlockScreen screen(window, font, vault, dialog, "/tmp/photos.osv");
+    ui::UnlockScreenTestPeer::choose_destination(screen);
+    REQUIRE(Peer::parent_picker_calls == 1);
+    CHECK_FALSE(Peer::parent_allow_many);
+    screen.update(0);
+    CHECK(ui::UnlockScreenTestPeer::destination(screen) == "/tmp/photos-converted.osv");
+    CHECK_FALSE(screen.animating());
+    CHECK(screen.take_nav().kind == ui::NavKind::None);
+
+    // Cancelling a replacement choice preserves the previously selected path.
+    ui::UnlockScreenTestPeer::choose_destination(screen);
+    Peer::complete(dialog, {});
+    screen.update(0);
+    CHECK(ui::UnlockScreenTestPeer::destination(screen) == "/tmp/photos-converted.osv");
+}
 
 TEST(file_dialog_new_vault_selects_parent_folder)
 {

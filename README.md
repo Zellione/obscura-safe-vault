@@ -24,7 +24,9 @@ folder. The `.osv` suffix is added automatically, and existing destinations are
 rejected. Escape cancels the name prompt. Open Vault selects a directory;
 `Shift+O` opens a legacy `.osv` file. After authentication, choose **Open read-only**
 (Enter) to browse without upgrading, or **Convert a copy** (C). Conversion asks
-for a distinct destination and independent destination credentials. Escape from
+for a destination folder and independent destination credentials. Use
+**Destination folder...** to choose where `<original-name>-converted.osv` will
+be created; the full destination is shown before Convert is submitted. Escape from
 the conversion form returns to the read-only choice.
 Conversion is cancellable and resumable; it never modifies or deletes the
 source. Success is shown only after deep verification, logical and plaintext
