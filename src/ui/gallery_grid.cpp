@@ -1843,7 +1843,7 @@ void poll_transfer_and_combine(GalleryGrid& g)
 
 void begin_tag_list_review(GalleryGrid& g, const std::vector<std::string>& paths)
 {
-    if (paths.empty()) return;
+    if (paths.empty() || g.naming_.tag_target.empty()) return;
     const auto bytes = platform::read_file(paths.front(), platform::MAX_METADATA_IMPORT_BYTES);
     if (!bytes) {
         g.error_ = "Could not read tag list.";

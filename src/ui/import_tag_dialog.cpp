@@ -236,7 +236,7 @@ void ImportTagDialog::handle_key(SDL_Keycode key)
 void ImportTagDialog::render_rows(gfx::Renderer& r, gfx::FontAtlas& font)
 {
     using namespace gfx::theme;
-    const int count = static_cast<int>(list_box_.h / pitch_);
+    const auto count = static_cast<int>(list_box_.h / pitch_);
     if (count < 1) return;
     first_ = std::max(0, selected_ - count + 1);
     for (int j = first_; j < std::min(first_ + count, static_cast<int>(visible_.size())); ++j) {
