@@ -67,6 +67,17 @@ The storage layer retains exclusive directory creation as the final race guard.
 Regression tests cover folder-picker routing, name entry, cancellation, path
 validation, and navigation to the new child path.
 
+## Conversion destination picker follow-up
+
+The startup legacy conversion form selects a destination parent folder using the
+native folder picker. It displays `<original-name>-converted.osv` within that
+folder before conversion starts. Cancelling the picker retains the previous
+selection, and selecting a folder alone creates nothing. The copy converter
+continues to preserve the original file unchanged and rejects unrelated existing
+destinations; choosing the same folder again allows an incomplete conversion to
+resume. Screen regression coverage checks folder-picker routing and cancellation;
+converter tests verify byte-for-byte source preservation.
+
 ## Audit correction
 
 The original benchmark below measures SQL repository operations, not facade

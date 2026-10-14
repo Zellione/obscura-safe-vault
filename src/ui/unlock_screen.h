@@ -39,6 +39,7 @@ public:
     [[nodiscard]] bool blocks_idle_lock() const override { return conversion_job_.active(); }
 
 private:
+    friend struct UnlockScreenTestPeer;
     struct Layout {
         SDL_FRect keyfile_btn;
         SDL_FRect other_btn;

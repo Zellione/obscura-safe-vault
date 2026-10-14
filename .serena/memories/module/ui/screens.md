@@ -19,7 +19,10 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   KdfParams).
   Successful legacy unlock offers Open read-only (Enter) or Convert a copy (C), with
   no mandatory upgrade. The conversion form clears source credentials and requires its own
-  destination/password/keyfile policy. Escape from the idle form returns to the choice;
+  destination/password/keyfile policy. Destination folder opens the parent-folder picker
+  and displays `<source-stem>-converted.osv` inside it; cancellation keeps the prior path.
+  The original file is preserved by copy-based conversion.
+  Escape from the idle form returns to the choice;
   worker cancellation completes before browsing is allowed. A verified conversion promotes
   the destination; read-only browsing retains the source path. Screen event regression tests
   run with an uninitialized Window (no display) in `test_unlock_job.cpp`.

@@ -262,7 +262,7 @@ void UnlockScreen::handle_click(const SDL_MouseButtonEvent& b)
     } else if (point_in_rect(p.x, p.y, L.other_btn)) {
         if (conversion_mode_) {
             pending_ = Pending::Destination;
-            dlg_.save_vault(win_.sdl_window());
+            dlg_.open_vault_parent(win_.sdl_window());
         } else {
             pending_ = Pending::Vault;
             dlg_.open_vault_directory(win_.sdl_window());
@@ -374,7 +374,8 @@ void UnlockScreen::apply_dialog_result(const std::string& path)
             create_mode_ = !exists_no_throw(vault_path_);
             break;
         case Destination:
-            destination_path_ = platform::utf8_to_path(path);
+            destination_path_ =
+                platform::utf8_to_path(path) / (vault_path_.stem().native() + "-converted.osv");
             error_.clear();
             break;
         case Keyfile:
@@ -433,7 +434,7 @@ void UnlockScreen::submit()
     }
 
     if (conversion_mode_ && destination_path_.empty()) {
-        error_ = "Please select a destination vault.";
+        error_ = "Please select a destination folder.";
         return;
     }
 
@@ -484,7 +485,7 @@ void UnlockScreen::render(gfx::Renderer& r)
     // Draw a button wired to live hover/active state.
     auto btn = [&](const SDL_FRect& rect, std::string_view label) {
         const ButtonState s = button_state(rect, mouse_.x, mouse_.y, mouse_.down);
-        draw_button(r, font_, {rect, std::string(label)}, s.hover, s.active);
+        draw_button(r, font_, {rect, fit_text(font_, label, rect.w - 24)}, s.hover, s.active);
     };
 
     std::string_view title = "Unlock Vault";
@@ -509,7 +510,7 @@ void UnlockScreen::render(gfx::Renderer& r)
 
     const Layout L = layout();
     btn(L.keyfile_btn, keyfile_path_.empty() ? "Keyfile: none" : "Keyfile: set");
-    btn(L.other_btn, conversion_mode_ ? "Destination..." : "Open other...");
+    btn(L.other_btn, conversion_mode_ ? "Destination folder..." : "Open other...");
     if (!conversion_mode_) btn(L.mode_btn, create_mode_ ? "Have a vault?" : "New vault?");
     std::string_view submit_label = "Unlock";
     if (conversion_mode_)

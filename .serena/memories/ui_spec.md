@@ -537,7 +537,10 @@ produce an explicit damaged-vault message instead of entering the gallery.
 
 Legacy unlock offers **Open read-only [Enter]** and **Convert a copy [C]** after
 successful authentication. Conversion is optional; Escape from its idle form returns
-to this choice. Existing read-only badges and mutation guards remain in effect.
+to this choice. Destination folder selects a parent folder for
+`<source-stem>-converted.osv`; the full path is shown before conversion, and the
+original file stays unchanged. Cancelling the picker retains the prior selection.
+Existing read-only badges and mutation guards remain in effect.
 F2 Playback has Auto-play videos and one Video decoding row: Hardware (with fallback)
 or Software. Ctrl+Shift+H toggles that choice for the next clip; Ctrl+Shift+F is retired.
 
