@@ -946,7 +946,7 @@ struct App::OverlayDispatch {
         return true;
     }
 
-    // Lock-confirm modal (lowest priority: key events only; Phase 50)
+    // Dataset tags are applied only after explicit review confirmation.
     static bool import_tags(App& app, const SDL_Event& e)
     {
         if (!app.import_tags_.active()) return false;
@@ -954,9 +954,13 @@ struct App::OverlayDispatch {
         if (auto result = app.import_tags_.take_result()) {
             if (app.pending_import_tags_ &&
                 !app.import_ui_.queue.apply_tag_review(*app.pending_import_tags_, *result)) {
-                app.import_tags_.open(std::move(*result), "Review dataset tags: " + app.pending_import_tags_->display_name);
-                app.import_tags_.set_error("Could not save all tags. Retry or cancel remaining tags.");
-            } else if (app.screen_) app.screen_->on_vault_changed();
+                app.import_tags_.open(std::move(*result),
+                                      "Review dataset tags: " +
+                                          app.pending_import_tags_->display_name);
+                app.import_tags_.set_error(
+                    "Could not save all tags. Retry or cancel remaining tags.");
+            } else if (app.screen_)
+                app.screen_->on_vault_changed();
         }
         if (!app.import_tags_.active()) app.pending_import_tags_.reset();
         if (app.screen_) app.screen_->mark_dirty();
@@ -1371,7 +1375,8 @@ void App::update(double dt)  // NOSONAR cpp:S3776 -- ordered lifecycle coordinat
         !(screen_ && screen_->blocks_idle_lock()) && !overlays_.settings.open &&
         !migration_ui_.offer_open && !migration_ui_.result_open && !import_ui_.lock_confirm.open) {
         if (auto pending = import_ui_.queue.take_tag_review()) {
-            import_tags_.open(ui::ImportTagReview(pending->tags(), ui::import_tag_vocabulary(*vault_state_.active)),
+            import_tags_.open(ui::ImportTagReview(pending->tags(),
+                                                  ui::import_tag_vocabulary(*vault_state_.active)),
                               "Review dataset tags: " + pending->display_name);
             pending_import_tags_ = std::move(pending);
             if (screen_) screen_->mark_dirty();

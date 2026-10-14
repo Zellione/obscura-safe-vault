@@ -1135,13 +1135,14 @@ TEST(import_queue_tag_review_cancel_keeps_media_and_discards_metadata)
     lane.start(v);
     v.set_commit_router(&lane);
     const std::string meta = R"json({"tags":[{"type":"artist","name":"Alice (alias)"}]})json";
-    const auto zip = ziptest::make_archive({{"a.jpg", ziptest::fake_jpeg(31)},
-        {"meta.json", {meta.begin(), meta.end()}}}, dir / "book.zip");
+    const auto zip = ziptest::make_archive(
+        {{"a.jpg", ziptest::fake_jpeg(31)}, {"meta.json", {meta.begin(), meta.end()}}},
+        dir / "book.zip");
     ui::ImportQueue q;
     q.begin_session(v, lane);
     (void)q.enqueue_archive(zip, "", "Book", ui::ImportTaskKind::Zip);
     pump_until_idle(q);
-    REQUIRE(q.take_tag_review().has_value()); // Cancelling drops this detached batch.
+    REQUIRE(q.take_tag_review().has_value());  // Cancelling drops this detached batch.
     CHECK(!q.take_tag_review().has_value());
     q.end_session();
     REQUIRE(v.list("").size() == 1);
@@ -1155,10 +1156,12 @@ TEST(import_queue_folder_metadata_waits_for_review)
     const auto dir = ziptest::fresh_dir("test_import_tag_review_folder");
     const auto folder = dir / "source";
     fs::create_directories(folder);
-    std::ofstream(folder / "meta.json") << R"json({"tags":[{"type":"artist","name":"Alice (alias)"}]})json";
+    std::ofstream(folder / "meta.json")
+        << R"json({"tags":[{"type":"artist","name":"Alice (alias)"}]})json";
     const auto jpeg = ziptest::fake_jpeg(32);
-    std::ofstream(folder / "a.jpg", std::ios::binary).write(
-        reinterpret_cast<const char*>(jpeg.data()), static_cast<std::streamsize>(jpeg.size()));
+    std::ofstream(folder / "a.jpg", std::ios::binary)
+        .write(reinterpret_cast<const char*>(jpeg.data()),
+               static_cast<std::streamsize>(jpeg.size()));
     vault::Vault v;
     ziptest::make_vault(v, dir / "vault.osv");
     vault::CommitLane lane;
@@ -1185,12 +1188,15 @@ TEST(import_queue_nested_tag_review_maps_each_gallery_and_survives_reopen)
     const auto dir = ziptest::fresh_dir("test_import_tag_review_nested");
     const std::string root_meta = R"json({"tags":[{"name":"root (note)"}]})json";
     const std::string child_meta = R"json({"tags":[{"name":"alias"},{"name":"skip"}]})json";
-    const auto child = ziptest::make_archive({{"b.jpg", ziptest::fake_jpeg(34)},
-        {"meta.json", {child_meta.begin(), child_meta.end()}}}, dir / "child.zip");
+    const auto child = ziptest::make_archive(
+        {{"b.jpg", ziptest::fake_jpeg(34)}, {"meta.json", {child_meta.begin(), child_meta.end()}}},
+        dir / "child.zip");
     std::ifstream file(child, std::ios::binary);
     const std::vector<uint8_t> child_bytes{std::istreambuf_iterator<char>(file), {}};
     const auto zip = ziptest::make_archive({{"a.jpg", ziptest::fake_jpeg(33)},
-        {"child.zip", child_bytes}, {"meta.json", {root_meta.begin(), root_meta.end()}}}, dir / "book.zip");
+                                            {"child.zip", child_bytes},
+                                            {"meta.json", {root_meta.begin(), root_meta.end()}}},
+                                           dir / "book.zip");
     const auto vault_path = dir / "vault.osv";
     {
         vault::Vault v;

@@ -180,15 +180,17 @@ void TagOverviewScreen::import_tag_dict(const std::string& path)
     }
 
     std::vector<std::string> tags;
-    for (const auto& entry : parsed.entries) tags.push_back(entry.key());
+    for (const auto& entry : parsed.entries)
+        tags.push_back(entry.key());
     pending_dict_ = std::move(parsed);
-    import_tags_.open(ImportTagReview(std::move(tags), import_tag_vocabulary(vault_)), "Review dictionary tags");
+    import_tags_.open(ImportTagReview(std::move(tags), import_tag_vocabulary(vault_)),
+                      "Review dictionary tags");
 }
 
 void TagOverviewScreen::finish_tag_dict(const ImportTagReview& review)
 {
     auto       settings = vault::vault_settings(vault_);
-    const auto summary  = apply_reviewed_tag_dict(settings, pending_dict_, review);
+    const auto summary = apply_reviewed_tag_dict(settings, pending_dict_, review);
     // One commit for the whole file, not one per entry. It can fail, and a
     // failed commit must never be reported as a successful import.
     if (vault::set_vault_settings(vault_, std::move(settings)) != vault::VaultResult::Ok) {

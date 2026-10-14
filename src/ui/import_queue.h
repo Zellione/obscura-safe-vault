@@ -108,7 +108,8 @@ public:
     int drain(double dt);
     // Completed tasks expose their metadata separately; media is already imported.
     [[nodiscard]] std::optional<DatasetTagReview> take_tag_review();
-    [[nodiscard]] bool apply_tag_review(const DatasetTagReview& pending, const ImportTagReview& review);
+    [[nodiscard]] bool apply_tag_review(const DatasetTagReview& pending,
+                                        const ImportTagReview& review);
 
     // ---- observation (main thread / render) ----
     [[nodiscard]] bool busy() const;                 // running or queued work
@@ -235,7 +236,7 @@ private:
 
     // Record queue for main thread to drain
     std::deque<StagedRecord> records_;
-    std::vector<DatasetTagReview> pending_tags_; // main-thread-only
+    std::vector<DatasetTagReview> pending_tags_;  // main-thread-only
 
     // Batch commit policy
     BatchCommitPolicy policy_;

@@ -71,7 +71,11 @@ constexpr float COL_DATE = 120;
 // Returns {added, skipped} by comparing the node's tag count before/after, so
 // no UI-side case-folding is needed. Kept free (not a GalleryGrid member) to
 // keep the class under the S1448 method cap (Phase 21).
-struct TagImportCounts { int added = 0; int skipped = 0; int failed = 0; };
+struct TagImportCounts {
+    int added = 0;
+    int skipped = 0;
+    int failed = 0;
+};
 TagImportCounts apply_tag_list(vault::Vault& v, const std::string& target,
                                const std::vector<std::string>& tags)
 {
@@ -89,7 +93,8 @@ TagImportCounts apply_tag_list(vault::Vault& v, const std::string& target,
     int failed = 0;
     for (const auto& t : tags) {
         const auto result = v.add_tag(target, t);
-        if (result != vault::VaultResult::Ok && result != vault::VaultResult::AlreadyExists) ++failed;
+        if (result != vault::VaultResult::Ok && result != vault::VaultResult::AlreadyExists)
+            ++failed;
     }
     const size_t after = tag_count();
 
@@ -1195,19 +1200,24 @@ bool GalleryGrid::handle_compact_confirm_key(const SDL_Event& e)
 // quick_switch > export consent. Extracted from handle_event (cpp:S3776 —
 // each of these blocks was a nested branch there; here they're flat top-level
 // ifs, so the same logic costs far less cognitive complexity).
+bool handle_import_tag_review(GalleryGrid& g, const SDL_Event& e)
+{
+    if (!g.import_tags_.active()) return false;
+    g.import_tags_.handle_event(e);
+    if (auto result = g.import_tags_.take_result()) {
+        const auto counts = apply_tag_list(g.vault_, g.naming_.tag_target, result->selected_tags());
+        g.status_ = std::format("Tag import: {} added, {} skipped, {} failed", counts.added,
+                                counts.skipped, counts.failed);
+        g.refresh();
+    }
+    if (!g.import_tags_.active()) g.naming_.tag_target.clear();
+    g.mark_dirty();
+    return true;
+}
+
 bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
 {
-    if (import_tags_.active()) {
-        import_tags_.handle_event(e);
-        if (auto result = import_tags_.take_result()) {
-            const auto counts = apply_tag_list(vault_, naming_.tag_target, result->selected_tags());
-            status_ = std::format("Tag import: {} added, {} skipped, {} failed", counts.added, counts.skipped, counts.failed);
-            refresh();
-        }
-        if (!import_tags_.active()) naming_.tag_target.clear();
-        mark_dirty();
-        return true;
-    }
+    if (handle_import_tag_review(*this, e)) return true;
     if (search_.active()) {
         if (search_.handle_event(e)) {
             Nav nav = search_.take_nav();
@@ -1831,6 +1841,17 @@ void poll_transfer_and_combine(GalleryGrid& g)
     }
 }
 
+void begin_tag_list_review(GalleryGrid& g, const std::vector<std::string>& paths)
+{
+    if (paths.empty()) return;
+    const auto bytes = platform::read_file(paths.front(), platform::MAX_METADATA_IMPORT_BYTES);
+    if (!bytes) {
+        g.error_ = "Could not read tag list.";
+        return;
+    }
+    g.import_tags_.open(ImportTagReview(parse_tag_list(*bytes), import_tag_vocabulary(g.vault_)));
+}
+
 void poll_pending_pickers(GalleryGrid& g)
 {
     // The import picker shares dialogs_.file with the transfer's keyfile picker, so
@@ -1844,11 +1865,7 @@ void poll_pending_pickers(GalleryGrid& g)
         // Tag-list import (Shift+G, Phase 21). The .txt carries tag metadata only —
         // not key material or decrypted vault content — so reading it is invariant-safe.
         if (auto res = g.dialogs_.file.take_result(platform::FileDialog::Purpose::TagList)) {
-            if (!res->empty()) {
-                const auto bytes = platform::read_file(res->front(), platform::MAX_METADATA_IMPORT_BYTES);
-                if (bytes) g.import_tags_.open(ImportTagReview(parse_tag_list(*bytes), import_tag_vocabulary(g.vault_)));
-                else g.error_ = "Could not read tag list.";
-            }
+            begin_tag_list_review(g, *res);
             if (!g.import_tags_.active()) g.naming_.tag_target.clear();
             g.mark_dirty();
         }

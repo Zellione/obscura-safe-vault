@@ -19,7 +19,8 @@ TEST(import_tag_review_cleanup_unbalanced_delimiters)
 
 TEST(import_tag_review_selection_rename_replace_and_dedupe)
 {
-    ui::ImportTagReview review({"cat:Alice (alias)", "omit", "other", "duplicate"}, {"artist:Existing"});
+    ui::ImportTagReview review({"cat:Alice (alias)", "omit", "other", "duplicate"},
+                               {"artist:Existing"});
     review.set_cleanup(true);
     CHECK_EQ(review.target(0), "cat:Alice");
     review.rows()[1].selected = false;
@@ -52,7 +53,9 @@ TEST(import_tag_review_empty_cleanup_is_skipped_and_toggle_is_reversible)
 TEST(import_tag_review_dictionary_preserves_replacement_metadata_and_uses_first_collision)
 {
     ui::TagDictParseResult parsed{.entries = {{"artist", "alias", "incoming"},
-        {"", "skip", "skip"}, {"", "new (note)", "first"}, {"", "new", "second"}}};
+                                              {"", "skip", "skip"},
+                                              {"", "new (note)", "first"},
+                                              {"", "new", "second"}}};
     ui::ImportTagReview review({"artist:alias", "skip", "new (note)", "new"}, {"artist:Existing"});
     review.set_cleanup(true);
     CHECK(review.replace(0, "artist:Existing"));
@@ -66,8 +69,8 @@ TEST(import_tag_review_dictionary_preserves_replacement_metadata_and_uses_first_
     CHECK_EQ(sum.descriptions_added, size_t{1});
 }
 
-#include "ui/import_tag_dialog.h"
 #include "gfx/window.h"
+#include "ui/import_tag_dialog.h"
 
 TEST(import_tag_review_dialog_cancel_does_not_return_a_commit)
 {
@@ -104,10 +107,11 @@ TEST(import_tag_review_dialog_confirms_selection_and_cleanup)
 
 TEST(import_tag_review_rejects_invalid_names_and_skips_empty_cleaned_categories)
 {
-    ui::ImportTagReview review({"artist:(alias)", "artist:<old> Alice"}, {});
+    ui::ImportTagReview review({"artist:(alias)", "artist:<old> Alice", "<category>:Alice"}, {});
     review.set_cleanup(true);
     CHECK(review.target(0).empty());
     CHECK_EQ(review.target(1), "artist:Alice");
+    CHECK_EQ(review.target(2), "Alice");
     CHECK(!review.rename(0, "artist:"));
     CHECK(!review.rename(0, "bad\nname"));
     CHECK(!review.rename(4, "name"));

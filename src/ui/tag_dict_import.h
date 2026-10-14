@@ -59,7 +59,8 @@ struct TagDictImportSummary {
                                                   const TagDictParseResult& parsed);
 
 [[nodiscard]] TagDictImportSummary apply_reviewed_tag_dict(vault::VaultSettings& settings,
-    const TagDictParseResult& parsed, const ImportTagReview& review);
+                                                           const TagDictParseResult& parsed,
+                                                           const ImportTagReview& review);
 
 // The summary modal's body text, one line per outcome. The three "what changed"
 // counts are always listed (an import that changed nothing must say so plainly);

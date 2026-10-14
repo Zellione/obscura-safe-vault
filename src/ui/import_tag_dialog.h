@@ -5,8 +5,14 @@
 #include "ui/text_input_model.h"
 #include "ui/widgets.h"
 
-namespace gfx { class Window; class Renderer; class FontAtlas; }
-namespace vault { class Vault; }
+namespace gfx {
+class Window;
+class Renderer;
+class FontAtlas;
+}  // namespace gfx
+namespace vault {
+class Vault;
+}
 namespace ui {
 [[nodiscard]] std::vector<std::string> import_tag_vocabulary(vault::Vault& vault);
 struct ImportTagDialogLayout {
@@ -15,18 +21,26 @@ struct ImportTagDialogLayout {
     float pitch;
     float controls_y;
 };
-[[nodiscard]] ImportTagDialogLayout import_tag_dialog_layout(float font_px, float width, float height);
+[[nodiscard]] ImportTagDialogLayout import_tag_dialog_layout(float font_px, float width,
+                                                             float height);
 
 class ImportTagDialog {
 public:
     explicit ImportTagDialog(gfx::Window& window) : window_(window) {}
     void open(ImportTagReview review, std::string title = "Review imported tags");
     void close();
-    void set_error(std::string error) { error_ = std::move(error); }
-    [[nodiscard]] bool active() const { return active_; }
+    void set_error(std::string error)
+    {
+        error_ = std::move(error);
+    }
+    [[nodiscard]] bool active() const
+    {
+        return active_;
+    }
     [[nodiscard]] std::optional<ImportTagReview> take_result();
     void handle_event(const SDL_Event& e);
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float width, float height);
+
 private:
     enum class Mode { Browse, Filter, Rename, Replace };
     void rebuild();
@@ -56,4 +70,4 @@ private:
     float pitch_ = 1;
     int first_ = 0;
 };
-} // namespace ui
+}  // namespace ui

@@ -5,13 +5,13 @@
 #include <string>
 #include <vector>
 
-#include "ui/nav_model.h"
 #include "ui/import_tag_dialog.h"
-#include "ui/tag_json_parse.h"
+#include "ui/nav_model.h"
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "ui/tag_fields_form.h"
-#include "ui/tag_overview_model.h"   // ui::TagTally, TagSort
+#include "ui/tag_json_parse.h"
+#include "ui/tag_overview_model.h"  // ui::TagTally, TagSort
 #include "ui/template_editor.h"
 #include "ui/text_input_model.h"
 #include "ui/widgets.h"

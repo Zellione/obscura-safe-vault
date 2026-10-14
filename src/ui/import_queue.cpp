@@ -1,8 +1,8 @@
 #include "ui/import_queue.h"
+#include "platform/paths.h"
+#include "ui/meta_json.h"
 #include "ui/tag_inherit.h"
 #include "ui/tag_list_parse.h"
-#include "ui/meta_json.h"
-#include "platform/paths.h"
 
 #include "ui/recursive_exec.h"
 #include "ui/spanned_zip.h"
@@ -42,16 +42,16 @@ void collect_dataset_tag(std::vector<DatasetTagReview>& pending, uint64_t task_i
         pending.push_back({task_id, {}, {}});
         it = std::prev(pending.end());
     }
-    it->assignments.push_back({std::move(gallery), std::move(tag)});
+    it->assignments.emplace_back(std::move(gallery), std::move(tag));
 }
 
 void collect_folder_tags(MediaSink& sink, const std::filesystem::path& root,
                          const std::vector<ZipEntry>& entries, std::string_view gallery)
 {
     const auto meta = find_meta_entry(entries);
-    if (!meta) return;
+    if (!meta.has_value()) return;
     const auto bytes = platform::read_file(root / platform::utf8_to_path(entries[*meta].path),
-                                          platform::MAX_METADATA_IMPORT_BYTES);
+                                           platform::MAX_METADATA_IMPORT_BYTES);
     if (!bytes) return;
     for (const auto& tag : meta_gallery_tags(parse_meta_json(*bytes)))
         (void)sink.tag_gallery(gallery, tag);
@@ -414,7 +414,7 @@ void ImportQueue::abort_and_flush()
         // Process remaining records without lock
         for (auto& record : remaining) {
             if (!record.tag.empty()) {
-                continue; // Unreviewed metadata is discarded when locking or exiting.
+                continue;  // Unreviewed metadata is discarded when locking or exiting.
             } else if (record.node) {
                 if (!record.gallery_path.empty()) {
                     (void)vault::ensure_gallery_path(*v_, record.gallery_path);
@@ -691,8 +691,8 @@ int ImportQueue::drain(double dt)
         to_process.pop_front();
 
         if (!record.tag.empty()) {
-            collect_dataset_tag(pending_tags_, record.task_id,
-                                std::move(record.gallery_path), std::move(record.tag));
+            collect_dataset_tag(pending_tags_, record.task_id, std::move(record.gallery_path),
+                                std::move(record.tag));
         } else if (record.node) {
             // Ensure the destination gallery exists first
             if (!record.gallery_path.empty()) {
@@ -748,7 +748,8 @@ std::optional<DatasetTagReview> ImportQueue::take_tag_review()
     for (auto it = pending_tags_.begin(); it != pending_tags_.end(); ++it) {
         const auto task = std::ranges::find(tasks_, it->task_id, &Task::id);
         if (task != tasks_.end() && !task->finished()) continue;
-        if (std::ranges::any_of(records_, [&](const auto& r) { return r.task_id == it->task_id; })) continue;
+        if (std::ranges::any_of(records_, [&](const auto& r) { return r.task_id == it->task_id; }))
+            continue;
         auto result = std::move(*it);
         if (task != tasks_.end()) result.display_name = task->display_name;
         pending_tags_.erase(it);
@@ -768,7 +769,8 @@ bool ImportQueue::apply_tag_review(const DatasetTagReview& pending, const Import
         const auto tag = review.target(static_cast<size_t>(it - review.rows().begin()));
         if (!tag_has_renderable_text(tag)) continue;
         const auto result = v_->add_tag(assignment.gallery, tag);
-        if (result != vault::VaultResult::Ok && result != vault::VaultResult::AlreadyExists) return false;
+        if (result != vault::VaultResult::Ok && result != vault::VaultResult::AlreadyExists)
+            return false;
     }
     return lane_->flush();
 }

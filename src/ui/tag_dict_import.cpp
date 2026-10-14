@@ -103,7 +103,8 @@ TagDictImportSummary apply_tag_dict(VaultSettings& s, const TagDictParseResult& 
 }
 
 TagDictImportSummary apply_reviewed_tag_dict(VaultSettings& settings,
-    const TagDictParseResult& parsed, const ImportTagReview& review)
+                                             const TagDictParseResult& parsed,
+                                             const ImportTagReview& review)
 {
     TagDictParseResult filtered;
     filtered.malformed_skipped = parsed.malformed_skipped;
@@ -114,7 +115,8 @@ TagDictImportSummary apply_reviewed_tag_dict(VaultSettings& settings,
         const auto& row = review.rows()[i];
         const auto key = review.target(i);
         if (!row.selected || !tag_has_renderable_text(key)) continue;
-        if (std::ranges::any_of(seen, [&](const auto& old) { return tag_ci_equal(old, key); })) continue;
+        if (std::ranges::any_of(seen, [&](const auto& old) { return tag_ci_equal(old, key); }))
+            continue;
         seen.push_back(key);
         // Mapping reuses the destination's metadata; incoming aliases cannot overwrite it.
         if (row.replacement) continue;

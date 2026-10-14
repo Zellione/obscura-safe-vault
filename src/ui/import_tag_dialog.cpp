@@ -16,20 +16,23 @@ namespace {
 bool matches(std::string_view text, std::string_view query)
 {
     if (query.empty()) return true;
-    return std::search(text.begin(), text.end(), query.begin(), query.end(),
-        [](char a, char b) { return tag_ci_equal(std::string_view(&a, 1), std::string_view(&b, 1)); }) != text.end();
+    return !std::ranges::search(text, query, [](char a, char b) {
+                return tag_ci_equal(std::string_view(&a, 1), std::string_view(&b, 1));
+            }).empty();
 }
-}
+}  // namespace
 std::vector<std::string> import_tag_vocabulary(vault::Vault& vault)
 {
     auto tags = vault::VaultSearch(vault).all_tags();
-    const auto settings = vault::vault_settings(vault);
+    const auto& settings = vault::vault_settings(vault);
     auto add = [&](std::string_view tag) {
         if (std::ranges::none_of(tags, [&](const auto& t) { return tag_ci_equal(t, tag); }))
             tags.emplace_back(tag);
     };
-    for (const auto& d : settings.tag_descriptions) add(d.tag.view());
-    for (const auto& f : settings.tag_field_values) add(f.tag.view());
+    for (const auto& d : settings.tag_descriptions)
+        add(d.tag.view());
+    for (const auto& f : settings.tag_field_values)
+        add(f.tag.view());
     std::ranges::sort(tags);
     return tags;
 }
@@ -83,7 +86,8 @@ void ImportTagDialog::rebuild()
 }
 void ImportTagDialog::select_row(int delta)
 {
-    selected_ = std::clamp(selected_ + delta, 0, std::max(0, static_cast<int>(visible_.size()) - 1));
+    selected_ =
+        std::clamp(selected_ + delta, 0, std::max(0, static_cast<int>(visible_.size()) - 1));
 }
 void ImportTagDialog::edit(Mode mode)
 {
@@ -93,19 +97,27 @@ void ImportTagDialog::edit(Mode mode)
     skip_opening_text_ = true;
     input_.set_text(mode == Mode::Rename ? review_.target(editing_) : "");
     input_.select_all();
-    if (mode == Mode::Replace) { selected_ = 0; rebuild(); }
+    if (mode == Mode::Replace) {
+        selected_ = 0;
+        rebuild();
+    }
     SDL_StartTextInput(window_.sdl_window());
 }
 void ImportTagDialog::accept_edit()
 {
+    using enum Mode;
     bool accepted = true;
-    if (mode_ == Mode::Rename) accepted = review_.rename(editing_, input_.view());
-    if (mode_ == Mode::Replace) {
-        accepted = !visible_.empty() && review_.replace(editing_,
-            review_.existing()[visible_[static_cast<size_t>(selected_)]]);
+    if (mode_ == Rename) accepted = review_.rename(editing_, input_.view());
+    if (mode_ == Replace) {
+        accepted =
+            !visible_.empty() &&
+            review_.replace(editing_, review_.existing()[visible_[static_cast<size_t>(selected_)]]);
     }
-    if (!accepted) { error_ = "Choose a valid, non-empty tag."; return; }
-    mode_ = Mode::Browse;
+    if (!accepted) {
+        error_ = "Choose a valid, non-empty tag.";
+        return;
+    }
+    mode_ = Browse;
     error_.clear();
     SDL_StopTextInput(window_.sdl_window());
     rebuild();
@@ -113,7 +125,9 @@ void ImportTagDialog::accept_edit()
 void ImportTagDialog::browse_key(SDL_Keycode key)
 {
     switch (key) {
-    case SDLK_ESCAPE: close(); break;
+    case SDLK_ESCAPE:
+        close();
+        break;
     case SDLK_RETURN:
     case SDLK_KP_ENTER: {
         auto accepted = std::move(review_);
@@ -127,31 +141,46 @@ void ImportTagDialog::browse_key(SDL_Keycode key)
             row.selected = !row.selected;
         }
         break;
-    case SDLK_A: for (const auto i : visible_) review_.rows()[i].selected = true; break;
-    case SDLK_N: for (const auto i : visible_) review_.rows()[i].selected = false; break;
-    case SDLK_C: review_.set_cleanup(!review_.cleanup()); rebuild(); break;
-    case SDLK_R: edit(Mode::Rename); break;
-    case SDLK_E: edit(Mode::Replace); break;
+    case SDLK_A:
+        for (const auto i : visible_)
+            review_.rows()[i].selected = true;
+        break;
+    case SDLK_N:
+        for (const auto i : visible_)
+            review_.rows()[i].selected = false;
+        break;
+    case SDLK_C:
+        review_.set_cleanup(!review_.cleanup());
+        rebuild();
+        break;
+    case SDLK_R:
+        edit(Mode::Rename);
+        break;
+    case SDLK_E:
+        edit(Mode::Replace);
+        break;
     case SDLK_SLASH:
         mode_ = Mode::Filter;
         skip_opening_text_ = true;
         input_.set_text(filter_);
         SDL_StartTextInput(window_.sdl_window());
         break;
-    default: break;
+    default:
+        break;
     }
 }
 void ImportTagDialog::handle_event(const SDL_Event& e)
 {
+    using enum Mode;
     if (!active_) return;
     if (skip_opening_text_ && e.type == SDL_EVENT_TEXT_INPUT) {
         skip_opening_text_ = false;
         return;
     }
     if (e.type == SDL_EVENT_KEY_UP || e.type == SDL_EVENT_KEY_DOWN) skip_opening_text_ = false;
-    if (mode_ != Mode::Browse && handle_text_input_event(input_, e)) {
-        if (mode_ == Mode::Filter) filter_ = input_.str();
-        if (mode_ != Mode::Rename) rebuild();
+    if (mode_ != Browse && handle_text_input_event(input_, e)) {
+        if (mode_ == Filter) filter_ = input_.str();
+        if (mode_ != Rename) rebuild();
         return;
     }
     if (e.type == SDL_EVENT_MOUSE_WHEEL || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
@@ -162,7 +191,10 @@ void ImportTagDialog::handle_event(const SDL_Event& e)
 }
 void ImportTagDialog::handle_pointer(const SDL_Event& e)
 {
-    if (e.type == SDL_EVENT_MOUSE_WHEEL) { select_row(e.wheel.y > 0 ? -3 : 3); return; }
+    if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+        select_row(e.wheel.y > 0 ? -3 : 3);
+        return;
+    }
     if (e.button.button != SDL_BUTTON_LEFT) return;
     const SDL_FPoint p{e.button.x, e.button.y};
     if (!SDL_PointInRectFloat(&p, &list_box_)) return;
@@ -173,19 +205,32 @@ void ImportTagDialog::handle_pointer(const SDL_Event& e)
 void ImportTagDialog::handle_key(SDL_Keycode key)
 {
     switch (key) {
-    case SDLK_UP: select_row(-1); return;
-    case SDLK_DOWN: select_row(1); return;
-    case SDLK_PAGEUP: select_row(-10); return;
-    case SDLK_PAGEDOWN: select_row(10); return;
-    default: break;
+    case SDLK_UP:
+        select_row(-1);
+        return;
+    case SDLK_DOWN:
+        select_row(1);
+        return;
+    case SDLK_PAGEUP:
+        select_row(-10);
+        return;
+    case SDLK_PAGEDOWN:
+        select_row(10);
+        return;
+    default:
+        break;
     }
-    if (mode_ == Mode::Browse) { browse_key(key); return; }
+    if (mode_ == Mode::Browse) {
+        browse_key(key);
+        return;
+    }
     if (key == SDLK_ESCAPE) {
         mode_ = Mode::Browse;
         error_.clear();
         SDL_StopTextInput(window_.sdl_window());
         rebuild();
-    } else if (key == SDLK_RETURN || key == SDLK_KP_ENTER) accept_edit();
+    } else if (key == SDLK_RETURN || key == SDLK_KP_ENTER)
+        accept_edit();
 }
 
 void ImportTagDialog::render_rows(gfx::Renderer& r, gfx::FontAtlas& font)
@@ -195,13 +240,19 @@ void ImportTagDialog::render_rows(gfx::Renderer& r, gfx::FontAtlas& font)
     if (count < 1) return;
     first_ = std::max(0, selected_ - count + 1);
     for (int j = first_; j < std::min(first_ + count, static_cast<int>(visible_.size())); ++j) {
-        const size_t i = visible_[static_cast<size_t>(j)];
+        const auto i = visible_[static_cast<size_t>(j)];
         const float at = list_box_.y + static_cast<float>(j - first_) * pitch_;
-        if (j == selected_) r.draw_round_rect({list_box_.x, at, list_box_.w, pitch_}, RADIUS_SMALL, BG);
+        if (j == selected_)
+            r.draw_round_rect({list_box_.x, at, list_box_.w, pitch_}, RADIUS_SMALL, BG);
         const auto color = j == selected_ ? ACCENT : TEXT;
-        if (mode_ == Mode::Replace) { r.draw_text(font, list_box_.x, at, fit_text_tail(font, review_.existing()[i], list_box_.w), color); continue; }
+        if (mode_ == Mode::Replace) {
+            r.draw_text(font, list_box_.x, at,
+                        fit_text_tail(font, review_.existing()[i], list_box_.w), color);
+            continue;
+        }
         const float column = (list_box_.w - 24) / 2;
-        const auto source = std::string(review_.rows()[i].selected ? "[x] " : "[ ] ") + review_.rows()[i].source;
+        const auto source =
+            std::string(review_.rows()[i].selected ? "[x] " : "[ ] ") + review_.rows()[i].source;
         const auto target = review_.target(i);
         r.draw_text(font, list_box_.x, at, fit_text_tail(font, source, column), color);
         r.draw_text(font, list_box_.x + column + 24, at,
@@ -216,8 +267,10 @@ ImportTagDialogLayout import_tag_dialog_layout(float font_px, float width, float
     const float x = (width - w) / 2;
     const float y = (height - h) / 2;
     const float list_height = std::max(0.0f, h - 8 * pitch - 24);
-    return {{x, y, w, h}, {x + 16, y + 12 + 3 * pitch, std::max(1.0f, w - 32), list_height},
-            pitch, y + h - 5 * pitch - 12};
+    return {{x, y, w, h},
+            {x + 16, y + 12 + 3 * pitch, std::max(1.0f, w - 32), list_height},
+            pitch,
+            y + h - 5 * pitch - 12};
 }
 void ImportTagDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float width, float height)
 {
@@ -235,23 +288,28 @@ void ImportTagDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float width
     };
     line(title_, y + 12, TEXT);
     line(std::format("[C] Remove <...> and (...): {}    {} source tags    Filter: {}",
-                     review_.cleanup() ? "ON" : "OFF", review_.rows().size(), filter_), y + 12 + pitch_, TEXT_DIM);
+                     review_.cleanup() ? "ON" : "OFF", review_.rows().size(), filter_),
+         y + 12 + pitch_, TEXT_DIM);
     line("Source tag  ->  Imported tag (empty results are skipped)", y + 12 + 2 * pitch_, TEXT_DIM);
     list_box_ = layout.list;
     render_rows(r, font);
     const float at = layout.controls_y;
     if (mode_ != Mode::Browse) {
         std::string_view caption = "Filter source / imported tags:";
-        if (mode_ == Mode::Replace) caption = "Choose existing tag (type to search, Up/Down, Enter):";
+        if (mode_ == Mode::Replace)
+            caption = "Choose existing tag (type to search, Up/Down, Enter):";
         if (mode_ == Mode::Rename) caption = "Rename to (include category: if needed):";
         line(caption, at, TEXT);
         draw_edit_field(r, font, {x + 16, at + pitch_, inner, pitch_ + 8}, input_, chrome_, true);
     } else {
         line("[Space/click] Include  [A] All shown  [N] None shown  [/] Filter", at, TEXT_DIM);
-        line("[R] Rename  [E] Replace with existing  [Up/Down/PgUp/PgDn] Navigate", at + pitch_, TEXT_DIM);
+        line("[R] Rename  [E] Replace with existing  [Up/Down/PgUp/PgDn] Navigate", at + pitch_,
+             TEXT_DIM);
     }
     line(error_, y + h - 2 * pitch_ - 8, DANGER);
-    line(mode_ == Mode::Browse ? "[Enter] Import selected tags    [Esc] Skip tag import (media is kept)"
-                               : "[Enter] Accept edit    [Esc] Back to review", y + h - pitch_ - 8, TEXT_DIM);
+    line(mode_ == Mode::Browse
+             ? "[Enter] Import selected tags    [Esc] Skip tag import (media is kept)"
+             : "[Enter] Accept edit    [Esc] Back to review",
+         y + h - pitch_ - 8, TEXT_DIM);
 }
-} // namespace ui
+}  // namespace ui

@@ -17,13 +17,13 @@
 #include "ui/help_popup.h"
 #include "ui/import_queue.h"
 #include "ui/import_tag_dialog.h"
+#include "ui/migration_job.h"
 #include "ui/screen.h"
 #include "ui/second_vault.h"
 #include "ui/settings_model.h"
-#include "ui/migration_job.h"
-#include "vault/vault.h"
-#include "vault/migration.h"
 #include "vault/commit_lane.h"
+#include "vault/migration.h"
+#include "vault/vault.h"
 
 namespace ui { class ImageViewer; }
 
