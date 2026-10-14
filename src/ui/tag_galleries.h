@@ -21,13 +21,11 @@ namespace ui {
 class TagGalleries : public FavoritesScreen {
 public:
     TagGalleries(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                 platform::VaultRegistry& registry, std::string tag,
+                 gfx::TextureCache& cache, platform::VaultRegistry& registry, std::string tag,
                  const CollectionOps& ops);
 
 protected:
     [[nodiscard]] std::vector<vault::SearchHit> fetch() const override;
-    void draw_tile_content(gfx::Renderer& r, const vault::SearchHit& hit,
-                           const SDL_FRect& box) override;
     void activate(const vault::SearchHit& hit, int index) override;
     void go_back() override;   // back to the tag overview, not the root grid
     [[nodiscard]] const char* title() const override { return title_.c_str(); }

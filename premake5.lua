@@ -554,6 +554,13 @@ project "osv_tests"
         "src/ui/dual_layout.cpp",
         "src/ui/dual_transfer.cpp",
         "src/ui/tile_thumb.cpp",
+        "src/ui/favorites_screen.cpp",
+        "src/ui/favorites_images.cpp",
+        "src/ui/favorites_galleries.cpp",
+        "src/ui/collection_ops.cpp",
+        "src/ui/quick_switch.cpp",
+        "src/ui/rename_dialog.cpp",
+        "src/ui/consent_dialog.cpp",
     }
 
     includedirs {

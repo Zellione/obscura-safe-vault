@@ -300,7 +300,7 @@ void App::to_favorite_galleries()
 {
     state_  = State::Browsing;
     auto screen = std::make_unique<ui::FavoritesGalleries>(
-        window_, font_, *vault_state_.active, registry_,
+        window_, font_, *vault_state_.active, *cache_, registry_,
         ui::FavoritesScreen::CollectionOps{dialog_, folder_dialog_, import_ui_.queue,
                                            &second_.session, vault_state_.active_path});
     screen->set_detail_open(sessions_.gallery.detail_open);
@@ -354,7 +354,7 @@ void App::to_tag_galleries(const std::string& tag)
 {
     state_  = State::Browsing;
     auto screen = std::make_unique<ui::TagGalleries>(
-        window_, font_, *vault_state_.active, registry_, tag,
+        window_, font_, *vault_state_.active, *cache_, registry_, tag,
         ui::FavoritesScreen::CollectionOps{dialog_, folder_dialog_, import_ui_.queue,
                                            &second_.session, vault_state_.active_path});
     screen->set_detail_open(sessions_.gallery.detail_open);

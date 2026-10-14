@@ -8,6 +8,7 @@
 
 #include "gfx/renderer.h"
 #include "gfx/text.h"
+#include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "platform/gallery_view_pref.h"
@@ -22,6 +23,7 @@
 #include "ui/parent_group.h"
 #include "ui/position_label.h"
 #include "ui/tag_inherit.h"
+#include "ui/tile_thumb.h"
 #include "ui/widgets.h"
 #include "vault/vault.h"
 
@@ -42,18 +44,44 @@ GridSpec grid_spec(float win_w, int cols, float cell) noexcept
 }
 
 FavoritesScreen::FavoritesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                                 platform::VaultRegistry& registry, const CollectionOps& ops)
-    : win_(win), font_(font), vault_(vault),
-      quick_switch_(registry, ops.active_path), rename_(win_),
-      ops_(CollectionBatchOps::Deps{vault, ops.active_path, registry, ops.file_dialog,
-                                    win, ops.second, ops.folder_dialog, ops.queue})
+                                 gfx::TextureCache& cache, platform::VaultRegistry& registry,
+                                 const CollectionOps& ops)
+    : win_(win), font_(font), vault_(vault), quick_switch_(registry, ops.active_path),
+      rename_(win_),
+      ops_(CollectionBatchOps::Deps{vault, ops.active_path, registry, ops.file_dialog, win,
+                                    ops.second, ops.folder_dialog, ops.queue}),
+      thumbs_{.cache = cache, .failed = {}, .covers = {}}
 {
+}
+
+bool FavoritesScreen::pump_thumbs()
+{
+    bool any = false;
+    while (auto res = thumbs_.worker.take_result()) {
+        if (res->image) {
+            thumbs_.cache.get_or_upload(res->key, *res->image);
+            any = true;
+        } else {
+            thumbs_.failed.insert(res->key);
+        }
+    }
+    return any;
+}
+
+void FavoritesScreen::draw_tile_content(gfx::Renderer& r, const vault::SearchHit& hit,
+                                        const SDL_FRect& box)
+{
+    draw_tile_thumb(r, font_,
+                    {vault_, thumbs_.cache, thumbs_.worker, thumbs_.failed, thumbs_.covers},
+                    *hit.node, box);
 }
 
 bool current_detail_open(const FavoritesScreen& s) { return s.detail_.panel.open; }
 
 void FavoritesScreen::reload()
 {
+    thumbs_.covers.clear();
+    thumbs_.failed.clear();
     favs_ = fetch();
     nav_.set_count(static_cast<int>(favs_.size()));
     nav_.select(0);
@@ -124,6 +152,7 @@ void FavoritesScreen::on_vault_changed()
 
 void FavoritesScreen::update(double)
 {
+    if (pump_thumbs()) mark_dirty();
     if (auto p = ops_.poll(); p.dirty || p.reload || !p.status.empty()) {
         if (!p.status.empty()) { status_ = std::move(p.status); }
         if (p.reload) { reload(); }   // a Move removed items from the collection
