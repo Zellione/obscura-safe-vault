@@ -18,7 +18,10 @@ See [`AGENTS.md`](AGENTS.md) for all technology decisions and [`ROADMAP.md`](ROA
 
 ## Vault storage
 
-New Vault creates the v3 directory format. Open Vault selects a directory;
+New Vault (`N`) asks for a parent folder, then a vault name. Press Enter to
+continue to the password form; Create makes a new `.osv` directory inside that
+folder. The `.osv` suffix is added automatically, and existing destinations are
+rejected. Escape cancels the name prompt. Open Vault selects a directory;
 `Shift+O` opens a legacy `.osv` file. After authentication, choose **Open read-only**
 (Enter) to browse without upgrading, or **Convert a copy** (C). Conversion asks
 for a distinct destination and independent destination credentials. Escape from

@@ -463,6 +463,7 @@ project "osv_tests"
         "src/ui/text_input_event.cpp",
         "src/gfx/window.cpp",
         "src/ui/unlock_screen.cpp",
+        "src/ui/vault_manager.cpp",
         "src/ui/unlock_logic.cpp",
         "src/ui/unlock_job.cpp",
         "src/ui/legacy_conversion_job.cpp",

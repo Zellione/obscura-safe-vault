@@ -1,6 +1,10 @@
 #include "test_framework.h"
 
 #include "platform/file_dialog.h"
+#include "platform/vault_registry.h"
+#include "gfx/window.h"
+#include "gfx/text.h"
+#include "ui/vault_manager.h"
 
 #include <filesystem>
 #include <string>
@@ -12,6 +16,17 @@
 // result-routing logic can be exercised headlessly.
 namespace platform {
 struct FileDialogTestPeer {
+    static inline int parent_picker_calls = 0;
+    static inline bool parent_allow_many = true;
+    static void SDLCALL pick_parent(SDL_DialogFileCallback callback, void* userdata,
+                                   SDL_Window*, const char*, bool allow_many)
+    {
+        ++parent_picker_calls;
+        parent_allow_many = allow_many;
+        const char* paths[] = {"/tmp", nullptr};
+        callback(userdata, paths, -1);
+    }
+    static void use_parent_picker(FileDialog& d) { d.vault_parent_picker_ = pick_parent; }
     static void arm(FileDialog& d, FileDialog::Purpose p) { d.begin_open(p); }
 
     static void complete(FileDialog& d, const std::vector<std::string>& paths)
@@ -28,6 +43,89 @@ struct FileDialogTestPeer {
 using platform::FileDialog;
 using Peer = platform::FileDialogTestPeer;
 using Purpose = platform::FileDialog::Purpose;
+
+TEST(file_dialog_new_vault_selects_parent_folder)
+{
+    FileDialog d;
+    Peer::use_parent_picker(d);
+    Peer::parent_picker_calls = 0;
+    d.open_vault_parent(nullptr);
+    CHECK(Peer::parent_picker_calls == 1);
+    CHECK_FALSE(Peer::parent_allow_many);
+    CHECK_FALSE(d.take_result(Purpose::VaultDirectory).has_value());
+    CHECK_FALSE(d.take_result(Purpose::SaveVault).has_value());
+    const auto result = d.take_result(Purpose::VaultParent);
+    REQUIRE(result.has_value());
+    REQUIRE(result->size() == 1);
+    CHECK(result->front() == "/tmp");
+    Peer::arm(d, Purpose::Images);
+    d.open_vault_parent(nullptr);
+    CHECK(Peer::parent_picker_calls == 1);
+}
+
+TEST(file_dialog_new_vault_manager_names_child_before_navigation)
+{
+    FileDialog d;
+    Peer::use_parent_picker(d);
+    gfx::Window window;
+    gfx::FontAtlas font;
+    platform::VaultRegistry registry;
+    ui::VaultManager manager(window, font, registry, d, {});
+    SDL_Event event{};
+    event.type = SDL_EVENT_KEY_DOWN;
+    event.key.key = SDLK_N;
+    manager.handle_event(event);
+    manager.update(0);
+    CHECK(manager.take_nav().kind == ui::NavKind::None);
+    event.type = SDL_EVENT_TEXT_INPUT;
+    event.text.text = "../outside";
+    manager.handle_event(event);
+    event = {};
+    event.type = SDL_EVENT_KEY_DOWN;
+    event.key.key = SDLK_RETURN;
+    manager.handle_event(event);
+    CHECK(manager.take_nav().kind == ui::NavKind::None);
+    event.key.key = SDLK_A;
+    event.key.mod = SDL_KMOD_CTRL;
+    manager.handle_event(event);
+    event = {};
+    event.type = SDL_EVENT_TEXT_INPUT;
+    event.text.text = "osv-picker-regression-été";
+    manager.handle_event(event);
+    event = {};
+    event.type = SDL_EVENT_KEY_DOWN;
+    event.key.key = SDLK_RETURN;
+    manager.handle_event(event);
+    const auto nav = manager.take_nav();
+    CHECK(nav.kind == ui::NavKind::ToUnlock);
+    CHECK(nav.path == "/tmp/osv-picker-regression-été.osv");
+    CHECK_FALSE(std::filesystem::exists(nav.path));
+}
+
+TEST(file_dialog_new_vault_manager_cancel_stays_in_manager)
+{
+    FileDialog d;
+    Peer::use_parent_picker(d);
+    gfx::Window window;
+    gfx::FontAtlas font;
+    platform::VaultRegistry registry;
+    ui::VaultManager manager(window, font, registry, d, {});
+    SDL_Event event{};
+    event.type = SDL_EVENT_KEY_DOWN;
+    event.key.key = SDLK_N;
+    manager.handle_event(event);
+    Peer::complete(d, {});
+    manager.update(0);
+    CHECK(manager.take_nav().kind == ui::NavKind::None);
+    manager.handle_event(event);
+    manager.update(0);
+    event.key.key = SDLK_ESCAPE;
+    manager.handle_event(event);
+    CHECK(manager.take_nav().kind == ui::NavKind::None);
+    event.key.key = SDLK_RETURN;
+    manager.handle_event(event);
+    CHECK(manager.take_nav().kind == ui::NavKind::None);
+}
 
 // Regression (Phase 17): a zip pick must NOT be consumable as an image import.
 // GalleryGrid polls one shared dialog from two handlers (pump_import then

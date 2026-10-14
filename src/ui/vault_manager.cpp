@@ -11,6 +11,9 @@
 #include "platform/vault_registry.h"
 #include "platform/path_utf8.h"
 #include "ui/second_vault.h"
+#include "ui/new_vault_path.h"
+#include "ui/text_input_event.h"
+#include "ui/text_metrics.h"
 #include "ui/widgets.h"
 
 namespace ui {
@@ -25,6 +28,12 @@ VaultManager::VaultManager(gfx::Window& win, gfx::FontAtlas& font,
 }
 
 void VaultManager::on_enter() { reload(); mark_dirty(); }
+
+void VaultManager::on_exit()
+{
+    if (!new_parent_.empty()) SDL_StopTextInput(win_.sdl_window());
+    new_parent_.clear();
+}
 
 void VaultManager::reload()
 {
@@ -94,7 +103,7 @@ void VaultManager::handle_key(const SDL_KeyboardEvent& key)
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
         case SDLK_SPACE:  open_selected(); break;
-        case SDLK_N:      dlg_.save_vault(win_.sdl_window()); awaiting_dialog_ = true; break;
+        case SDLK_N:      dlg_.open_vault_parent(win_.sdl_window()); awaiting_dialog_ = true; break;
         case SDLK_O:
             if (key.mod & SDL_KMOD_SHIFT)
                 dlg_.open_vault(win_.sdl_window());
@@ -136,7 +145,7 @@ void VaultManager::handle_click(const SDL_MouseButtonEvent& b)
 
     const Layout L = layout();
     if (point_in_rect(b.x, b.y, L.new_btn)) {
-        dlg_.save_vault(win_.sdl_window()); awaiting_dialog_ = true; return;
+        dlg_.open_vault_parent(win_.sdl_window()); awaiting_dialog_ = true; return;
     }
     if (point_in_rect(b.x, b.y, L.open_btn)) {
         dlg_.open_vault_directory(win_.sdl_window()); awaiting_dialog_ = true; return;
@@ -149,6 +158,8 @@ void VaultManager::handle_click(const SDL_MouseButtonEvent& b)
 
 void VaultManager::handle_event(const SDL_Event& e)
 {
+    if (!new_parent_.empty()) { handle_new_vault_name(e); return; }
+    if (awaiting_dialog_) return;
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:          handle_key(e.key); break;
         case SDL_EVENT_MOUSE_MOTION:      mouse_x_ = e.motion.x; mouse_y_ = e.motion.y; break;
@@ -162,15 +173,60 @@ void VaultManager::handle_event(const SDL_Event& e)
 
 void VaultManager::update(double)
 {
-    // A New/Open file dialog resolves asynchronously; pick up its result here.
-    // Both routes lead to the unlock screen, which auto-selects create-vs-open by
-    // whether the chosen path already exists.
     if (!awaiting_dialog_) return;
+    if (auto parent = dlg_.take_result(platform::FileDialog::Purpose::VaultParent)) {
+        awaiting_dialog_ = false;
+        if (!parent->empty()) {
+            new_parent_ = platform::utf8_to_path(parent->front());
+            new_name_.set_text("New vault");
+            new_name_.select_all();
+            new_name_chrome_ = {};
+            new_error_.clear();
+            SDL_StartTextInput(win_.sdl_window());
+        }
+        mark_dirty();
+        return;
+    }
     auto res = dlg_.take_result();
     if (!res) return;                            // still open
     awaiting_dialog_ = false;
     if (res->empty()) { mark_dirty(); return; }  // cancelled
     request(NavKind::ToUnlock, (*res)[0]);
+}
+
+void VaultManager::handle_new_vault_name(const SDL_Event& e)
+{
+    mark_dirty();
+    if (handle_text_input_event(new_name_, e)) { new_error_.clear(); return; }
+    if (e.type != SDL_EVENT_KEY_DOWN) return;
+    if (e.key.key == SDLK_ESCAPE) { on_exit(); return; }
+    if (e.key.key != SDLK_RETURN && e.key.key != SDLK_KP_ENTER) return;
+    const auto destination = new_vault_path(new_parent_, new_name_.str());
+    if (destination.error) { new_error_ = destination.error; return; }
+    on_exit();
+    request(NavKind::ToUnlock, platform::path_to_utf8(destination.path));
+}
+
+void VaultManager::render_new_vault_name(gfx::Renderer& r)
+{
+    using namespace gfx::theme;
+    const float width = static_cast<float>(win_.width()) - 120.0f;
+    const auto pitch = line_pitch(font_.pixel_height());
+    const float top = 120.0f;
+    r.draw_round_rect({40.0f, top - 20.0f, width + 40.0f, 6 * pitch + 80.0f},
+                      RADIUS, SURFACE);
+    r.draw_text(font_, 60.0f, top, fit_text(font_, "New vault name", width), TEXT);
+    r.draw_text(font_, 60.0f, top + pitch,
+                fit_text(font_, "Parent folder: " + platform::path_to_utf8(new_parent_), width), TEXT_DIM);
+    draw_edit_field(r, font_, {60.0f, top + 2 * pitch, width, pitch + 16.0f},
+                    new_name_, new_name_chrome_, true);
+    r.draw_text(font_, 60.0f, top + 3 * pitch + 24.0f,
+                fit_text(font_, "Creates a new .osv directory inside this folder.", width), TEXT_DIM);
+    r.draw_text(font_, 60.0f, top + 4 * pitch + 24.0f,
+                fit_text(font_, "[Enter] Continue  [Esc] Cancel", width), TEXT_FAINT);
+    if (!new_error_.empty())
+        r.draw_text(font_, 60.0f, top + 5 * pitch + 24.0f,
+                    fit_text(font_, new_error_, width), DANGER);
 }
 
 void VaultManager::render(gfx::Renderer& r)
@@ -224,6 +280,7 @@ void VaultManager::render(gfx::Renderer& r)
     };
     btn(L.new_btn, "New Vault (N)");
     btn(L.open_btn, "Open Other (O)");
+    if (!new_parent_.empty()) render_new_vault_name(r);
 }
 
 std::vector<ui::HelpGroup> VaultManager::help_groups() const
@@ -231,7 +288,7 @@ std::vector<ui::HelpGroup> VaultManager::help_groups() const
     return {
         {"Vaults", {
             {"Up/Down", "Move selection"}, {"Enter / Space", "Open selected vault"},
-            {"N", "Create new directory vault"}, {"O", "Open vault directory"},
+            {"N", "Create vault: choose parent folder, then name"}, {"O", "Open vault directory"},
             {"Shift+O", "Open legacy vault read only"},
             {"R / Del", "Remove from list"}, {"L", "Lock the selected/active vault"},
             {"Shift+I", "Import status"},
