@@ -3,11 +3,15 @@
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/vault_registry.h"
+#include "ui/import_queue.h"
+#include "ui/second_vault.h"
 #include "ui/transfer_dialog.h"
 #include "ui/zip_test_helpers.h"
+#include "vault/commit_lane.h"
 
 #include <chrono>
 #include <thread>
+#include <utility>
 
 namespace {
 void press(ui::TransferDialog& dialog, SDL_Keycode key, int& _failures)
@@ -92,4 +96,83 @@ TEST(transfer_dialog_empty_pull_can_cancel_and_reopen)
     CHECK(dialog.active());
     press(dialog, SDLK_ESCAPE, _failures);
     CHECK(!dialog.active());
+}
+
+TEST(transfer_dialog_directory_copy_and_move_with_warm_vault_close_cleanly)
+{
+    for (const auto& [pull, move] : {std::pair{false, false}, std::pair{false, true},
+                                     std::pair{true, false}, std::pair{true, true}}) {
+        const auto dir = ziptest::fresh_dir(move ? "v3_move_close" : "v3_copy_close");
+        {
+            vault::Vault source, active;
+            const std::vector<uint8_t> password{'p', 'w'};
+            REQUIRE(vault::Vault::create_directory((dir / "source.osv").string(), password, {},
+                                                   ziptest::kTestKdf,
+                                                   source) == vault::VaultResult::Ok);
+            REQUIRE(vault::Vault::create_directory((dir / "active.osv").string(), password, {},
+                                                   ziptest::kTestKdf,
+                                                   active) == vault::VaultResult::Ok);
+            auto& origin = pull ? source : active;
+            REQUIRE(origin.create_gallery("Photos") == vault::VaultResult::Ok);
+            REQUIRE(origin.add_image("Photos", ziptest::fake_jpeg(7), "photo.jpg") ==
+                    vault::VaultResult::Ok);
+            source.lock();
+
+            auto lane = std::make_unique<vault::CommitLane>();
+            lane->start(active);
+            active.set_commit_router(lane.get());
+            ui::ImportQueue queue;
+            queue.begin_session(active, *lane);
+            queue.set_exclusive(true);
+            ui::SecondVaultSession second;
+            second.set_default_mode(platform::SecondVaultMode::KeepSession);
+            platform::VaultRegistry registry(dir / "vaults.list");
+            REQUIRE(registry.add(dir / "source.osv"));
+            platform::FileDialog files;
+            gfx::Window window;
+            {
+                ui::TransferDialog dialog(active, (dir / "active.osv").string(), registry, files,
+                                          window, &second);
+                if (pull)
+                    ui::open_pull_transfer(dialog, "");
+                else
+                    dialog.open_gallery("Photos");
+                // Pull defaults to Copy, push defaults to Move.
+                if (move == pull) press(dialog, SDLK_DOWN, _failures);
+                press(dialog, SDLK_RETURN, _failures);
+                if (!pull) press(dialog, SDLK_DOWN, _failures);  // Skip "This vault".
+                press(dialog, SDLK_RETURN, _failures);
+                SDL_Event text{};
+                text.type = SDL_EVENT_TEXT_INPUT;
+                text.text.text = "pw";
+                REQUIRE(dialog.handle_event(text));
+                press(dialog, SDLK_RETURN, _failures);
+                if (pull) press(dialog, SDLK_SPACE, _failures);
+                press(dialog, SDLK_RETURN, _failures);
+                REQUIRE(dialog.job_active());
+                for (int i = 0; i < 5000 && dialog.active(); ++i) {
+                    dialog.update();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                REQUIRE(!dialog.active());
+                ui::TransferCompletion completion;
+                REQUIRE(dialog.consume_completed(completion));
+                CHECK_EQ(completion.failed_total, 0);
+                CHECK(second.occupied());
+                CHECK(second.vault().is_unlocked());
+                CHECK(active.is_unlocked());
+            }
+            // App shutdown order: screens, import queue, warm vault, active vault,
+            // then lane. Both destination durability and source move semantics survive.
+            queue.end_session();
+            second.wipe();
+            active.lock();
+            lane.reset();
+            REQUIRE(ziptest::open_vault(dir / "active.osv", active));
+            CHECK_EQ(active.list("Photos").size(), !pull && move ? size_t{0} : size_t{1});
+            REQUIRE(ziptest::open_vault(dir / "source.osv", source));
+            CHECK_EQ(source.list("Photos").size(), pull && move ? size_t{0} : size_t{1});
+        }
+        ziptest::cleanup_dir(dir);
+    }
 }

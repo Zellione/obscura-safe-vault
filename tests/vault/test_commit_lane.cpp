@@ -9,6 +9,54 @@ using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
 using ziptest::make_vault;
 
+TEST(commit_lane_stop_releases_directory_vault_for_move_and_lock)
+{
+    const auto dir = fresh_dir("lane_directory_detach");
+    {
+        vault::Vault v;
+        const std::vector<uint8_t> password{'p', 'w'};
+        REQUIRE(vault::Vault::create_directory((dir / "vault.osv").string(), password, {},
+                                               ziptest::kTestKdf, v) == vault::VaultResult::Ok);
+        auto lane = std::make_unique<vault::CommitLane>();
+        lane->start(v);
+        v.set_commit_router(lane.get());
+        REQUIRE(v.create_gallery("saved") == vault::VaultResult::Ok);
+        lane->stop();
+        REQUIRE(lane->flush());
+        CHECK(v.is_unlocked());
+        // A stopped lane must release its back-reference. Moving an unlocked
+        // vault into the warm slot must not retain a pointer to the old lane.
+        vault::Vault moved(std::move(v));
+        lane.reset();
+        moved.lock();
+        CHECK(!moved.is_unlocked());
+        REQUIRE(ziptest::open_vault(dir / "vault.osv", moved));
+        CHECK_EQ(moved.list("").size(), size_t{1});
+    }
+    cleanup_dir(dir);
+}
+
+TEST(commit_lane_destruction_detaches_before_directory_vault_shutdown)
+{
+    const auto dir = fresh_dir("lane_directory_destroy");
+    {
+        vault::Vault v;
+        const std::vector<uint8_t> password{'p', 'w'};
+        REQUIRE(vault::Vault::create_directory((dir / "vault.osv").string(), password, {},
+                                               ziptest::kTestKdf, v) == vault::VaultResult::Ok);
+        {
+            vault::CommitLane lane;
+            lane.start(v);
+            v.set_commit_router(&lane);
+            REQUIRE(lane.enqueue_snapshot());
+        }
+        CHECK(v.is_unlocked());
+        v.lock();
+        CHECK(!v.is_unlocked());
+    }
+    cleanup_dir(dir);
+}
+
 TEST(commit_lane_persists_attached_nodes)
 {
     const uint64_t wipes_before = crypto::detail::wiping_deallocation_count();

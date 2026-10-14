@@ -534,6 +534,10 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   `push_child_fail_after` mirrors `resize_fail_after` fault-injection for tests.
 ### commit_lane.* (Phase 50) — batched, ordered index commits
 - `CommitLane` owns a jthread + a CV-based work queue. Runs independently, stops gracefully on Vault::lock().
+- `stop()` joins the worker before detaching its matching `Vault::commit_router_`
+  binding and clearing its own vault pointer. Destruction shares this path, so
+  destroying a lane before a later vault lock cannot leave a dangling router.
+  Detachment leaves the vault unlocked for synchronous commits or warm-slot use.
 - `enqueue(generation, blob)` → appends if not stopped; dequeues stale blobs (coalescing).
 - Main thread serializes index every N=32 files or 2s, tags it with generation, hands to lane.
 - Lane writes the inactive slot, fsyncs, flips active_slot in generation order — newest blob always wins.

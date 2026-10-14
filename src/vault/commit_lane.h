@@ -48,7 +48,9 @@ public:
     // A disk write failed; the lane refuses further work (hard stop per spec).
     [[nodiscard]] bool failed() const noexcept;
 
-    // flush() then join the thread. Idempotent. Noexcept: swallows all failures
+    // Drain, join, and detach from the vault without locking it. Idempotent.
+    // The vault must outlive this call; after stop neither object retains a
+    // pointer to the other. Noexcept: swallows all failures
     // into the failed() flag rather than throwing, safe to call from noexcept contexts
     // like Vault::lock().
     void stop() noexcept;

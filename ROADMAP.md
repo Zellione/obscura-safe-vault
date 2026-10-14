@@ -16,6 +16,10 @@ production facade benchmarks, and Linux-only cleanup. Validation is in progress.
 
 ## Phase index
 
+Vault-close follow-up: detach stopped commit lanes from their vaults before lane
+destruction, and cover v3 copy/move with a warm second vault through shutdown.
+See the [Phase 73 follow-up](docs/roadmap/phase-73-tag-templates.md#commit-lane-lifetime-follow-up).
+
 Favorites thumbnail follow-up: share gallery-grid thumbnail rendering for image,
 video, and gallery favorites (including tagged collections). See the
 [Phase 13 follow-up](docs/roadmap/phase-13-favorites.md#thumbnail-consistency-follow-up).
