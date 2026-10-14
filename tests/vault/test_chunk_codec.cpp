@@ -61,6 +61,51 @@ TEST(codec_secure_bytes_roundtrip)
     CHECK(std::memcmp(back.data(), payload.data(), payload.size()) == 0);
 }
 
+TEST(codec_wipes_internal_compression_and_decompression_state)
+{
+    const auto payload = zeros(65536);
+    std::vector<uint8_t> framed;
+    crypto::detail::reset_wipe_observations_for_tests();
+    REQUIRE(chunk_codec::encode_frame(payload, framed));
+    CHECK(crypto::detail::wiping_deallocation_count() > 0);
+    CHECK(crypto::detail::all_wipe_observations_zero_for_tests());
+    REQUIRE(framed[0] == chunk_codec::METHOD_DEFLATE);
+    std::vector<uint8_t> decoded;
+    crypto::detail::reset_wipe_observations_for_tests();
+    REQUIRE(chunk_codec::decode_frame(framed, decoded));
+    CHECK(crypto::detail::wiping_deallocation_count() > 0);
+    CHECK(crypto::detail::all_wipe_observations_zero_for_tests());
+    CHECK(decoded == payload);
+}
+
+TEST(codec_secure_state_failure_and_corrupt_stream_are_safe)
+{
+    const auto payload = zeros(65536);
+    std::vector<uint8_t> framed;
+    crypto::detail::inject_secure_allocation_failure(0);
+    const bool encoded = chunk_codec::encode_frame(payload, framed);
+    crypto::detail::clear_secure_allocation_failure();
+    REQUIRE(encoded);
+    CHECK(framed[0] == chunk_codec::METHOD_RAW);
+
+    REQUIRE(chunk_codec::encode_frame(payload, framed));
+    REQUIRE(framed[0] == chunk_codec::METHOD_DEFLATE);
+    std::vector<uint8_t> decoded;
+    crypto::detail::inject_secure_allocation_failure(0);
+    const bool decoded_ok = chunk_codec::decode_frame(framed, decoded);
+    crypto::detail::clear_secure_allocation_failure();
+    CHECK_FALSE(decoded_ok);
+    CHECK(decoded.empty());
+
+    framed.back() ^= 1;  // invalid checksum after plaintext has been produced
+    crypto::SecureBytes secure_output;
+    crypto::detail::reset_wipe_observations_for_tests();
+    CHECK_FALSE(chunk_codec::decode_frame(framed, secure_output));
+    CHECK(secure_output.empty());
+    CHECK(crypto::detail::wiping_deallocation_count() > 0);
+    CHECK(crypto::detail::all_wipe_observations_zero_for_tests());
+}
+
 // Regression test for a real crash: std::vector<uint8_t>::resize() can throw
 // (bad_alloc / length_error) on allocation failure. Both resize_buf overloads
 // are noexcept, so an uncaught throw there calls std::terminate() and kills
