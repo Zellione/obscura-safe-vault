@@ -416,7 +416,7 @@ void start_transfer_focused(GalleryGrid& g)
     g.transfer_had_exclusive_ = true;
     const int s = g.nav_.selected();
     if (s < 0 || s >= static_cast<int>(g.children_.size())) {
-        g.transfer_.open_pull(g.nav_.path());
+        open_pull_transfer(g.transfer_, g.nav_.path());
         return;
     }
     const vault::IndexNode* node = g.children_[s];

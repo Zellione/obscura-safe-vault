@@ -38,7 +38,7 @@ void pull_into_empty_gallery(const std::string& target, int& _failures)
         gfx::Window window;
         ui::TransferDialog dialog(destination, (dir / "destination.osv").string(),
                                   registry, files, window, nullptr);
-        dialog.open_pull(target);
+        ui::open_pull_transfer(dialog, target);
         CHECK(dialog.active());
         press(dialog, SDLK_RETURN, _failures); // Copy (default).
         press(dialog, SDLK_RETURN, _failures); // Source vault; destination must be excluded.
@@ -84,11 +84,11 @@ TEST(transfer_dialog_empty_pull_can_cancel_and_reopen)
     platform::FileDialog files;
     gfx::Window window;
     ui::TransferDialog dialog(vault, "", registry, files, window, nullptr);
-    dialog.open_pull("");
+    ui::open_pull_transfer(dialog, "");
     press(dialog, SDLK_ESCAPE, _failures);
     CHECK(!dialog.active());
     CHECK(!dialog.job_active());
-    dialog.open_pull("Destination");
+    ui::open_pull_transfer(dialog, "Destination");
     CHECK(dialog.active());
     press(dialog, SDLK_ESCAPE, _failures);
     CHECK(!dialog.active());

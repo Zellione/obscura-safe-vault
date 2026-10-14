@@ -27,6 +27,9 @@ struct TransferCompletion {
     std::vector<vault::TransferFailure> failures;
 };
 
+class TransferDialog;
+void open_pull_transfer(TransferDialog& dialog, std::string destination_gallery);
+
 // Modal that moves OR copies the grid's selected images / a gallery subtree to
 // another vault — or within the active vault (Phase 14 PR2/3/4). Stages: choose
 // Move/Copy -> pick a destination vault ("This vault" or a registry entry) ->
@@ -49,7 +52,7 @@ public:
     void open(std::string src_gallery, std::vector<std::string> filenames);
 
     // Pull into an empty browsed gallery without requiring a local source item.
-    void open_pull(std::string destination_gallery);
+    friend void open_pull_transfer(TransferDialog& dialog, std::string destination_gallery);
 
     // Activate to move a whole GALLERY subtree (`src_gallery`, a gallery path).
     void open_gallery(std::string src_gallery);
