@@ -462,7 +462,11 @@ nothing persists to the vault file.
 
 ## Pull transfers (Phase 75)
 
-`M` opens the transfer dialog with a **Direction** stage when the host provided a
+In an empty gallery (including an empty vault root), `M` opens **Pull from another
+vault** directly at Mode, with **Copy** selected by default. No local selection
+is required; the browsed gallery is the destination.
+
+With a local item available, `M` opens the transfer dialog with a **Direction** stage when the host provided a
 browse context (the gallery grid calls `set_current_gallery(nav path)` before every
 open; collection screens do not, so they keep the push-only dialog): *To another
 vault* (the unchanged push flow) / *From another vault* (pull). Pull stages:

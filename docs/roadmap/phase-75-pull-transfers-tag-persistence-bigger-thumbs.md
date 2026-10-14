@@ -21,6 +21,19 @@ Three long-standing gaps, delivered as one phase (PR #183):
 
 ## What shipped
 
+### Empty-gallery pull follow-up
+
+`M` in an empty vault or gallery opens **Pull from another vault** directly at
+the Move/Copy choice, with **Copy** selected by default. Choose the source vault,
+unlock it, mark galleries with Space, and confirm with Enter. The currently
+browsed gallery is the destination. No placeholder item or selection is needed.
+
+When local items are available, `M` retains the existing To/From direction choice
+and focused-item/selection behavior. Import-queue exclusion and cancellation
+cleanup apply equally to empty-gallery pulls. Headless dialog regression tests
+exercise copying into empty root and nested destinations, source preservation,
+and cancellation/reopening.
+
 ### Pull transfers ("From another vault")
 
 - `M` (TransferDialog) opens with a new **Direction** stage when the host provides a

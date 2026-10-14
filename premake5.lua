@@ -464,6 +464,8 @@ project "osv_tests"
         "src/gfx/window.cpp",
         "src/ui/unlock_screen.cpp",
         "src/ui/vault_manager.cpp",
+        "src/ui/transfer_dialog.cpp",
+        "src/ui/vault_unlock_picker.cpp",
         "src/ui/unlock_logic.cpp",
         "src/ui/unlock_job.cpp",
         "src/ui/legacy_conversion_job.cpp",
