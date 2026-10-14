@@ -16,6 +16,10 @@ production facade benchmarks, and Linux-only cleanup. Validation is in progress.
 
 ## Phase index
 
+Directory creation picker follow-up: New Vault selects a parent folder and asks
+for a new `.osv` directory name before the password form. See the
+[Phase 114 follow-up](docs/roadmap/phase-114-directory-cutover.md#new-vault-picker-follow-up).
+
 Audio EOF follow-up: prevent repeated drain packets and diagnostics after playback
 ends; preserve buffered audio and reset EOF on seek/reopen. See the
 [Phase 103 follow-up](docs/roadmap/phase-103-audio-eagain.md#eof-follow-up).

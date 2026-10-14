@@ -2,6 +2,10 @@
 
 Pure SDL-free view/sort/model helpers, layout geometry, settings state, search infrastructure.
 
+- `new_vault_path.h` — new-directory UI preflight: validates one name component,
+  appends `.osv`, checks the parent, and rejects existing files/directories/links.
+  Does not create anything; exclusive creation remains the storage layer's job.
+
 ## Export & batch operations (refactored from old "Export" section)
 - `selection_model.*` — multi-select state for export AND batch ops (Phase 68:
   the same Space/Ctrl+A selection drives B favorite-toggle, X export, and M

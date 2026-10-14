@@ -56,6 +56,17 @@ Make directory vaults the default for newly created vaults only after feature pa
 
 New vaults default to v3; the measured performance budgets and full test/sanitizer/fuzz/crash suites pass; the security review has no unresolved high/medium issue; documentation reflects the directory model; legacy vaults still open read-only; and the owner has merged the cutover PR.
 
+## New vault picker follow-up
+
+The manager's New Vault action still used the legacy file-save picker after
+the directory cutover. It now opens a folder picker for the parent, then a name
+prompt that appends `.osv` and continues to the password form. No directory is
+created until Create is submitted. Empty/unsafe/overlong names, unavailable
+parents, and existing destinations (including dangling symlinks) are rejected.
+The storage layer retains exclusive directory creation as the final race guard.
+Regression tests cover folder-picker routing, name entry, cancellation, path
+validation, and navigation to the new child path.
+
 ## Audit correction
 
 The original benchmark below measures SQL repository operations, not facade

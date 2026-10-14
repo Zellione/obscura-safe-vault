@@ -23,10 +23,11 @@ public:
     // be polled by several handlers without one stealing another's result —
     // take_result(Purpose) only resolves for the matching kind.
     enum class Purpose { None, Vault, VaultDirectory, Images, Keyfile, Zip, TagList, TagJson,
-                         SaveKeyfile, SaveVault };
+                         SaveKeyfile, SaveVault, VaultParent };
 
     void open_vault(SDL_Window* parent);    // *.osv (single)
     void open_vault_directory(SDL_Window* parent); // v3 *.osv directory (single)
+    void open_vault_parent(SDL_Window* parent); // parent folder for a new v3 vault
     void open_images(SDL_Window* parent);    // common image types (multi)
     void open_keyfile(SDL_Window* parent);   // any file (single)
     void open_zip(SDL_Window* parent);       // *.zip / *.cbz (single)
@@ -58,6 +59,8 @@ private:
     St                       state_ = St::Idle;
     Purpose                  purpose_ = Purpose::None;
     std::vector<std::string> paths_;
+
+    decltype(&SDL_ShowOpenFolderDialog) vault_parent_picker_ = SDL_ShowOpenFolderDialog;
 
     friend struct FileDialogTestPeer;   // tests/platform/test_file_dialog.cpp
 };

@@ -191,8 +191,10 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
 ## platform/
 - `path_utf8.h` — pure-std UTF-8/path vocabulary (`utf8_to_path`,
   `path_to_utf8`, `path_to_utf8_generic`, `fopen_path`), includable from any module.
-- `paths.*`, `file_dialog.*` — config dirs, SDL file dialogs (`save_vault()`). Phase 111 adds
-  `open_vault_directory()` / `Purpose::VaultDirectory` for v3 roots. Each open is
+- `paths.*`, `file_dialog.*` — config dirs, SDL file dialogs.
+  `open_vault_parent()` / `Purpose::VaultParent` selects a parent directory for
+  the manager's new-vault name prompt; `save_vault()` remains the conversion destination picker.
+  `open_vault_directory()` / `Purpose::VaultDirectory` selects existing v3 roots. Each open is
   tagged with a `Purpose` + `take_result(Purpose)` so one shared dialog polled by two handlers
   (image pick vs zip import) can't steal each other's result. `Purpose::TagList` +
   `open_tag_list()` (.txt); `open_zip()`'s filter accepts `zip;cbz`. Externally-supplied paths

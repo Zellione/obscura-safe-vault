@@ -95,7 +95,9 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   (Shift+F). `B` toggles favorite on the focused grid tile / current viewer image; gold star
   badge on favorited tiles.
 - `vault_manager.*` — multi-vault home screen: lists known vaults from VaultRegistry;
-  open/create(save dialog)/remove/lock/select. Emits `NavKind::ToVaultManager`/`LockActive`/
+  open/create(parent-folder picker followed by name prompt)/remove/lock/select.
+  New names gain `.osv`; invalid names and existing destinations are rejected
+  before entering the password form. Escape cancels the prompt. Emits `NavKind::ToVaultManager`/`LockActive`/
   `ToUnlock(path)`/`ToGallery`. `C` emits `NavKind::ToSettings` (Phase 49; it opened the
   now-deleted ThemePicker before). **Phase 66:** a warm vault row shows an "unlocked · m:ss" or
   "unlocked · session" badge; selecting it promotes the warm handle to active with no password.

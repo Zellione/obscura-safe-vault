@@ -60,6 +60,10 @@ invent its own key handling.
 - Optional keyfile picker button (`SDL_ShowOpenFileDialog`).
 - Create New Vault: passphrase-strength meter; offer to generate a random
   passphrase (password is the genuine security boundary).
+- Vault manager New Vault (`N`): choose a parent folder, then enter a name.
+  Enter continues to the password form; Escape cancels. `.osv` is appended
+  automatically. Existing destinations and invalid names are rejected; the
+  directory is created only when the user submits Create with credentials.
 
 ## Vault migration offer (Phase 65)
 **Post-unlock, before the gallery renders:** if the vault's migration watermark is
