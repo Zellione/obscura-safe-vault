@@ -16,6 +16,10 @@ production facade benchmarks, and Linux-only cleanup. Validation is in progress.
 
 ## Phase index
 
+Vault leakage/corruption audit follow-up: secure compression state, fail-closed
+metadata snapshots, pending-object GC protection, immutable published handles,
+and durable shard retries. See the [audit report](docs/audit/vault-leakage-corruption-2026-10.md).
+
 Legacy conversion destination follow-up: choose a parent folder for the converted
 `.osv` directory while keeping the original file unchanged. See the
 [Phase 114 follow-up](docs/roadmap/phase-114-directory-cutover.md#conversion-destination-picker-follow-up).

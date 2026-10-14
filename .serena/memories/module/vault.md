@@ -590,6 +590,13 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
 
 ## Directory audit remediation
 
+- Metadata snapshot traversal fails closed even when validation stops before a
+  SQLite call; the transaction rolls back rather than deleting unseen nodes.
+- Session GC excludes pending staged object IDs until attachment or session end.
+  Published `DurableFile` handles reject further writes; publication syncs the
+  objects directory even for existing shards to cover failed-sync retries.
+- Shared chunk compression uses miniz stream allocator callbacks backed by
+  `SecureAllocator`, locking and wiping internal dictionaries on every release.
 - Schema v2 migrates encrypted v1 databases transactionally under the writer lease.
   Durations are microseconds; sibling names are case-sensitive. Tags accept u16
   byte lengths with a per-node 4096 limit, preserving node spelling/order and

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <limits>
+#include <set>
 
 namespace vault::v3 {
 namespace {
@@ -411,8 +412,15 @@ GarbageCollectionResult ReadSession::garbage_collect(uint64_t grace_seconds) noe
                             : now - static_cast<int64_t>(grace_seconds);
     const auto staging = root_handle_.cleanup_staging(*session_lock_, cutoff);
     if (!staging) return {.status = RecoveryStatus::FilesystemError};
-    const auto report = reconcile_objects(root_handle_, *database_);
+    auto report = reconcile_objects(root_handle_, *database_);
     if (report.status != RecoveryStatus::Ok) return {.status = report.status};
+    // Publication precedes metadata attachment. These objects are live session
+    // state even though the durable database cannot reference them yet.
+    std::set<Id> pending;
+    for (const auto& object : staged_objects_)
+        pending.insert(object.object_id);
+    std::erase_if(report.garbage,
+                  [&pending](const auto& object) { return pending.contains(object.id); });
     auto result =
         collect_garbage(root_handle_, *session_lock_, *database_, report.garbage, grace_seconds);
     result.staging_removed = staging->removed;

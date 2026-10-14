@@ -145,6 +145,10 @@ TEST(v3_fs_stage_write_sync_publish_and_unlink)
     CHECK_TRUE(root->publish(*file, id));
     CHECK_TRUE(fs::exists(d.path / "a.osv" / object_relative_path(id)));
     CHECK_FALSE(root->publish(*file, id));
+    CHECK_FALSE(file->write_all(bytes));
+    auto published = root->open_object(id);
+    REQUIRE(published);
+    CHECK_EQ(published->size().value(), bytes.size());
     CHECK_TRUE(root->unlink_object(id));
     CHECK_FALSE(fs::exists(d.path / "a.osv" / object_relative_path(id)));
 }
@@ -166,6 +170,30 @@ TEST(v3_fs_parallel_publishers_cannot_claim_the_same_object)
     tb.join();
     CHECK_TRUE(won_a != won_b);
     CHECK_TRUE(root->validate_layout());
+}
+
+TEST(v3_fs_publish_retry_syncs_existing_shard_parent_before_rename)
+{
+    TempDir d("shard_retry");
+    auto root = VaultRoot::create(d.path / "a.osv");
+    REQUIRE(root);
+    auto file = root->create_staging_file();
+    REQUIRE(file);
+    const std::array<uint8_t, 4> bytes{1, 2, 3, 4};
+    REQUIRE(file->write_all(bytes));
+    REQUIRE(file->sync());
+    const auto id = id_from(0x6a);
+    inject_fs_fault(FsFault::DirectorySync);
+    CHECK_FALSE(root->publish(*file, id));
+    clear_fs_faults();
+    REQUIRE(fs::exists(d.path / "a.osv/objects/6a"));
+
+    // A failed parent sync leaves a visible but not necessarily durable shard.
+    inject_fs_fault(FsFault::DirectorySync);
+    CHECK_FALSE(root->publish(*file, id));
+    clear_fs_faults();
+    CHECK_FALSE(root->open_object(id).has_value());
+    CHECK_TRUE(root->publish(*file, id));
 }
 
 TEST(v3_fs_open_handle_is_not_redirected_when_root_name_is_replaced)

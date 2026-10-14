@@ -477,6 +477,9 @@ TEST(v3_unattached_staged_object_remains_readable_until_session_ends)
                                           bytes) == vault::v3::ReadStatus::Ok);
     REQUIRE(created.session->commit_metadata(created.session->root(), created.session->settings(),
                                              {}) == vault::v3::ReadStatus::Ok);
+    const auto pending_gc = created.session->garbage_collect(0);
+    CHECK(pending_gc.status == vault::v3::RecoveryStatus::Ok);
+    CHECK_EQ(pending_gc.deleted, 0U);
     crypto::SecureBytes abandoned_plain;
     CHECK(created.session->read_id(abandoned, vault::v3::ObjectRole::OriginalImage,
                                    abandoned_plain) == vault::v3::ReadStatus::Ok);
@@ -489,6 +492,7 @@ TEST(v3_unattached_staged_object_remains_readable_until_session_ends)
     REQUIRE(created.session->stage_object(live.node_id, vault::v3::ObjectRole::OriginalImage,
                                           static_cast<uint8_t>(live.meta.format),
                                           bytes) == vault::v3::ReadStatus::Ok);
+    CHECK_EQ(created.session->garbage_collect(0).deleted, 0U);
     root.children.push_back(live);
     REQUIRE(created.session->commit_metadata(root, created.session->settings(), {}) ==
             vault::v3::ReadStatus::Ok);
@@ -500,6 +504,10 @@ TEST(v3_unattached_staged_object_remains_readable_until_session_ends)
     REQUIRE(created.session->unlock(PASSWORD, {}) == vault::v3::ReadStatus::Ok);
     CHECK(created.session->read_id(abandoned, vault::v3::ObjectRole::OriginalImage,
                                    abandoned_plain) == vault::v3::ReadStatus::BadFormat);
+    CHECK_EQ(created.session->garbage_collect(0).deleted, 1U);
+    REQUIRE(created.session->read_id(live.node_id, vault::v3::ObjectRole::OriginalImage,
+                                     roundtrip) == vault::v3::ReadStatus::Ok);
+    CHECK_BYTES_EQ(roundtrip.as_span(), bytes);
 }
 
 TEST(v3_and_legacy_apply_the_same_user_visible_mutation_contract)

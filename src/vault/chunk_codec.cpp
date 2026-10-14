@@ -64,14 +64,51 @@ uint8_t* buf_data(crypto::WipingBytes& b) noexcept { return b.data(); }
 
 uint8_t* buf_data(crypto::SecureBytes& b) noexcept { return b.data(); }
 
+void* secure_codec_alloc(void*, size_t count, size_t size) noexcept
+{
+    if (size != 0 && count > std::numeric_limits<size_t>::max() / size) return nullptr;
+    try {
+        return crypto::SecureAllocator<uint8_t>{}.allocate(count * size);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void secure_codec_free(void*, void* allocation) noexcept
+{
+    crypto::SecureAllocator<uint8_t>{}.deallocate(static_cast<uint8_t*>(allocation), 0);
+}
+
+// miniz's convenience APIs allocate unwiped dictionaries containing plaintext.
+// Use its stream allocator hooks so even failed operations release secure state.
+bool transform(std::span<const uint8_t> input, std::span<uint8_t> output, bool compress,
+               size_t& produced) noexcept
+{
+    if (input.size() > UINT32_MAX || output.size() > UINT32_MAX) return false;
+    mz_stream stream{};
+    stream.next_in = input.data();
+    stream.avail_in = static_cast<mz_uint32>(input.size());
+    stream.next_out = output.data();
+    stream.avail_out = static_cast<mz_uint32>(output.size());
+    stream.zalloc = secure_codec_alloc;
+    stream.zfree = secure_codec_free;
+    const int initialized =
+        compress ? mz_deflateInit(&stream, MZ_DEFAULT_LEVEL) : mz_inflateInit(&stream);
+    if (initialized != MZ_OK) return false;
+    const int result = compress ? mz_deflate(&stream, MZ_FINISH) : mz_inflate(&stream, MZ_FINISH);
+    const bool complete = result == MZ_STREAM_END && stream.avail_in == 0;
+    produced = static_cast<size_t>(stream.total_out);
+    const int ended = compress ? mz_deflateEnd(&stream) : mz_inflateEnd(&stream);
+    return complete && ended == MZ_OK;
+}
+
 // Compress into `dst` (pre-sized to mz_compressBound). Returns compressed
 // length, or 0 when compression failed or did not win the >=5% threshold.
 size_t try_deflate(std::span<const uint8_t> payload, std::span<uint8_t> dst) noexcept
 {
     if (payload.empty() || payload.size() > MZ_LEN_MAX) return 0;
-    auto comp_len = static_cast<mz_ulong>(dst.size());
-    if (mz_compress2(dst.data(), &comp_len, payload.data(),
-                     static_cast<mz_ulong>(payload.size()), MZ_DEFAULT_LEVEL) != MZ_OK) {
+    size_t comp_len = 0;
+    if (!transform(payload, dst, true, comp_len)) {
         return 0;
     }
     // Store-if-smaller: framed deflate must be <= 95% of framed raw.
@@ -134,10 +171,10 @@ bool decode_impl(std::span<const uint8_t> framed, Buf& out) noexcept
     if (orig_len > MZ_LEN_MAX || orig_len == 0) return false;
 
     if (!resize_buf(out, static_cast<size_t>(orig_len))) return false;
-    auto dst_len = static_cast<mz_ulong>(orig_len);
-    if (auto src_len = static_cast<mz_ulong>(comp_len);
-        mz_uncompress2(buf_data(out), &dst_len, framed.data() + DEFLATE_HDR, &src_len) != MZ_OK ||
-        dst_len != static_cast<mz_ulong>(orig_len) || src_len != static_cast<mz_ulong>(comp_len)) {
+    size_t dst_len = 0;
+    if (!transform(framed.subspan(DEFLATE_HDR), {buf_data(out), static_cast<size_t>(orig_len)},
+                   false, dst_len) ||
+        dst_len != orig_len) {
         (void)resize_buf(out, 0);  // SecureBytes: wipes the partial plaintext
         return false;
     }

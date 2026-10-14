@@ -732,8 +732,12 @@ DbStatus Database::sync_metadata(const IndexNode& root,          // NOSONAR cpp:
         "sort_key=excluded.sort_key,animated=excluded.animated"};
     if (status == Ok && (!live.get() || !upsert.get())) status = IoError;
     if (MetadataNodeWriter node_writer{live, upsert};
-        status == Ok && !node_writer.store(root, nullptr, 0))
+        status == Ok && !node_writer.store(root, nullptr, 0)) {
         status = map_status(sqlite3_extended_errcode(handle_));
+        // Validation can fail before SQLite is called. Its previous successful
+        // step must never turn a partial live-node set into a committed deletion.
+        if (status == Ok) status = InvalidArgument;
+    }
     if (status == Ok)
         status =
             exec(handle_,

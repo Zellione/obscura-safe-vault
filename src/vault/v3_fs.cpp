@@ -155,9 +155,11 @@ bool ensure_shard(int objects_fd, std::string_view shard, int& shard_fd) noexcep
     std::string name{shard};
     if (::mkdirat(objects_fd, name.c_str(), 0700) == 0) {
         if (::fchmodat(objects_fd, name.c_str(), 0700, AT_SYMLINK_NOFOLLOW) != 0) return false;
-        if (!sync_dir(objects_fd)) return false;
     } else if (errno != EEXIST)
         return false;
+    // EEXIST may follow a prior failed directory sync. Visibility alone does
+    // not prove that the shard's entry will survive a crash.
+    if (!sync_dir(objects_fd)) return false;
     shard_fd = open_child(objects_fd, name.c_str(), O_RDONLY | O_DIRECTORY);
     return shard_fd >= 0 && owned_mode(shard_fd, S_IFDIR, 0700, false);
 }
@@ -405,6 +407,7 @@ void DurableFile::close() noexcept
 }
 bool DurableFile::write_all(std::span<const uint8_t> bytes) noexcept
 {
+    if (!valid() || published_) return false;
     synced_ = false;
     size_t off = 0;
     while (off < bytes.size()) {

@@ -309,3 +309,27 @@ TEST(v3_db_tag_limit_is_per_node_and_failed_sync_rolls_back)
     opened.database.reset();
     fs::remove_all(dir);
 }
+
+TEST(v3_db_invalid_snapshot_preserves_committed_tree)
+{
+    const auto dir = db_temp_dir();
+    const auto path = dir / "vault.db";
+    auto opened = vault::v3::Database::create(path, DB_KEY, ROOT_ID);
+    REQUIRE(opened.database);
+    auto root = vault::IndexNode::gallery("");
+    root.node_id = ROOT_ID;
+    root.children.push_back(vault::IndexNode::gallery("retained"));
+    root.children.back().node_id = CHILD_ID;
+    REQUIRE(opened.database->sync_metadata(root, {}, {}) == vault::v3::DbStatus::Ok);
+    const auto generation = opened.database->settings().value.app_generation;
+    root.children.insert(root.children.begin(), vault::IndexNode::gallery("invalid"));
+    root.children.front().node_id = {};
+    CHECK(opened.database->sync_metadata(root, {}, {}) != vault::v3::DbStatus::Ok);
+    opened.database.reset();
+    auto reopened = vault::v3::Database::open(path, DB_KEY, false);
+    REQUIRE(reopened.database);
+    CHECK(reopened.database->find_node(CHILD_ID).value.has_value());
+    CHECK_EQ(reopened.database->settings().value.app_generation, generation);
+    reopened.database.reset();
+    fs::remove_all(dir);
+}
