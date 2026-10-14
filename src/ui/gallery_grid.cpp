@@ -410,16 +410,16 @@ void GalleryGrid::start_export()
 // complexity (S3776) down.
 void start_transfer_focused(GalleryGrid& g)
 {
-    const int s = g.nav_.selected();
-    if (s < 0 || s >= static_cast<int>(g.children_.size())) {
-        g.error_ = "Nothing to move.";
-        return;
-    }
-    const vault::IndexNode* node = g.children_[s];
     g.error_.clear();
     // Phase 50: acquire exclusive before opening transfer dialog
     g.queue_.set_exclusive(true);
     g.transfer_had_exclusive_ = true;
+    const int s = g.nav_.selected();
+    if (s < 0 || s >= static_cast<int>(g.children_.size())) {
+        g.transfer_.open_pull(g.nav_.path());
+        return;
+    }
+    const vault::IndexNode* node = g.children_[s];
     g.transfer_.set_current_gallery(g.nav_.path());
     if (node->is_gallery()) {
         const std::string path = g.nav_.path().empty()

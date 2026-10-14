@@ -16,6 +16,10 @@ production facade benchmarks, and Linux-only cleanup. Validation is in progress.
 
 ## Phase index
 
+Empty-gallery transfer follow-up: `M` can pull from another vault into an empty
+vault or gallery, defaulting to Copy. See the
+[Phase 75 follow-up](docs/roadmap/phase-75-pull-transfers-tag-persistence-bigger-thumbs.md#empty-gallery-pull-follow-up).
+
 Directory creation picker follow-up: New Vault selects a parent folder and asks
 for a new `.osv` directory name before the password form. See the
 [Phase 114 follow-up](docs/roadmap/phase-114-directory-cutover.md#new-vault-picker-follow-up).

@@ -79,6 +79,16 @@ void TransferDialog::open(std::string src_gallery, std::vector<std::string> file
     SDL_StartTextInput(win_.sdl_window());
 }
 
+void TransferDialog::open_pull(std::string destination_gallery)
+{
+    set_current_gallery(std::move(destination_gallery));
+    open("", {});
+    // There is nothing local to push. Start with the non-destructive pull action.
+    pull_.active = true;
+    stage_ = Stage::Mode;
+    mode_ = vault::TransferMode::Copy;
+}
+
 void TransferDialog::open_gallery(std::string src_gallery)
 {
     open("", {});                  // reuse open() to reset all state + direction state

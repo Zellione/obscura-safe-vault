@@ -48,6 +48,9 @@ public:
     // Activate to move `filenames` (image names within `src_gallery`).
     void open(std::string src_gallery, std::vector<std::string> filenames);
 
+    // Pull into an empty browsed gallery without requiring a local source item.
+    void open_pull(std::string destination_gallery);
+
     // Activate to move a whole GALLERY subtree (`src_gallery`, a gallery path).
     void open_gallery(std::string src_gallery);
 
