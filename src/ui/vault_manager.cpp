@@ -211,7 +211,7 @@ void VaultManager::render_new_vault_name(gfx::Renderer& r)
 {
     using namespace gfx::theme;
     const float width = static_cast<float>(win_.width()) - 120.0f;
-    const float pitch = static_cast<float>(line_pitch(font_.pixel_height()));
+    const auto pitch = line_pitch(font_.pixel_height());
     const float top = 120.0f;
     r.draw_round_rect({40.0f, top - 20.0f, width + 40.0f, 6 * pitch + 80.0f},
                       RADIUS, SURFACE);

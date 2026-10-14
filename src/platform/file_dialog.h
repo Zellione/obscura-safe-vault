@@ -60,7 +60,7 @@ private:
     Purpose                  purpose_ = Purpose::None;
     std::vector<std::string> paths_;
 
-    decltype(&SDL_ShowOpenFolderDialog) vault_parent_picker_ = SDL_ShowOpenFolderDialog;
+    decltype(&SDL_ShowOpenFolderDialog) vault_parent_picker_ = &SDL_ShowOpenFolderDialog;
 
     friend struct FileDialogTestPeer;   // tests/platform/test_file_dialog.cpp
 };
