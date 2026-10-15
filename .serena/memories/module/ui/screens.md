@@ -21,7 +21,12 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   no mandatory upgrade. The conversion form clears source credentials and requires its own
   destination/password/keyfile policy. Destination folder opens the parent-folder picker
   and displays `<source-stem>-converted.osv` inside it; cancellation keeps the prior path.
-  The original file is preserved by copy-based conversion.
+  The original file is preserved by copy-based conversion. A dedicated compact conversion
+  form groups destination, new-vault password/confirmation, and optional keyfile actions
+  (existing/create/none); it shows the selected keyfile path and resume guidance.
+  `unlock_logic.*` provides pure font-derived conversion geometry and distinct report-to-error
+  messages, including required MiB for space/access failures. Mouse clicks select password
+  fields; wheel scrolling keeps the form reachable in short windows.
   Escape from the idle form returns to the choice;
   worker cancellation completes before browsing is allowed. A verified conversion promotes
   the destination; read-only browsing retains the source path. Screen event regression tests

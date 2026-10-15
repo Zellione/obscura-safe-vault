@@ -2,6 +2,7 @@
 
 #include <monocypher.h>
 
+#include <algorithm>
 #include <format>
 #include <optional>
 #include <system_error>
@@ -89,6 +90,20 @@ UnlockScreen::Layout UnlockScreen::layout() const
     const float bh = 44.0f;
     const float gap = 16.0f;
     const float row = H - 140.0f;
+    if (conversion_mode_) {
+        const auto form = conversion_form_layout(W, font_.pixel_height(), conversion_scroll_);
+        const float step = form.step;
+        const float third = std::max(1.0f, (form.width - 32) / 3);
+        return Layout{
+            .keyfile_btn = {60, form.row(10), third, step - 8},
+            .other_btn = {60, form.row(3), std::min(340.0f, form.width), step - 8},
+            .mode_btn = {60 + 2 * (third + 16), form.row(10), third, step - 8},
+            .submit_btn = {60, form.row(13), std::min(300.0f, form.width), step - 8},
+            .generate_btn = {60, form.row(8), std::min(340.0f, form.width), step - 8},
+            .new_keyfile_btn = {60 + third + 16, form.row(10), third, step - 8},
+            .copy_btn = {},
+        };
+    }
     return Layout{
         .keyfile_btn  = {60.0f,                  row, bw, bh},
         .other_btn    = {60.0f + (bw + gap),     row, bw, bh},
@@ -100,8 +115,33 @@ UnlockScreen::Layout UnlockScreen::layout() const
     };
 }
 
+bool UnlockScreen::handle_conversion_input(const SDL_Event& e)
+{
+    if (conversion_mode_) {
+        const auto form = conversion_form_layout(static_cast<float>(win_.width()),
+                                                 font_.pixel_height(), conversion_scroll_);
+        if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+            const float max_scroll =
+                std::max(0.0f, 24 + 19 * form.step - static_cast<float>(win_.height()));
+            conversion_scroll_ =
+                std::clamp(conversion_scroll_ - e.wheel.y * form.step, 0.0f, max_scroll);
+            mark_dirty();
+            return true;
+        }
+        if (!conversion_job_.active() && e.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+            e.button.button == SDL_BUTTON_LEFT) {
+            if (point_in_rect(e.button.x, e.button.y, form.password_field(false)))
+                password_.focus = 0;
+            if (point_in_rect(e.button.x, e.button.y, form.password_field(true)))
+                password_.focus = 1;
+        }
+    }
+    return false;
+}
+
 void UnlockScreen::handle_event(const SDL_Event& e)
 {
+    if (handle_conversion_input(e)) return;
     if (handle_blocking_event(e)) return;
     if (handle_legacy_choice(e)) return;
     if (handle_text_event(e)) return;
@@ -238,7 +278,10 @@ void UnlockScreen::handle_click(const SDL_MouseButtonEvent& b)
 
     const Layout L = layout();
     const SDL_FPoint p{b.x, b.y};
-    if (!conversion_mode_ && point_in_rect(p.x, p.y, L.mode_btn)) {
+    if (conversion_mode_ && point_in_rect(p.x, p.y, L.mode_btn)) {
+        keyfile_path_.clear();
+        error_.clear();
+    } else if (!conversion_mode_ && point_in_rect(p.x, p.y, L.mode_btn)) {
         create_mode_ = !create_mode_;
         password_.focus = 0;
         error_.clear();
@@ -269,7 +312,7 @@ void UnlockScreen::handle_click(const SDL_MouseButtonEvent& b)
         }
     } else if (point_in_rect(p.x, p.y, L.submit_btn)) {
         submit();
-    } else if (point_in_rect(p.x, p.y, L.copy_btn)) {
+    } else if (!conversion_mode_ && point_in_rect(p.x, p.y, L.copy_btn)) {
         copy_password_to_clipboard();
     }
 }
@@ -334,11 +377,10 @@ void UnlockScreen::update(double dt)
     if (auto converted = conversion_job_.take_outcome()) {
         conversion_report_ = *converted;
         if (converted->status != vault::LegacyConversionStatus::Ok)
-            error_ = converted->status == vault::LegacyConversionStatus::Cancelled
-                         ? "Conversion cancelled. Progress can be resumed."
-                         : "Conversion failed verification or I/O checks.";
+            error_ = conversion_error_message(*converted);
         password_.pw.clear();
         password_.confirm.clear();
+        password_.reveal = false;
         mark_dirty();
     }
 
@@ -478,6 +520,10 @@ void UnlockScreen::render(gfx::Renderer& r)
         render_legacy_choice(r);
         return;
     }
+    if (conversion_mode_) {
+        render_conversion(r);
+        return;
+    }
     using namespace gfx::theme;
     const auto W = static_cast<float>(win_.width());
     const auto H = static_cast<float>(win_.height());
@@ -488,38 +534,128 @@ void UnlockScreen::render(gfx::Renderer& r)
         draw_button(r, font_, {rect, fit_text(font_, label, rect.w - 24)}, s.hover, s.active);
     };
 
-    std::string_view title = "Unlock Vault";
-    if (conversion_mode_)
-        title = "Convert Legacy Vault";
-    else if (create_mode_)
-        title = "Create Vault";
-    r.draw_text(font_, 60, 44, title, TEXT);
-    r.draw_text(
-        font_, 60, 92,
-        fit_text(font_,
-                 (conversion_mode_ ? "Source: " : "Vault: ") + platform::path_to_utf8(vault_path_),
-                             W - 120),
-                    TEXT_DIM);
-    if (conversion_mode_ && !destination_path_.empty())
-        r.draw_text(
-            font_, 60, 112,
-            fit_text(font_, "Destination: " + platform::path_to_utf8(destination_path_), W - 120),
-            TEXT_DIM);
+    r.draw_text(font_, 60, 44, create_mode_ ? "Create Vault" : "Unlock Vault", TEXT);
+    r.draw_text(font_, 60, 92,
+                fit_text(font_, "Vault: " + platform::path_to_utf8(vault_path_), W - 120),
+                TEXT_DIM);
 
     render_credentials(r, W);
 
     const Layout L = layout();
     btn(L.keyfile_btn, keyfile_path_.empty() ? "Keyfile: none" : "Keyfile: set");
-    btn(L.other_btn, conversion_mode_ ? "Destination folder..." : "Open other...");
-    if (!conversion_mode_) btn(L.mode_btn, create_mode_ ? "Have a vault?" : "New vault?");
-    std::string_view submit_label = "Unlock";
-    if (conversion_mode_)
-        submit_label = "Convert";
-    else if (create_mode_)
-        submit_label = "Create";
-    btn(L.submit_btn, submit_label);
+    btn(L.other_btn, "Open other...");
+    btn(L.mode_btn, create_mode_ ? "Have a vault?" : "New vault?");
+    btn(L.submit_btn, create_mode_ ? "Create" : "Unlock");
     btn(L.copy_btn, "Copy");
     render_status(r, W, H);
+}
+
+void UnlockScreen::render_conversion(gfx::Renderer& r)
+{
+    using namespace gfx::theme;
+    const auto form = conversion_form_layout(static_cast<float>(win_.width()), font_.pixel_height(),
+                                             conversion_scroll_);
+    const float width = form.width;
+    const auto y = [&form](float row) { return form.row(row); };
+    const auto text = [&](float row, std::string_view label, gfx::Color color) {
+        r.draw_text(font_, 60, y(row), fit_text(font_, label, width), color);
+    };
+    const auto button = [&](const SDL_FRect& rect, std::string_view label) {
+        const auto state = button_state(rect, mouse_.x, mouse_.y, mouse_.down);
+        draw_button(r, font_, {rect, fit_text(font_, label, rect.w - 24)}, state.hover,
+                    state.active);
+    };
+    text(0, "Convert a copy of your vault", TEXT);
+    text(1, "The source is already unlocked. Conversion leaves the original unchanged.", TEXT_DIM);
+    text(2, "Source: " + platform::path_to_utf8(vault_path_), TEXT_DIM);
+    const auto L = layout();
+    button(L.other_btn, "Choose destination...");
+    text(4,
+         destination_path_.empty() ? "New vault: choose a parent folder above."
+                                   : "New vault: " + platform::path_to_utf8(destination_path_),
+         TEXT_DIM);
+    text(5, "Choose credentials for the new vault. They may differ from the source.", TEXT);
+    const float field_width = (width - 24) / 2;
+    r.draw_text(font_, 60, y(6), fit_text(font_, "New vault password", field_width), TEXT_DIM);
+    r.draw_text(font_, 84 + field_width, y(6), fit_text(font_, "Confirm new password", field_width),
+                TEXT_DIM);
+    const SDL_FRect password_rect = form.password_field(false);
+    const SDL_FRect confirm_rect = form.password_field(true);
+    draw_edit_field(r, font_, password_rect, password_.pw, password_.pw_chrome,
+                    password_.focus == 0, true);
+    draw_edit_field(r, font_, confirm_rect, password_.confirm, password_.confirm_chrome,
+                    password_.focus == 1, true);
+    button(L.generate_btn, "Generate passphrase");
+    if (!password_.pw.empty()) {
+        const auto strength = classify_strength(password_.pw.bytes());
+        r.draw_text(
+            font_, 420, y(8),
+            fit_text(font_, std::format("Strength: {}", strength_label(strength)), width - 360),
+            strength_color(strength));
+    }
+    text(9, "New vault keyfile (optional): choose an existing file or create one.", TEXT);
+    button(L.keyfile_btn, "Use existing file...");
+    button(L.new_keyfile_btn, "Create keyfile...");
+    button(L.mode_btn, "Use none");
+    text(11,
+         keyfile_path_.empty() ? "No keyfile: the new vault will require only its password."
+                               : "Required to open the new vault: " + keyfile_path_,
+         TEXT_DIM);
+    if (password_.reveal && !password_.pw.empty())
+        text(12, password_.pw.text_view(), OK);
+    else
+        text(12, "Resuming? Use the same destination, password and keyfile as the first attempt.",
+             TEXT_DIM);
+    button(L.submit_btn, "Convert copy");
+    render_conversion_status(r);
+}
+
+void UnlockScreen::render_conversion_status(gfx::Renderer& r)
+{
+    using namespace gfx::theme;
+    const auto form = conversion_form_layout(static_cast<float>(win_.width()), font_.pixel_height(),
+                                             conversion_scroll_);
+    const float width = form.width;
+    const auto text = [&](float row, std::string_view label, gfx::Color color) {
+        r.draw_text(font_, 60, form.row(row), fit_text(font_, label, width), color);
+    };
+    if (conversion_job_.active())
+        text(14,
+             std::format("Converting... {} / {}. Esc cancels safely.",
+                         conversion_job_.progress().done.load(),
+                         conversion_job_.progress().total.load()),
+             TEXT_DIM);
+    else if (conversion_report_ &&
+             conversion_report_->status == vault::LegacyConversionStatus::Ok) {
+        text(14, "Copy verified. Original preserved. Press Enter to open the new vault.", OK);
+        text(15, "Back up and test the new vault before deleting the original.", TEXT_DIM);
+        text(16,
+             std::format("Copied {} galleries, {} images and {} videos.",
+                         conversion_report_->galleries, conversion_report_->images,
+                         conversion_report_->videos),
+             TEXT_DIM);
+        if (conversion_report_->missing_derived)
+            text(17,
+                 std::format("{} source thumbnails/posters were absent; originals are intact.",
+                             conversion_report_->missing_derived),
+                 WARN);
+    } else if (!error_.empty()) {
+        // Keep both the cause and recovery instruction visible, rather than
+        // eliding the middle of the diagnostic on smaller windows.
+        std::string_view remaining = error_;
+        for (float row = 14; !remaining.empty() && row < 18; ++row) {
+            size_t end = remaining.size();
+            while (end > 0 && static_cast<float>(font_.measure(remaining.substr(0, end))) > width) {
+                const auto space = remaining.rfind(' ', end - 1);
+                if (space == std::string_view::npos) break;
+                end = space;
+            }
+            text(row, remaining.substr(0, end), DANGER);
+            remaining.remove_prefix(end);
+            while (remaining.starts_with(' '))
+                remaining.remove_prefix(1);
+        }
+    }
 }
 
 void UnlockScreen::render_credentials(gfx::Renderer& r, float width)
@@ -530,8 +666,8 @@ void UnlockScreen::render_credentials(gfx::Renderer& r, float width)
     const float fh = 44;
     r.draw_text(font_, fx, 126, "Password", TEXT_DIM);
     draw_edit_field(r, font_, {fx, 160, fw, fh}, password_.pw, password_.pw_chrome,
-                    (!create_mode_ && !conversion_mode_) || password_.focus == 0, /*mask*/ true);
-    if (create_mode_ || conversion_mode_) {
+                    !create_mode_ || password_.focus == 0, /*mask*/ true);
+    if (create_mode_) {
         r.draw_text(font_, fx, 226, "Confirm", TEXT_DIM);
         draw_edit_field(r, font_, {fx, 260, fw, fh}, password_.confirm, password_.confirm_chrome,
                         password_.focus == 1, /*mask*/ true);
@@ -555,47 +691,16 @@ void UnlockScreen::render_credentials(gfx::Renderer& r, float width)
         if (password_.reveal && !password_.pw.empty()) {
             // string_view straight over the mlock'd buffer — no unlocked copy.
             r.draw_text(font_, fx, 372, fit_text(font_, password_.pw.text_view(), fw), OK);
-            r.draw_text(font_, fx, 398,
-                        conversion_mode_ ? "Write this down, then press Convert."
-                                         : "Write this down, then press Create.",
-                        TEXT_DIM);
-        }
+            r.draw_text(font_, fx, 398, "Write this down, then press Create.", TEXT_DIM);
         }
     }
+}
 
 void UnlockScreen::render_status(gfx::Renderer& r, float width, float height)
 {
     using namespace gfx::theme;
-    if (conversion_report_ && conversion_report_->status == vault::LegacyConversionStatus::Ok) {
-        const auto& report = *conversion_report_;
-        r.draw_text(font_, 60, 430,
-                    std::format("Converted {} galleries, {} images, {} videos · {} original bytes",
-                                report.galleries, report.images, report.videos,
-                                report.original_bytes),
-                    OK);
-        r.draw_text(font_, 60, 458, "Deep verification, logical digests, and cold reopen passed.",
-                    OK);
-        r.draw_text(
-            font_, 60, 486,
-            fit_text(font_, "New vault: " + platform::path_to_utf8(destination_path_), width - 120),
-                    TEXT_DIM);
-        if (report.missing_derived != 0)
-            r.draw_text(
-                font_, 60, 514,
-                std::format(
-                    "Warning: {} source thumbnails/posters were absent; originals are intact.",
-                                    report.missing_derived),
-                        WARN);
-        r.draw_text(
-            font_, 60, report.missing_derived == 0 ? 514 : 542,
-                    "Back up and manually test the new vault before deleting the source. Press Enter.",
-                    TEXT_DIM);
-    } else if (conversion_job_.active()) {
-        const auto done = conversion_job_.progress().done.load();
-        const auto total = conversion_job_.progress().total.load();
-        r.draw_text(font_, 60, height - 70,
-                    std::format("Converting… {} / {} · Esc cancels safely", done, total), TEXT_DIM);
-    } else if (job_.active()) {
+    (void)width;
+    if (job_.active()) {
         // KDF in flight: input is swallowed (handle_event) until the worker
         // hands back its outcome, so tell the user why nothing reacts.
         r.draw_text(font_, 60, height - 70,
@@ -612,13 +717,17 @@ std::vector<ui::HelpGroup> UnlockScreen::help_groups() const
                  {{"Enter", "Open read-only"},
                   {"C", "Convert a copy"},
                   {"Esc", "Back to vault manager"}}}};
-    return {{conversion_mode_ ? "Legacy conversion" : "Unlock",
-             {
-                 {"Tab", "Switch password field"},
-                 {"Enter", "Submit"},
-                 {"Esc", conversion_mode_ ? "Back to read-only choice" : "Back to vault manager"},
-             }},
-            text_editing_help_group()};
+    std::vector<ui::HelpGroup> groups{
+        {conversion_mode_ ? "Legacy conversion" : "Unlock",
+         {
+             {"Tab", "Switch password field"},
+             {"Enter", "Submit"},
+             {"Esc", conversion_mode_ ? "Back to read-only choice" : "Back to vault manager"},
+         }},
+        text_editing_help_group()};
+    if (conversion_mode_)
+        groups.front().entries.push_back({"Mouse wheel", "Scroll conversion form"});
+    return groups;
 }
 
 } // namespace ui

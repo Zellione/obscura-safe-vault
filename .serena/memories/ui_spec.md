@@ -565,3 +565,14 @@ metadata; cleanup never changes explicit edits. Empty results are skipped.
 
 ## Tag rename (Phase 118)
 In tag administration, R opens the selected tag name for editing; Enter saves globally and Esc cancels. Case-only changes work; existing target tags are rejected. Description, fields, and saved-search tag clauses follow the rename. A category change must preserve existing fields. On success, clear the prefix filter and focus the renamed row. Read-only legacy vaults cannot rename tags.
+
+## Legacy conversion form
+
+Conversion uses a dedicated form, separate from ordinary unlock/create. Explain
+that the source is already unlocked and remains unchanged. Group the destination
+folder picker with the resulting new-vault path; label credentials as new-vault
+password/confirmation. Group optional keyfile actions (use existing, create,
+use none) and show the selected path plus the requirement for future unlocks.
+Explain that resume uses the original destination credentials. Use font-derived
+rows, bounded field widths, clickable password focus and wheel scrolling. Show
+specific conversion errors and required free MiB instead of a generic failure.

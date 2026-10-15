@@ -1,9 +1,30 @@
 #pragma once
 
+#include <SDL3/SDL.h>
 #include <cstdint>
 #include <span>
+#include <string>
+
+namespace vault {
+struct LegacyConversionReport;
+}
 
 namespace ui {
+
+struct ConversionFormLayout {
+    float width;
+    float step;
+    float top;
+    [[nodiscard]] float row(float index) const noexcept
+    {
+        return top + index * step;
+    }
+    [[nodiscard]] SDL_FRect password_field(bool confirm) const noexcept;
+};
+[[nodiscard]] ConversionFormLayout conversion_form_layout(float window_width, float font_px,
+                                                          float scroll = 0) noexcept;
+
+[[nodiscard]] std::string conversion_error_message(const vault::LegacyConversionReport& report);
 
 enum class SubmitAction { None, Unlock, Create };
 

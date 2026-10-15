@@ -4,6 +4,7 @@
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/vault_registry.h"
+#include "ui/unlock_logic.h"
 #include "ui/unlock_screen.h"
 #include "ui/vault_manager.h"
 #include "vault/vault.h"
@@ -55,9 +56,27 @@ struct UnlockScreenTestPeer {
         SDL_Event event{};
         event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
         event.button.button = SDL_BUTTON_LEFT;
-        event.button.x = button.x + 1;
-        event.button.y = button.y + 1;
+        event.button.x = button.x + button.w / 2;
+        event.button.y = button.y + button.h / 2;
         screen.handle_event(event);
+    }
+    static bool check_conversion_controls(UnlockScreen& screen)
+    {
+        screen.conversion_mode_ = true;
+        screen.keyfile_path_ = "/tmp/test-keyfile";
+        auto button = screen.layout().mode_btn;
+        SDL_Event event{};
+        event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+        event.button.button = SDL_BUTTON_LEFT;
+        event.button.x = button.x + button.w / 2;
+        event.button.y = button.y + button.h / 2;
+        screen.handle_event(event);
+        const bool cleared = screen.keyfile_path_.empty();
+        const auto field = conversion_form_layout(0, 0).password_field(true);
+        event.button.x = field.x + field.w / 2;
+        event.button.y = field.y + field.h / 2;
+        screen.handle_event(event);
+        return cleared && screen.password_.focus == 1;
     }
     static const std::filesystem::path& destination(const UnlockScreen& screen)
     {
@@ -332,4 +351,14 @@ TEST(file_dialog_zip_multi_select)
     CHECK(std::filesystem::path(zip->at(0)) == std::filesystem::path("/tmp/a.zip"));
     CHECK(std::filesystem::path(zip->at(1)) == std::filesystem::path("/tmp/b.cbz"));
     CHECK(std::filesystem::path(zip->at(2)) == std::filesystem::path("/tmp/c.7z"));
+}
+
+TEST(legacy_conversion_can_remove_optional_keyfile_and_click_confirmation)
+{
+    gfx::Window window;
+    gfx::FontAtlas font;
+    vault::Vault vault;
+    FileDialog dialog;
+    ui::UnlockScreen screen(window, font, vault, dialog, "/tmp/source.osv");
+    CHECK(ui::UnlockScreenTestPeer::check_conversion_controls(screen));
 }

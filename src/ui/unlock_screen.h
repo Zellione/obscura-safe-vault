@@ -51,8 +51,11 @@ private:
     };
     [[nodiscard]] Layout layout() const;
     bool handle_blocking_event(const SDL_Event& e);
+    bool handle_conversion_input(const SDL_Event& e);
     bool handle_legacy_choice(const SDL_Event& e);
     void render_legacy_choice(gfx::Renderer& r);
+    void render_conversion(gfx::Renderer& r);
+    void render_conversion_status(gfx::Renderer& r);
     bool handle_text_event(const SDL_Event& e);
     void handle_click(const SDL_MouseButtonEvent& b);
     void render_credentials(gfx::Renderer& r, float width);
@@ -73,6 +76,7 @@ private:
     bool                  create_mode_;
     bool legacy_choice_ = false;
     bool                  conversion_mode_ = false;
+    float conversion_scroll_ = 0;
 
     // Password input state
     struct PasswordInput {
