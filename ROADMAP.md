@@ -164,6 +164,7 @@ ends; preserve buffered audio and reset EOF on seek/reopen. See the
 | 115 | Legacy one-file vault converter | ✅ | Authenticated legacy vaults enter an explicit copy-only conversion screen with independent destination credentials, cancellation, deterministic encrypted resume state, bounded secure video streaming, publication-fault recovery, and compatibility coverage. Success requires deep verification, cold reopen, logical equivalence, and keyed plaintext digests; the source remains byte-for-byte untouched for the owner to retain or remove manually. → [details](docs/roadmap/phase-115-legacy-vault-converter.md) |
 | 116 | Optional legacy conversion and one video decode control | 🔜 | Restore a first-class read-only opening choice for legacy single-file vaults and replace competing hardware/software switches with one persisted video decoding selection. → [details](docs/roadmap/phase-116-legacy-readonly-and-decode-control.md) |
 | 117 | Review tags on import | 🔜 | Preview optional annotation cleanup, select tags, rename incoming tags, and map to existing tags for datasets and tag files. → [details](docs/roadmap/phase-117-import-tag-review.md) |
+| 118 | Rename tags in administration | 🔜 | Vault-wide tag renaming from the overview, preserving assignments, metadata, and saved-search tag conditions. → [details](docs/roadmap/phase-118-tag-renaming.md) |
 
 ---
 

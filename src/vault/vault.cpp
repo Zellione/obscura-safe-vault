@@ -2119,6 +2119,106 @@ VaultResult move_node_within(Vault& v, std::string_view source_gallery, std::str
     return v.commit_index();
 }
 
+namespace {
+
+struct TagRenamePlan {
+    std::vector<std::pair<crypto::SecureString*, crypto::SecureString>> changes;
+    bool found = false;
+    bool collision = false;
+};
+
+template <typename Inspect>
+void inspect_node_tags(IndexNode& node, const Inspect& inspect)
+{
+    for (auto& tag : node.tags) inspect(tag);
+    for (auto& child : node.children) inspect_node_tags(child, inspect);
+}
+
+TagRenamePlan plan_tag_rename(IndexNode& root, VaultSettings& settings,
+                              std::string_view old_tag, std::string_view new_tag)
+{
+    // Prepare replacements before publishing anything, preserving node identity.
+    TagRenamePlan plan;
+    const auto inspect = [&plan, old_tag, new_tag](crypto::SecureString& tag) {
+        if (tag_ci_equal(tag.view(), old_tag)) {
+            plan.found = true;
+            if (tag != new_tag)
+                plan.changes.emplace_back(&tag, crypto::SecureString(new_tag));
+        } else if (tag_ci_equal(tag.view(), new_tag)) {
+            plan.collision = true;
+        }
+    };
+    inspect_node_tags(root, inspect);
+    for (auto& description : settings.tag_descriptions) inspect(description.tag);
+    for (auto& field : settings.tag_field_values) inspect(field.tag);
+    return plan;
+}
+
+bool rename_query_tags(ui::AdvancedQuery& query, std::string_view old_tag,
+                       std::string_view new_tag)
+{
+    bool changed = false;
+    const auto rename = [&changed, old_tag, new_tag](std::string& tag) {
+        if (tag_ci_equal(tag, old_tag)) {
+            tag = new_tag;
+            changed = true;
+        }
+    };
+    for (auto& tag : query.include) rename(tag.tag);
+    for (auto& tag : query.exclude) rename(tag);
+    for (auto& group : query.groups)
+        for (auto& tag : group.tags) rename(tag);
+    return changed;
+}
+
+bool rename_preserves_tag_fields(const VaultSettings& settings, std::string_view old_tag,
+                                 std::string_view new_tag)
+{
+    const auto fields = category_template(settings, tag_category_prefix(new_tag));
+    return std::ranges::all_of(settings.tag_field_values, [old_tag, fields](const auto& value) {
+        return !tag_ci_equal(value.tag.view(), old_tag) ||
+            std::ranges::any_of(fields, [&value](const auto& field) {
+                return tag_ci_equal(field.view(), value.field.view());
+            });
+    });
+}
+
+}  // namespace
+
+VaultResult rename_tag(Vault& v, std::string_view old_tag, std::string_view new_tag)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
+    old_tag = normalise_tag(old_tag);
+    new_tag = normalise_tag(new_tag);
+    if (old_tag.empty() || new_tag.empty() || new_tag.size() > 65535 ||
+        new_tag.contains('\0')) return InvalidArg;
+
+    auto [changes, found, collision] = plan_tag_rename(v.root_, v.settings_, old_tag, new_tag);
+    if (!found) return NotFound;
+    if (collision) return AlreadyExists;
+    if (changes.empty()) return Ok;
+    if (!rename_preserves_tag_fields(v.settings_, old_tag, new_tag)) return InvalidArg;
+    auto searches = v.saved_searches_;
+    for (auto& search : searches) {
+        ui::AdvancedQuery query;
+        if (ui::deserialize_query(search.query.as_span(), query) &&
+            rename_query_tags(query, old_tag, new_tag)) {
+            const auto blob = ui::serialize_query(query);
+            if (!search.query.assign(blob)) return IoError;
+        }
+    }
+    v.saved_searches_.swap(searches);
+    for (auto& [tag, replacement] : changes) tag->swap(replacement);
+    const auto result = v.commit_index();
+    if (result != Ok) {
+        for (auto& [tag, original] : changes) tag->swap(original);
+        v.saved_searches_.swap(searches);
+    }
+    return result;
+}
+
 VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::string>& tags)
 {
     using enum VaultResult;

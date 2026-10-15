@@ -562,3 +562,6 @@ nested/multipart archive tags. Media is already imported and is retained when
 skipping tags. Folder datasets read root meta.json. Unreviewed tags never reach
 the vault and are discarded on session teardown. Mapping preserves destination
 metadata; cleanup never changes explicit edits. Empty results are skipped.
+
+## Tag rename (Phase 118)
+In tag administration, R opens the selected tag name for editing; Enter saves globally and Esc cancels. Case-only changes work; existing target tags are rejected. Description, fields, and saved-search tag clauses follow the rename. A category change must preserve existing fields. On success, clear the prefix filter and focus the renamed row. Read-only legacy vaults cannot rename tags.

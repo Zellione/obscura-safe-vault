@@ -137,13 +137,13 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   holds a `platform::FileDialog&` (passed by App); `Ctrl+I` (modifier chord — bare letters
   belong to the filter/prompt) opens a `Purpose::TagJson` pick, `update()` drains it,
   `import_tag_dict()` reads + parses and opens the shared import-tag review; confirmation applies the selected mappings with ONE `set_vault_settings` commit
-  and only then shows the summary modal (`import_summary_`, non-empty exactly while up,
+  and only then shows the summary modal (`summary_.lines`, non-empty exactly while up,
   any key dismisses, owns every key while up). A failed commit sets `error_` and shows no
   modal — a failed write is never reported as a successful import. **Phase 56:** prompt geometry
   derives from `prompt_layout.*` module. **PR #148:** `Ctrl+X` junk-tag cleanup — Y/N confirm
   modal (compact-confirm pattern) -> `Vault::prune_tags(tag_has_renderable_text, &stats)` ->
   summary modal "Removed N junk tags from M items" + `reload()`. The summary modal's title is
-  the `summary_title_` member (dict import and cleanup each set their own).
+  the `summary_.title` member (dict import and cleanup each set their own).
 - `tag_galleries.*` — galleries-only view of galleries directly carrying one tag
   (`NavKind::ToTagGalleries`, tag in Nav::path); thin FavoritesScreen subclass over
   `VaultSearch::galleries_with_tag` whose `go_back()` returns to the overview. Tab toggles to
@@ -220,3 +220,5 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   **Phase 56:** Selection is now id-based (not positional index) so `Ctrl+Up`/`Ctrl+Down` keeps focus on the item it just moved.
   Each row is two lines — `source → destination` above, progress bar or outcome below — via `import_status_row.*` module.
   Summary modal geometry via `prompt_layout.*` module.
+
+Tag overview: `R` opens `RenameDialog::open_tag` for the selected row in writable vaults. Success clears the prefix filter, reloads, and selects the renamed tag. The modal owns input before list/filter shortcuts; F1 documents R.

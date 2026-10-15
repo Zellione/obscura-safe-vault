@@ -330,6 +330,8 @@ public:
                                         std::string_view name, std::string_view destination_gallery,
                                         std::string_view destination_name);
 
+    friend VaultResult rename_tag(Vault& v, std::string_view old_tag, std::string_view new_tag);
+
     // Replace a node's tag list (gallery OR image). Tags are normalised: each trimmed
     // of surrounding whitespace, empties dropped, de-duplicated case-insensitively
     // (first occurrence's casing kept). Persisted via the crash-safe index swap.
@@ -740,6 +742,12 @@ void test_only_downgrade_to_legacy(Vault& v);
 // (header FLAG_CONTEXT_BOUND_CHUNKS set). A clear bit on an unlocked legacy
 // vault means the v1→v2 chunk migration is owed. Free friend (S1448).
 [[nodiscard]] bool uses_context_chunks(const Vault& v) noexcept;
+
+// Rename every direct assignment and its description/field values in one commit.
+// Matching is case-insensitive; existing target tags are rejected, including
+// metadata-only tags. Case-only renames are allowed. Failure restores memory.
+[[nodiscard]] VaultResult rename_tag(Vault& v, std::string_view old_tag,
+                                      std::string_view new_tag);
 
 // Rename an image, video, or gallery's own `name` field in place — a pure
 // leaf-field edit. Descendants, tags, favorite flag, sort key, and cover all

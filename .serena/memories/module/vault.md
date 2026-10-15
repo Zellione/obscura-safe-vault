@@ -616,3 +616,6 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
 - Quick/deep verification requires correctly typed originals matching logical size;
   derived objects remain optional. Conversion checks cancellation during streamed
   copies, deep verification frames, and original digest loops.
+
+## Tag renaming
+`vault::rename_tag` renames case-insensitive direct assignments plus description/field keys and saved-search tag conditions in one metadata commit, rolling back live values on failure. It rejects locked/read-only sessions, empty/NUL/oversized names, existing target vocabulary (including metadata-only entries), and category changes incompatible with stored fields. Case-only changes are allowed; node identity and media objects stay intact.

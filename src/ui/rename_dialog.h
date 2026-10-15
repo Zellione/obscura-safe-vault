@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <string>
+#include <string_view>
 
 #include "ui/text_input_model.h"
 #include "ui/widgets.h"
@@ -21,6 +22,8 @@ public:
 
     // Activate on `old_name` (an image/video/gallery) inside `gallery_path`.
     void open(std::string gallery_path, std::string old_name);
+    void open_tag(std::string tag);
+    [[nodiscard]] std::string_view new_name() const { return buf_.str(); }
     void close();
     [[nodiscard]] bool active() const noexcept { return active_; }
 
@@ -35,6 +38,8 @@ private:
     gfx::Window& win_;
 
     bool        active_ = false;
+    bool        tag_mode_ = false;
+    bool        skip_opening_text_ = false;
     std::string gallery_path_;
     std::string old_name_;
     TextInputModel  buf_;
