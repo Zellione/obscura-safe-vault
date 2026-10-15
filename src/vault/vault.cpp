@@ -2139,7 +2139,7 @@ TagRenamePlan plan_tag_rename(IndexNode& root, VaultSettings& settings,
 {
     // Prepare replacements before publishing anything, preserving node identity.
     TagRenamePlan plan;
-    const auto inspect = [&](crypto::SecureString& tag) {
+    const auto inspect = [&plan, old_tag, new_tag](crypto::SecureString& tag) {
         if (tag_ci_equal(tag.view(), old_tag)) {
             plan.found = true;
             if (tag != new_tag)
@@ -2158,7 +2158,7 @@ bool rename_query_tags(ui::AdvancedQuery& query, std::string_view old_tag,
                        std::string_view new_tag)
 {
     bool changed = false;
-    const auto rename = [&](std::string& tag) {
+    const auto rename = [&changed, old_tag, new_tag](std::string& tag) {
         if (tag_ci_equal(tag, old_tag)) {
             tag = new_tag;
             changed = true;
@@ -2175,9 +2175,9 @@ bool rename_preserves_tag_fields(const VaultSettings& settings, std::string_view
                                  std::string_view new_tag)
 {
     const auto fields = category_template(settings, tag_category_prefix(new_tag));
-    return std::ranges::all_of(settings.tag_field_values, [&](const auto& value) {
+    return std::ranges::all_of(settings.tag_field_values, [old_tag, fields](const auto& value) {
         return !tag_ci_equal(value.tag.view(), old_tag) ||
-            std::ranges::any_of(fields, [&](const auto& field) {
+            std::ranges::any_of(fields, [&value](const auto& field) {
                 return tag_ci_equal(field.view(), value.field.view());
             });
     });
