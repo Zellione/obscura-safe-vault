@@ -68,8 +68,10 @@ void scan_preflight(const IndexNode& node, PreflightTotals& totals) noexcept
     add_checked(1, totals.nodes, totals.valid);
     if (node.is_image()) {
         add_checked(node.meta.orig_size, totals.plaintext_bytes, totals.valid);
+        add_checked(node.meta.thumb_length, totals.plaintext_bytes, totals.valid);
     } else if (node.is_video()) {
         add_checked(node.vmeta.orig_size, totals.plaintext_bytes, totals.valid);
+        add_checked(node.vmeta.poster_length, totals.plaintext_bytes, totals.valid);
     }
     for (const auto& child : node.children)
         scan_preflight(child, totals);
@@ -82,10 +84,19 @@ bool preflight_space(const std::filesystem::path& source, const std::filesystem:
     std::error_code ec;
     const uint64_t source_bytes = std::filesystem::file_size(source, ec);
     const uint64_t content_bytes = std::max(totals.plaintext_bytes, source_bytes);
-    if (ec || !totals.valid ||
-        content_bytes > (std::numeric_limits<uint64_t>::max() - FIXED_SLACK) / 2)
+    constexpr uint64_t PER_NODE_SLACK = 16U * 1024U;
+    if (ec || !totals.valid || totals.nodes > std::numeric_limits<uint64_t>::max() / PER_NODE_SLACK)
         return false;
-    report.required_free_bytes = content_bytes * 2 + FIXED_SLACK;
+    // Conversion publishes objects in place and verifies by reading them back.
+    // Budget one destination, not a second full copy. Keep source size as a
+    // conservative floor, expanded originals plus stored derived records as the
+    // other baseline, and allow for framing, filesystem allocation and DB/WAL.
+    uint64_t required = content_bytes;
+    add_checked(content_bytes / 20 + (content_bytes % 20 != 0 ? 1U : 0U), required, totals.valid);
+    add_checked(totals.nodes * PER_NODE_SLACK, required, totals.valid);
+    add_checked(FIXED_SLACK, required, totals.valid);
+    if (!totals.valid) return false;
+    report.required_free_bytes = required;
     const auto parent =
         destination.parent_path().empty() ? std::filesystem::path{"."} : destination.parent_path();
     const auto info = std::filesystem::space(parent, ec);

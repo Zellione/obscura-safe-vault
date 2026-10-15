@@ -145,7 +145,10 @@ a matching interrupted destination to resume and is dropped after successful
 verification. The source is never written. Bounded video conversion now pulls
 v3 frames while retaining at most one authenticated
 legacy chunk in `SecureBytes`; free-space preflight and `OpProgress` reporting
-are also implemented. Conversion commits every 32 completed nodes; an encrypted
+are also implemented. The space budget is max(source file size, original sizes
+plus stored derived lengths), plus rounded-up 5%, 16 KiB per node, and 32 MiB
+fixed slack; checked arithmetic rejects overflow. Resume still budgets a full
+destination. Conversion commits every 32 completed nodes; an encrypted
 `conversion_nodes` table maps deterministic source traversal identities to fresh
 v3 node IDs, allowing pre-v13 sources with zero node IDs to resume as well. A
 resume rebuilds the same prefix and skips object roles already referenced by the

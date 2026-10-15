@@ -104,3 +104,23 @@ state, destination conflicts, resume mismatch/authentication, source reads,
 I/O, verification, cancellation, and the free-space/access preflight. Required
 space is shown in MiB when an estimate is available. This changes presentation,
 not the conversion format, verification checks, or conservative space policy.
+
+
+## Conversion free-space estimate follow-up
+
+The copy-only converter budgets one destination instead of requiring twice the
+source/content size in additional free space. Its baseline is the larger of the
+source file size and the sum of original media sizes plus stored thumbnail/poster
+lengths. This preserves an allowance for legacy compression expansion. It adds
+5% (rounded up), 16 KiB per node for metadata/filesystem overhead, and 32 MiB fixed
+working slack. Every sum and multiplication is overflow-checked before creating
+the destination. Source retention consumes no additional free space; verification
+reads the destination in place.
+
+This remains a conservative estimate, not a storage reservation or guarantee:
+source dead space can overestimate the destination, filesystem allocation and
+metadata vary, and resume still budgets a full destination. Runtime I/O failures
+remain handled by the existing safe interruption/resume path.
+
+Regression coverage exercises a sparse large source without a second-copy
+budget, compressed media expansion, arithmetic overflow, and source preservation.
