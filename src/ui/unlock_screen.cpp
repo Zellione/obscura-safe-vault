@@ -34,6 +34,17 @@ constexpr double CLIPBOARD_CLEAR_SECS = 25.0;
 constexpr SDL_FRect LEGACY_BROWSE_BUTTON{60, 240, 260, 44};
 constexpr SDL_FRect LEGACY_CONVERT_BUTTON{60, 300, 260, 44};
 
+size_t conversion_error_line_end(std::string_view text, const gfx::FontAtlas& font, float width)
+{
+    size_t end = text.size();
+    while (end > 0 && static_cast<float>(font.measure(text.substr(0, end))) > width) {
+        const auto space = text.rfind(' ', end - 1);
+        if (space == std::string_view::npos) break;
+        end = space;
+    }
+    return end;
+}
+
 gfx::Color strength_color(Strength s)
 {
     using enum Strength;
@@ -643,14 +654,9 @@ void UnlockScreen::render_conversion_status(gfx::Renderer& r)
         // Keep both the cause and recovery instruction visible, rather than
         // eliding the middle of the diagnostic on smaller windows.
         std::string_view remaining = error_;
-        for (float row = 14; !remaining.empty() && row < 18; ++row) {
-            size_t end = remaining.size();
-            while (end > 0 && static_cast<float>(font_.measure(remaining.substr(0, end))) > width) {
-                const auto space = remaining.rfind(' ', end - 1);
-                if (space == std::string_view::npos) break;
-                end = space;
-            }
-            text(row, remaining.substr(0, end), DANGER);
+        for (int row = 14; !remaining.empty() && row < 18; ++row) {
+            const size_t end = conversion_error_line_end(remaining, font_, width);
+            text(static_cast<float>(row), remaining.substr(0, end), DANGER);
             remaining.remove_prefix(end);
             while (remaining.starts_with(' '))
                 remaining.remove_prefix(1);
@@ -726,7 +732,7 @@ std::vector<ui::HelpGroup> UnlockScreen::help_groups() const
          }},
         text_editing_help_group()};
     if (conversion_mode_)
-        groups.front().entries.push_back({"Mouse wheel", "Scroll conversion form"});
+        groups.front().entries.emplace_back("Mouse wheel", "Scroll conversion form");
     return groups;
 }
 

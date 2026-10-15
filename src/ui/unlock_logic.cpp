@@ -53,7 +53,7 @@ std::string conversion_error_message(const vault::LegacyConversionReport& report
         return std::format(
             "Destination needs at least {} MiB free. Check available space and folder access.",
             report.required_free_bytes / (1024 * 1024) +
-                (report.required_free_bytes % (1024 * 1024) != 0));
+                (report.required_free_bytes % (1024 * 1024) != 0 ? 1U : 0U));
     }
     return "Unknown conversion error. Keep the original vault.";
 }
