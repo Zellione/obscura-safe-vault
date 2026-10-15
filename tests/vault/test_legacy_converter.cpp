@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <tuple>
 #include <unistd.h>
 #include <vector>
@@ -389,4 +390,83 @@ TEST(legacy_converter_tampered_source_never_claims_success)
     CHECK(report.failed_ordinal != 0);
     CHECK(!report.logical_verified);
     CHECK(file_bytes(source_path) == tampered);
+}
+
+TEST(legacy_converter_space_budget_does_not_reserve_a_second_copy)
+{
+    TempDir temp;
+    const auto source_path = temp.path / "source.osv";
+    vault::Vault writer;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(source_path), SOURCE_PASSWORD, {}, TEST_KDF,
+                                 writer) == vault::VaultResult::Ok);
+    writer.lock();
+    // Sparse padding models a large source without allocating or copying its dead bytes.
+    constexpr uint64_t SOURCE_SIZE = 512ULL * 1024 * 1024;
+    std::filesystem::resize_file(source_path, SOURCE_SIZE);
+    vault::Vault source;
+    REQUIRE(vault::Vault::open(platform::path_to_utf8(source_path), source) ==
+            vault::VaultResult::Ok);
+    REQUIRE(source.unlock(SOURCE_PASSWORD, {}) == vault::VaultResult::Ok);
+    const vault::LegacyConversionRequest request{
+        temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF};
+    const auto report = vault::convert_legacy_vault(source, request);
+    REQUIRE(report.status == vault::LegacyConversionStatus::Ok);
+    CHECK(report.required_free_bytes >= SOURCE_SIZE);
+    CHECK(report.required_free_bytes < SOURCE_SIZE + SOURCE_SIZE / 10 + 32ULL * 1024 * 1024);
+    CHECK_EQ(std::filesystem::file_size(source_path), SOURCE_SIZE);
+}
+
+TEST(legacy_converter_space_budget_accounts_for_expanded_media)
+{
+    TempDir temp;
+    const auto source_path = temp.path / "source.osv";
+    vault::Vault writer;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(source_path), SOURCE_PASSWORD, {}, TEST_KDF,
+                                 writer) == vault::VaultResult::Ok);
+    const std::vector<uint8_t> original(4U * 1024 * 1024, 7);
+    vault::StagedThumb thumb;
+    REQUIRE(thumb.thumb_jpeg.assign(std::array<uint8_t, 4>{1, 2, 3, 4}));
+    thumb.format = vault::ImageFormat::JPEG;
+    REQUIRE(vault::attach_image_prestaged(writer, "", original, "photo.jpg", thumb, 0) ==
+            vault::VaultResult::Ok);
+    REQUIRE(vault::commit_staged(writer) == vault::VaultResult::Ok);
+    writer.lock();
+    REQUIRE(std::filesystem::file_size(source_path) < original.size());
+    vault::Vault source;
+    REQUIRE(vault::Vault::open(platform::path_to_utf8(source_path), source) ==
+            vault::VaultResult::Ok);
+    REQUIRE(source.unlock(SOURCE_PASSWORD, {}) == vault::VaultResult::Ok);
+    const vault::LegacyConversionRequest request{
+        temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF};
+    const auto report = vault::convert_legacy_vault(source, request);
+    REQUIRE(report.status == vault::LegacyConversionStatus::Ok);
+    constexpr uint64_t SLACK = 32ULL * 1024 * 1024;
+    CHECK(report.required_free_bytes > original.size() + SLACK);
+    CHECK(report.required_free_bytes < original.size() + original.size() / 10 + SLACK);
+}
+
+TEST(legacy_converter_space_budget_rejects_overflow_before_creating_destination)
+{
+    TempDir temp;
+    const auto source_path = temp.path / "source.osv";
+    vault::Vault source;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(source_path), SOURCE_PASSWORD, {}, TEST_KDF,
+                                 source) == vault::VaultResult::Ok);
+    vault::StagedThumb thumb;
+    const std::array<uint8_t, 1> original{7};
+    REQUIRE(vault::attach_image_prestaged(source, "", original, "photo.jpg", thumb, 0) ==
+            vault::VaultResult::Ok);
+    auto* node = source.resolve_node("photo.jpg");
+    REQUIRE(node != nullptr);
+    const vault::LegacyConversionRequest request{
+        temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF};
+    // Exercise both scan accumulation and the added percentage overflowing.
+    for (const uint64_t derived : {uint64_t{0}, uint64_t{1}}) {
+        node->meta.orig_size = std::numeric_limits<uint64_t>::max();
+        node->meta.thumb_length = derived;
+        const auto report = vault::convert_legacy_vault(source, request);
+        CHECK(report.status == vault::LegacyConversionStatus::InsufficientSpace);
+        CHECK_EQ(report.required_free_bytes, 0U);
+        CHECK(!std::filesystem::exists(request.destination));
+    }
 }
