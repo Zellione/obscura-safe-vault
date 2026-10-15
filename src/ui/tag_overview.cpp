@@ -200,8 +200,8 @@ void TagOverviewScreen::finish_tag_dict(const ImportTagReview& review)
     }
 
     error_.clear();
-    summary_title_  = "Tag dictionary imported";
-    import_summary_ = tag_dict_summary_lines(summary);
+    summary_.title  = "Tag dictionary imported";
+    summary_.lines = tag_dict_summary_lines(summary);
     reload();
 }
 
@@ -235,11 +235,11 @@ void TagOverviewScreen::run_junk_tag_cleanup()
     }
 
     error_.clear();
-    summary_title_ = "Junk-tag cleanup";
+    summary_.title = "Junk-tag cleanup";
     if (stats.tags_removed == 0) {
-        import_summary_ = {"No junk tags found."};
+        summary_.lines = {"No junk tags found."};
     } else {
-        import_summary_ = {std::format("Removed {} junk tag{} from {} item{}.",
+        summary_.lines = {std::format("Removed {} junk tag{} from {} item{}.",
                                        stats.tags_removed, stats.tags_removed == 1 ? "" : "s",
                                        stats.nodes_touched, stats.nodes_touched == 1 ? "" : "s")};
         reload();
@@ -337,16 +337,20 @@ bool TagOverviewScreen::handle_rename_event(const SDL_Event& e)
     return true;
 }
 
+bool TagOverviewScreen::handle_import_event(const SDL_Event& e)
+{
+    if (!import_tags_.active()) return false;
+    import_tags_.handle_event(e);
+    if (auto result = import_tags_.take_result()) finish_tag_dict(*result);
+    if (!import_tags_.active()) pending_dict_ = {};
+    mark_dirty();
+    return true;
+}
+
 void TagOverviewScreen::handle_event(const SDL_Event& e)
 {
     if (handle_rename_event(e)) return;
-    if (import_tags_.active()) {
-        import_tags_.handle_event(e);
-        if (auto result = import_tags_.take_result()) finish_tag_dict(*result);
-        if (!import_tags_.active()) pending_dict_ = {};
-        mark_dirty();
-        return;
-    }
+    if (handle_import_event(e)) return;
     if (quick_switch_.active()) {
         (void)quick_switch_.handle_event(e);
         if (std::string p; quick_switch_.consume_choice(p))
@@ -356,8 +360,8 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
 
     // The import summary is modal: it owns every key until it is dismissed, so
     // a keystroke meant to acknowledge it cannot also act on the list behind it.
-    if (!import_summary_.empty()) {
-        if (e.type == SDL_EVENT_KEY_DOWN) import_summary_.clear();
+    if (!summary_.lines.empty()) {
+        if (e.type == SDL_EVENT_KEY_DOWN) summary_.lines.clear();
         return;
     }
 
@@ -507,22 +511,22 @@ void TagOverviewScreen::render_prune_confirm(gfx::Renderer& r, float win_w, floa
 void TagOverviewScreen::render_import_summary(gfx::Renderer& r, float win_w, float win_h)
 {
     using namespace gfx::theme;
-    if (import_summary_.empty()) return;
+    if (summary_.lines.empty()) return;
 
     const float body_line_h = font_.pixel_height() + 8;
     const PromptBoxLayout l = prompt_box_layout({.font_px = font_.pixel_height(),
                                                  .window_w = win_w, .window_h = win_h,
                                                  .input_h = 0.0f,
-                                                 .body_lines = static_cast<int>(import_summary_.size()),
+                                                 .body_lines = static_cast<int>(summary_.lines.size()),
                                                  .body_line_h = body_line_h});
 
     r.draw_round_rect(l.box, RADIUS, SURFACE);
     r.draw_round_rect(l.box, RADIUS, ACCENT, /*filled*/ false);
 
-    r.draw_text(font_, l.box.x + PROMPT_PAD, l.title_y, summary_title_, TEXT);
+    r.draw_text(font_, l.box.x + PROMPT_PAD, l.title_y, summary_.title, TEXT);
 
     float y = l.body_y;
-    for (const std::string& line : import_summary_) {
+    for (const std::string& line : summary_.lines) {
         r.draw_text(font_, l.box.x + PROMPT_PAD, y, line, TEXT_DIM);
         y += body_line_h;
     }

@@ -51,6 +51,7 @@ private:
     void reload();          // fetch the overview from the vault, then rebuild()
     void rebuild();         // shown_ = sort(filter(all_)); re-clamp selection
     bool handle_rename_event(const SDL_Event& e);
+    bool handle_import_event(const SDL_Event& e);
     void handle_filter_event(const SDL_Event& e);   // while filtering_
     void close_filter();
     void open_selected();   // Enter → TagGalleries for the focused tag
@@ -99,8 +100,11 @@ private:
 
     // Phase 55: the summary modal (dict import / junk-tag cleanup). Non-empty
     // exactly while the modal is up; any key dismisses it.
-    std::vector<std::string> import_summary_;
-    std::string              summary_title_;
+    struct Summary {
+        std::vector<std::string> lines;
+        std::string title;
+    };
+    Summary summary_;
 
     // Ctrl+X junk-tag cleanup: awaiting the Y/N confirm.
     bool confirm_prune_ = false;

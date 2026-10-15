@@ -2127,6 +2127,13 @@ struct TagRenamePlan {
     bool collision = false;
 };
 
+template <typename Inspect>
+void inspect_node_tags(IndexNode& node, const Inspect& inspect)
+{
+    for (auto& tag : node.tags) inspect(tag);
+    for (auto& child : node.children) inspect_node_tags(child, inspect);
+}
+
 TagRenamePlan plan_tag_rename(IndexNode& root, VaultSettings& settings,
                               std::string_view old_tag, std::string_view new_tag)
 {
@@ -2141,11 +2148,7 @@ TagRenamePlan plan_tag_rename(IndexNode& root, VaultSettings& settings,
             plan.collision = true;
         }
     };
-    const auto visit = [&](auto&& self, IndexNode& node) -> void {
-        for (auto& tag : node.tags) inspect(tag);
-        for (auto& child : node.children) self(self, child);
-    };
-    visit(visit, root);
+    inspect_node_tags(root, inspect);
     for (auto& description : settings.tag_descriptions) inspect(description.tag);
     for (auto& field : settings.tag_field_values) inspect(field.tag);
     return plan;
@@ -2190,7 +2193,7 @@ VaultResult rename_tag(Vault& v, std::string_view old_tag, std::string_view new_
     old_tag = normalise_tag(old_tag);
     new_tag = normalise_tag(new_tag);
     if (old_tag.empty() || new_tag.empty() || new_tag.size() > 65535 ||
-        new_tag.find('\0') != std::string_view::npos) return InvalidArg;
+        new_tag.contains('\0')) return InvalidArg;
 
     auto [changes, found, collision] = plan_tag_rename(v.root_, v.settings_, old_tag, new_tag);
     if (!found) return NotFound;
