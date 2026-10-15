@@ -1,6 +1,9 @@
 #include "test_framework.h"
 
+#include <string>
 #include <string_view>
+#include <vector>
+#include "vault/legacy_converter.h"
 
 #include "ui/unlock_logic.h"
 
@@ -35,4 +38,60 @@ TEST(create_match_is_create)
     auto d = ui::decide_submit(true, b("same"), b("same"));
     CHECK(d.action == ui::SubmitAction::Create);
     CHECK(d.error == nullptr);
+}
+
+TEST(conversion_failures_explain_recovery_without_claiming_corruption)
+{
+    using enum vault::LegacyConversionStatus;
+    vault::LegacyConversionReport report;
+    report.status = InsufficientSpace;
+    report.required_free_bytes = 104857600;
+    CHECK(ui::conversion_error_message(report).find("100 MiB") != std::string::npos);
+    report.status = AuthenticationFailed;
+    CHECK(ui::conversion_error_message(report).find("destination password") != std::string::npos);
+    report.status = ResumeMismatch;
+    CHECK(ui::conversion_error_message(report).find("another folder") != std::string::npos);
+    report.status = SourceCorrupt;
+    CHECK(ui::conversion_error_message(report).find("source") != std::string::npos);
+    report.status = IoError;
+    CHECK(ui::conversion_error_message(report).find("permissions") != std::string::npos);
+    report.status = VerificationFailed;
+    CHECK(ui::conversion_error_message(report).find("Keep the original") != std::string::npos);
+}
+
+TEST(conversion_statuses_have_distinct_messages)
+{
+    std::vector<std::string> messages;
+    for (int value = 1; value <= static_cast<int>(vault::LegacyConversionStatus::InsufficientSpace);
+         ++value) {
+        vault::LegacyConversionReport report;
+        report.status = static_cast<vault::LegacyConversionStatus>(value);
+        const auto message = ui::conversion_error_message(report);
+        CHECK(!message.empty());
+        for (const auto& previous : messages)
+            CHECK(message != previous);
+        messages.push_back(message);
+    }
+    vault::LegacyConversionReport success;
+    success.status = vault::LegacyConversionStatus::Ok;
+    CHECK(ui::conversion_error_message(success).empty());
+}
+
+TEST(conversion_form_keeps_labels_and_inputs_separate_at_different_font_sizes)
+{
+    for (const float font : {20.0f, 28.0f, 36.0f}) {
+        for (const float width : {800.0f, 1280.0f, 2560.0f}) {
+            const auto form = ui::conversion_form_layout(width, font);
+            const auto password = form.password_field(false);
+            const auto confirm = form.password_field(true);
+            CHECK(form.row(6) + font <= password.y);
+            CHECK(password.y + password.h <= form.row(8));
+            CHECK(password.x + password.w < confirm.x);
+            CHECK(confirm.x + confirm.w <= width - 60);
+            CHECK(password.h >= font);
+            CHECK(form.row(4) + font <= form.row(5));
+            const auto scrolled = ui::conversion_form_layout(width, font, 100);
+            CHECK_EQ(scrolled.password_field(true).y, confirm.y - 100);
+        }
+    }
 }

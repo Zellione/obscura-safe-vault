@@ -86,3 +86,21 @@ As the final phase, provide an explicit, non-destructive conversion from a legac
 ## Acceptance criterion
 
 Every supported valid legacy fixture converts to a logically equivalent, independently keyed v3 directory vault; interruption resumes safely; corrupt input never yields a claimed-success destination; full verification and cold reopen pass; and the original one-file vault remains untouched for manual retention or deletion by the owner.
+
+### Conversion form clarity
+
+The conversion form identifies the already-unlocked source and explains that it
+remains unchanged. Choose a parent folder first; the resulting new-vault path is
+shown below the picker. Password and confirmation explicitly belong to the new
+vault. Its optional keyfile controls are grouped: use an existing file, create a
+file, or clear the selection with Use none. The selected keyfile path and its
+requirement for future unlocks are shown together. Retrying an incomplete copy
+requires the destination credentials from the first attempt.
+
+The form uses font-derived spacing, bounded field widths, mouse selection of
+password fields, and wheel scrolling for short windows. The redundant password
+Copy button is omitted from conversion. Conversion errors distinguish source
+state, destination conflicts, resume mismatch/authentication, source reads,
+I/O, verification, cancellation, and the free-space/access preflight. Required
+space is shown in MiB when an estimate is available. This changes presentation,
+not the conversion format, verification checks, or conservative space policy.

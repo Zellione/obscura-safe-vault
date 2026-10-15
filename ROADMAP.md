@@ -16,6 +16,10 @@ production facade benchmarks, and Linux-only cleanup. Validation is in progress.
 
 ## Phase index
 
+Legacy conversion form follow-up: separate destination and new-vault credentials,
+keep optional keyfile actions together, and explain individual conversion failures.
+See the [Phase 115 follow-up](docs/roadmap/phase-115-legacy-vault-converter.md#conversion-form-clarity).
+
 Vault leakage/corruption audit follow-up: secure compression state, fail-closed
 metadata snapshots, pending-object GC protection, immutable published handles,
 and durable shard retries. See the [audit report](docs/audit/vault-leakage-corruption-2026-10.md).
