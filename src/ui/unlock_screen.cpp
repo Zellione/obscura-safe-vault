@@ -654,9 +654,11 @@ void UnlockScreen::render_conversion_status(gfx::Renderer& r)
         // Keep both the cause and recovery instruction visible, rather than
         // eliding the middle of the diagnostic on smaller windows.
         std::string_view remaining = error_;
-        for (int row = 14; !remaining.empty() && row < 18; ++row) {
+        int row = 14;
+        while (!remaining.empty() && row < 18) {
             const size_t end = conversion_error_line_end(remaining, font_, width);
             text(static_cast<float>(row), remaining.substr(0, end), DANGER);
+            ++row;
             remaining.remove_prefix(end);
             while (remaining.starts_with(' '))
                 remaining.remove_prefix(1);
