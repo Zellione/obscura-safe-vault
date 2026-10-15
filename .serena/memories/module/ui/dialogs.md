@@ -167,3 +167,5 @@ Modal dialogs: transfer/combine operations, file pickers, rename/tag editing, se
   GalleryGrid text lists, TagOverview dictionaries). Selection, optional cleanup,
   rename and existing-tag picker; pure `import_tag_dialog_layout` derives row pitch
   from font height. See `mem:module/ui/import` for collection and commit boundaries.
+
+`RenameDialog::open_tag` reuses the rename modal for `vault::rename_tag`, selects the initial name, ignores the opening text event, and reports collisions/invalid category fields. `new_name()` supports selection after the overview reload. Modal line spacing derives from font metrics.

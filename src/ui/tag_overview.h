@@ -8,6 +8,7 @@
 #include "ui/import_tag_dialog.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
+#include "ui/rename_dialog.h"
 #include "ui/screen.h"
 #include "ui/tag_fields_form.h"
 #include "ui/tag_json_parse.h"
@@ -49,6 +50,7 @@ public:
 private:
     void reload();          // fetch the overview from the vault, then rebuild()
     void rebuild();         // shown_ = sort(filter(all_)); re-clamp selection
+    bool handle_rename_event(const SDL_Event& e);
     void handle_filter_event(const SDL_Event& e);   // while filtering_
     void close_filter();
     void open_selected();   // Enter → TagGalleries for the focused tag
@@ -78,6 +80,7 @@ private:
     // Phase 73: template editor and fields form panels (declare after vault_/win_)
     TemplateEditorPanel template_editor_{vault_, win_};
     TagFieldsForm       fields_form_{vault_, win_};
+    RenameDialog        rename_{win_};
 
     std::vector<TagTally> all_;      // full overview, as returned by the vault
     std::vector<TagTally> shown_;    // filtered + sorted view that is navigated

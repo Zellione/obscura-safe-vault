@@ -122,6 +122,7 @@ void TagOverviewScreen::on_enter()
 
 void TagOverviewScreen::on_exit()
 {
+    rename_.close();
     import_tags_.close();
     pending_dict_ = {};
     SDL_StopTextInput(win_.sdl_window());
@@ -281,6 +282,13 @@ void TagOverviewScreen::handle_key_down_in_browse_mode(const SDL_KeyboardEvent& 
             sort_ = (sort_ == TagSort::Name) ? TagSort::Count : TagSort::Name;
             rebuild();
             break;
+        case SDLK_R:
+            if (!vault::vault_is_read_only(vault_) && nav_.selected() >= 0 &&
+                nav_.selected() < static_cast<int>(shown_.size())) {
+                rename_.open_tag(shown_[nav_.selected()].tag);
+                error_.clear();
+            }
+            break;
         case SDLK_E:
             if (nav_.selected() >= 0 && nav_.selected() < static_cast<int>(shown_.size())) {
                 const std::string& tag = shown_[nav_.selected()].tag;
@@ -310,8 +318,28 @@ void TagOverviewScreen::handle_key_down_in_browse_mode(const SDL_KeyboardEvent& 
     }
 }
 
+bool TagOverviewScreen::handle_rename_event(const SDL_Event& e)
+{
+    if (!rename_.active()) return false;
+    (void)rename_.handle_event(vault_, e);
+    if (std::string status; rename_.consume_completed(status)) {
+        // A renamed tag may no longer match the old prefix filter.
+        filter_.clear();
+        reload();
+        auto name = rename_.new_name();
+        const auto first = name.find_first_not_of(" \t\r\n");
+        const auto last = name.find_last_not_of(" \t\r\n");
+        if (first != std::string_view::npos) name = name.substr(first, last - first + 1);
+        for (size_t i = 0; i < shown_.size(); ++i)
+            if (shown_[i].tag == name) nav_.select(static_cast<int>(i));
+    }
+    mark_dirty();
+    return true;
+}
+
 void TagOverviewScreen::handle_event(const SDL_Event& e)
 {
+    if (handle_rename_event(e)) return;
     if (import_tags_.active()) {
         import_tags_.handle_event(e);
         if (auto result = import_tags_.take_result()) finish_tag_dict(*result);
@@ -449,6 +477,7 @@ void TagOverviewScreen::render(gfx::Renderer& r)
     render_prune_confirm(r, W, H);
     render_import_summary(r, W, H);
     import_tags_.render(r, font_, W, H);
+    rename_.render(r, font_, W, H);
 }
 
 void TagOverviewScreen::render_prune_confirm(gfx::Renderer& r, float win_w, float win_h)
@@ -506,6 +535,7 @@ std::vector<HelpGroup> TagOverviewScreen::help_groups() const
         {"Up/Down", "Move selection"}, {"Enter", "Open tag"},
         {"/", "Filter tags"}, {"Tab", "Toggle sort (name/count)"},
         {"E", "Edit tag description & fields"},
+        {"R", "Rename selected tag throughout vault"},
         {"Ctrl+T", "Edit category templates"},
         {"Ctrl+I", "Import tag dictionary"},
         {"Ctrl+X", "Remove junk tags"},

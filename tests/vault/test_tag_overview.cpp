@@ -13,6 +13,8 @@
 #include <vector>
 
 #include "ui/tag_overview_model.h"
+#include "ui/advanced_search_model.h"
+#include "vault/file_util.h"
 #include "vault/vault.h"
 #include "vault/vault_search.h"
 
@@ -48,9 +50,9 @@ struct TempVault {
         path = fs::temp_directory_path() /
                ("osv_tagov_test_" + std::string(tag) + "_" + std::to_string(ctr++) + ".osv");
         std::error_code ec;
-        fs::remove(path, ec);
+        fs::remove_all(path, ec);
     }
-    ~TempVault() { std::error_code ec; fs::remove(path, ec); }
+    ~TempVault() { std::error_code ec; fs::remove_all(path, ec); }
     std::string str() const { return path.string(); }
 };
 
@@ -277,4 +279,118 @@ TEST(tag_overview_rows_carry_the_stored_description)
         [](const ui::TagTally& r) { return r.tag == "vacation"; });
     CHECK(it != rows.end());
     CHECK_EQ(it->description, std::string("Summer trips only"));
+}
+
+TEST(tag_rename_updates_all_assignments_and_metadata_after_reopen)
+{
+    TempVault tv("rename");
+    vault::Vault v;
+    using R = vault::VaultResult;
+    REQUIRE(vault::Vault::create_directory(tv.str(), bytes("pw"), {}, kTestKdf, v) == R::Ok);
+    REQUIRE(build_tree(v));
+    REQUIRE(vault::rename_tag(v, "vacation", "travel:vacation") == R::Ok);
+    REQUIRE(v.set_tags("", {"travel:VACATION"}) == R::Ok);
+    auto settings = vault::vault_settings(v);
+    settings.categories.push_back({crypto::SecureString("travel"), 0,
+                                   {crypto::SecureString("year")}});
+    vault::set_tag_description(settings, "travel:Vacation", "Summer trips");
+    vault::set_tag_field_value(settings, "travel:vacation", "year", "2026");
+    REQUIRE(vault::set_vault_settings(v, std::move(settings)) == R::Ok);
+    REQUIRE(vault::rename_tag(v, "travel:VACATION", "  travel:holiday  ") == R::Ok);
+    CHECK(vault::VaultSearch(v).images_with_tag("travel:vacation").empty());
+    CHECK_EQ(vault::VaultSearch(v).images_with_tag("travel:holiday").size(), size_t{2});
+    CHECK_EQ(vault::find_tag_description(vault::vault_settings(v), "travel:holiday"), "Summer trips");
+    CHECK_EQ(vault::find_tag_field_value(vault::vault_settings(v), "travel:holiday", "year"), "2026");
+    CHECK(vault::rename_tag(v, "travel:holiday", "holiday") == R::InvalidArg);
+    CHECK(vault::rename_tag(v, "travel:holiday", "unknown:holiday") == R::InvalidArg);
+    v.lock();
+    REQUIRE(v.unlock(bytes("pw"), {}) == R::Ok);
+    CHECK_EQ(vault::VaultSearch(v).images_with_tag("travel:holiday").size(), size_t{2});
+    CHECK_EQ(vault::find_tag_description(vault::vault_settings(v), "travel:holiday"), "Summer trips");
+    CHECK_EQ(vault::find_tag_field_value(vault::vault_settings(v), "travel:holiday", "year"), "2026");
+    CHECK(vault::find_tag_description(vault::vault_settings(v), "travel:vacation").empty());
+}
+
+TEST(tag_rename_rejects_collisions_and_invalid_names_without_changes)
+{
+    TempVault tv("rename_invalid");
+    vault::Vault v;
+    using R = vault::VaultResult;
+    CHECK(vault::rename_tag(v, "old", "new") == R::Locked);
+    REQUIRE(vault::Vault::create_directory(tv.str(), bytes("pw"), {}, kTestKdf, v) == R::Ok);
+    REQUIRE(build_tree(v));
+    auto settings = vault::vault_settings(v);
+    vault::set_tag_description(settings, "reserved", "Unused dictionary tag");
+    settings.categories.push_back({crypto::SecureString("travel"), 0,
+                                   {crypto::SecureString("year")}});
+    vault::set_tag_field_value(settings, "travel:field-only", "year", "2026");
+    REQUIRE(vault::set_vault_settings(v, std::move(settings)) == R::Ok);
+    CHECK(vault::rename_tag(v, "vacation", "BEACH") == R::AlreadyExists);
+    CHECK(vault::rename_tag(v, "vacation", "RESERVED") == R::AlreadyExists);
+    CHECK(vault::rename_tag(v, "vacation", "travel:FIELD-ONLY") == R::AlreadyExists);
+    CHECK(vault::rename_tag(v, "vacation", "  ") == R::InvalidArg);
+    CHECK(vault::rename_tag(v, "vacation", std::string(65536, 'x')) == R::InvalidArg);
+    CHECK(vault::rename_tag(v, "vacation", std::string("bad\0name", 8)) == R::InvalidArg);
+    CHECK(vault::rename_tag(v, "missing", "new") == R::NotFound);
+    CHECK_EQ(vault::VaultSearch(v).images_with_tag("vacation").size(), size_t{2});
+    REQUIRE(vault::rename_tag(v, "vacation", "VACATION") == R::Ok);
+    const auto rows = vault::VaultSearch(v).tag_overview();
+    const auto* tag = find_tag(rows, "vacation");
+    REQUIRE(tag != nullptr);
+    CHECK_EQ(tag->tag, "VACATION");
+    CHECK(vault::rename_tag(v, "VACATION", "VACATION") == R::Ok);
+}
+
+TEST(tag_rename_preserves_saved_search_meaning)
+{
+    TempVault tv("rename_search");
+    vault::Vault v;
+    using R = vault::VaultResult;
+    REQUIRE(vault::Vault::create_directory(tv.str(), bytes("pw"), {}, kTestKdf, v) == R::Ok);
+    REQUIRE(build_tree(v));
+    ui::AdvancedQuery query;
+    query.include.push_back({"Vacation", 3});
+    query.exclude.push_back("VACATION");
+    query.groups.push_back({"vacation", ui::Combinator::And, {"vacation", "beach"}});
+    query.name_query = "vacation";
+    REQUIRE(vault::VaultSearch(v).save_search("vacation", query) == R::Ok);
+    REQUIRE(vault::rename_tag(v, "vacation", "holiday") == R::Ok);
+    v.lock();
+    REQUIRE(v.unlock(bytes("pw"), {}) == R::Ok);
+    const auto saved = vault::VaultSearch(v).list_saved_searches();
+    REQUIRE(saved.size() == 1);
+    ui::AdvancedQuery actual;
+    REQUIRE(ui::deserialize_query(saved[0].query.as_span(), actual));
+    CHECK_EQ(actual.include[0].tag, "holiday");
+    CHECK_EQ(actual.include[0].weight, 3);
+    CHECK_EQ(actual.exclude[0], "holiday");
+    CHECK_EQ(actual.groups[0].tags[0], "holiday");
+    CHECK_EQ(actual.groups[0].tags[1], "beach");
+    CHECK_EQ(actual.name_query, "vacation");
+    CHECK_EQ(saved[0].name, "vacation");
+}
+
+TEST(tag_rename_rolls_back_on_commit_failure_and_rejects_readonly)
+{
+    TempVault tv("rename_failure");
+    vault::Vault v;
+    using R = vault::VaultResult;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == R::Ok);
+    REQUIRE(build_tree(v));
+    auto settings = vault::vault_settings(v);
+    vault::set_tag_description(settings, "vacation", "Summer");
+    REQUIRE(vault::set_vault_settings(v, std::move(settings)) == R::Ok);
+    vault::fileutil::inject_sync_failure(0);
+    const auto result = vault::rename_tag(v, "vacation", "holiday");
+    vault::fileutil::clear_sync_failure();
+    CHECK(result == R::IoError);
+    CHECK_EQ(vault::VaultSearch(v).images_with_tag("vacation").size(), size_t{2});
+    CHECK(vault::VaultSearch(v).images_with_tag("holiday").empty());
+    CHECK_EQ(vault::find_tag_description(vault::vault_settings(v), "vacation"), "Summer");
+    v.lock();
+    vault::Vault reopened;
+    REQUIRE(vault::Vault::open(tv.str(), reopened) == R::Ok);
+    REQUIRE(reopened.unlock(bytes("pw"), {}) == R::Ok);
+    CHECK(vault::rename_tag(reopened, "vacation", "holiday") == R::InvalidArg);
+    CHECK_EQ(vault::VaultSearch(reopened).images_with_tag("vacation").size(), size_t{2});
 }

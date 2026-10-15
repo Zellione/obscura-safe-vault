@@ -220,3 +220,5 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   **Phase 56:** Selection is now id-based (not positional index) so `Ctrl+Up`/`Ctrl+Down` keeps focus on the item it just moved.
   Each row is two lines — `source → destination` above, progress bar or outcome below — via `import_status_row.*` module.
   Summary modal geometry via `prompt_layout.*` module.
+
+Tag overview: `R` opens `RenameDialog::open_tag` for the selected row in writable vaults. Success clears the prefix filter, reloads, and selects the renamed tag. The modal owns input before list/filter shortcuts; F1 documents R.

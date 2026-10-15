@@ -272,6 +272,11 @@ scripts/       setup.sh · gen.sh · build.sh · test.sh · build_codecs.sh ·
 
 ## Tag dictionary import
 
+In the tag overview (`Shift+T`), select a tag and press `R` to rename it throughout
+the vault. Assignments, descriptions, field values, and saved-search tag conditions
+follow the rename. Enter saves; Esc cancels. Existing target names are rejected.
+Changing the category prefix requires compatible template fields.
+
 The tag overview (`Shift+T`) imports a JSON tag dictionary with `Ctrl+I`: a file of
 `{category, name, description}` entries that registers tag **categories** (each with a
 colour) and stores per-tag **descriptions**. It populates the vocabulary only — it tags
