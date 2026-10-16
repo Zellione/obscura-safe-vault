@@ -127,7 +127,7 @@ struct AuthenticationContext {
 
 void authenticate_object(const VaultRoot& root, const Database& database,
                          std::span<const uint8_t, crypto::KEY_SIZE> master_key, const Id& vault_id,
-                         const ObjectRecord& object, AuthenticationContext context) noexcept
+                         const ObjectRecord& object, const AuthenticationContext& context) noexcept
 {
     auto& [report, cancel, observer] = context;
     bool valid_format = false;
@@ -177,7 +177,7 @@ void authenticate_object(const VaultRoot& root, const Database& database,
 bool authenticate_references(const VaultRoot& root, const Database& database,
                              std::span<const uint8_t, crypto::KEY_SIZE> master_key,
                              const Id& vault_id, const ReconciliationReport& reconciled,
-                             AuthenticationContext context) noexcept
+                             const AuthenticationContext& context) noexcept
 {
     const auto references = database.object_references();
     if (references.status != DbStatus::Ok) return false;

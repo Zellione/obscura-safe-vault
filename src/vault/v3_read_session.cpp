@@ -492,15 +492,17 @@ DbStatus ReadSession::finish_conversion() noexcept
 
 DbStatus ReadSession::commit_conversion_batch(std::span<const ConversionEntry> entries) noexcept
 {
+    using enum DbStatus;
     const std::lock_guard lock(state_mutex_);
-    if (!unlocked_ || !database_ || !session_lock_) return DbStatus::IoError;
-    const auto status = database_->commit_conversion_batch(entries, staged_objects_);
-    if (status != DbStatus::Ok) return status;
+    if (!unlocked_ || !database_ || !session_lock_) return IoError;
+    if (const auto status = database_->commit_conversion_batch(entries, staged_objects_);
+        status != Ok)
+        return status;
     for (const auto& [key, info] : staged_index_)
         object_index_.insert_or_assign(key, info);
     staged_objects_.clear();
     staged_index_.clear();
-    return DbStatus::Ok;
+    return Ok;
 }
 
 ReadStatus ReadSession::commit_metadata(const IndexNode& root, const VaultSettings& settings,
