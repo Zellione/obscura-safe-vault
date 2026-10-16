@@ -10,13 +10,22 @@
 #include "monocypher.h"
 
 #include <algorithm>
+#include <format>
 #include <limits>
+#include <string_view>
 #include <system_error>
 
 namespace vault {
 #ifdef OSV_VAULT_FIXTURE_DIR
 // Deterministic cancellation seam, compiled only into the test binary.
 thread_local std::function<void(bool, uint64_t)> conversion_checkpoint;
+thread_local std::string_view conversion_fault_operation;
+thread_local int conversion_fault_status = 0;
+void test_only_conversion_backend_fault(std::string_view operation, int status)
+{
+    conversion_fault_operation = operation;
+    conversion_fault_status = status;
+}
 void test_only_conversion_checkpoint(std::function<void(bool, uint64_t)> callback)
 {
     conversion_checkpoint = std::move(callback);
@@ -28,32 +37,33 @@ constexpr uint32_t CONVERSION_VERSION = 1;
 
 const char* status_reason(VaultResult status) noexcept
 {
+    using enum VaultResult;
     switch (status) {
-    case VaultResult::Ok:
+    case Ok:
         return "";
-    case VaultResult::IoError:
+    case IoError:
         return "Filesystem read, write or sync failed";
-    case VaultResult::BadFormat:
+    case BadFormat:
         return "Vault header or metadata format is invalid";
-    case VaultResult::AuthFailed:
+    case AuthFailed:
         return "Password/keyfile or encrypted data authentication failed";
-    case VaultResult::Locked:
+    case Locked:
         return "Vault session is locked";
-    case VaultResult::NotFound:
+    case NotFound:
         return "Requested vault entry is missing";
-    case VaultResult::AlreadyExists:
+    case AlreadyExists:
         return "Destination already exists";
-    case VaultResult::InvalidArg:
+    case InvalidArg:
         return "Vault operation rejected invalid metadata or arguments";
-    case VaultResult::CryptoError:
+    case CryptoError:
         return "Random generator or key derivation failed";
-    case VaultResult::Busy:
+    case Busy:
         return "Another process holds the vault lease";
-    case VaultResult::IncompleteConversion:
+    case IncompleteConversion:
         return "Destination is an incomplete conversion";
-    case VaultResult::Damaged:
+    case Damaged:
         return "Destination media references are damaged";
-    case VaultResult::UnsupportedVersion:
+    case UnsupportedVersion:
         return "Vault format version is unsupported";
     }
     return "Unrecognized backend status";
@@ -61,20 +71,21 @@ const char* status_reason(VaultResult status) noexcept
 
 const char* status_reason(v3::ReadStatus status) noexcept
 {
+    using enum v3::ReadStatus;
     switch (status) {
-    case v3::ReadStatus::Ok:
+    case Ok:
         return "";
-    case v3::ReadStatus::IoError:
+    case IoError:
         return "Object or database read, write or sync failed";
-    case v3::ReadStatus::BadFormat:
+    case BadFormat:
         return "Encrypted object or database format is invalid";
-    case v3::ReadStatus::AuthenticationFailed:
+    case AuthenticationFailed:
         return "Encrypted data authentication failed";
-    case v3::ReadStatus::Busy:
+    case Busy:
         return "Another process holds the destination lease";
-    case v3::ReadStatus::UnsupportedVersion:
+    case UnsupportedVersion:
         return "Destination format version is unsupported";
-    case v3::ReadStatus::AlreadyExists:
+    case AlreadyExists:
         return "Destination object already exists";
     }
     return "Unrecognized backend status";
@@ -82,22 +93,23 @@ const char* status_reason(v3::ReadStatus status) noexcept
 
 const char* status_reason(v3::DbStatus status) noexcept
 {
+    using enum v3::DbStatus;
     switch (status) {
-    case v3::DbStatus::Ok:
+    case Ok:
         return "";
-    case v3::DbStatus::InvalidArgument:
+    case InvalidArgument:
         return "Database rejected invalid metadata";
-    case v3::DbStatus::IoError:
+    case IoError:
         return "Encrypted database read, write or sync failed";
-    case v3::DbStatus::WrongKeyOrCorrupt:
+    case WrongKeyOrCorrupt:
         return "Encrypted database key or integrity check failed";
-    case v3::DbStatus::Busy:
+    case Busy:
         return "Encrypted database is busy";
-    case v3::DbStatus::DiskFull:
+    case DiskFull:
         return "Destination disk is full";
-    case v3::DbStatus::Constraint:
+    case Constraint:
         return "Converted metadata violates a database constraint";
-    case v3::DbStatus::UnsupportedVersion:
+    case UnsupportedVersion:
         return "Database schema version is unsupported";
     }
     return "Unrecognized backend status";
@@ -105,16 +117,17 @@ const char* status_reason(v3::DbStatus status) noexcept
 
 const char* status_reason(v3::RecoveryStatus status) noexcept
 {
+    using enum v3::RecoveryStatus;
     switch (status) {
-    case v3::RecoveryStatus::Ok:
+    case Ok:
         return "";
-    case v3::RecoveryStatus::DatabaseError:
+    case DatabaseError:
         return "Encrypted database integrity or cleanup operation failed";
-    case v3::RecoveryStatus::FilesystemError:
+    case FilesystemError:
         return "Destination filesystem read or cleanup operation failed";
-    case v3::RecoveryStatus::Corrupt:
+    case Corrupt:
         return "Destination integrity check found corruption";
-    case v3::RecoveryStatus::Cancelled:
+    case Cancelled:
         return "Destination integrity check cancelled";
     }
     return "Unrecognized recovery status";
@@ -155,7 +168,13 @@ const char* conversion_failure_reason(LegacyConversionStatus status) noexcept
 template <typename Status>
 Status record_result(LegacyConversionReport& report, Status status) noexcept
 {
-    report.backend_code = static_cast<int>(status);
+#ifdef OSV_VAULT_FIXTURE_DIR
+    // Exercise error propagation after a backend call without requiring disk exhaustion
+    // or an actual database failure. Compiled out of production builds.
+    if (!conversion_fault_operation.empty() && conversion_fault_operation == report.operation)
+        status = static_cast<Status>(conversion_fault_status);
+#endif
+    report.backend_code = static_cast<int>(std::to_underlying(status));
     report.detail = status_reason(status);
     return status;
 }
@@ -637,10 +656,10 @@ struct LegacyVideoReader {
 LegacyConversionStatus verify_logical_node(Vault& source_vault, v3::ReadSession& destination_vault,
                                            const IndexNode& source, const IndexNode& destination,
                                            std::span<const uint8_t> digest_key,
-                                           CancellationToken cancel, LegacyConversionReport& report,
-                                           uint64_t& ordinal) noexcept
+                                           CancellationToken cancel,
+                                           LegacyConversionReport& report) noexcept
 {
-    report.failed_ordinal = ++ordinal;
+    ++report.failed_ordinal;
     report.operation = "Compare node metadata";
     report.detail = "Folder structure or node metadata differs";
     if (cancel.requested()) return LegacyConversionStatus::Cancelled;
@@ -662,7 +681,7 @@ LegacyConversionStatus verify_logical_node(Vault& source_vault, v3::ReadSession&
         report.operation = "Compare original media";
         const auto destination_status = destination_vault.digest_object(
             destination.node_id, role, digest_key, destination_digest, cancel);
-        report.backend_code = static_cast<int>(destination_status);
+        report.backend_code = static_cast<int>(std::to_underlying(destination_status));
         const bool matches = source_digest == destination_digest;
         crypto_wipe(source_digest.data(), source_digest.size());
         crypto_wipe(destination_digest.data(), destination_digest.size());
@@ -677,7 +696,7 @@ LegacyConversionStatus verify_logical_node(Vault& source_vault, v3::ReadSession&
     for (size_t i = 0; i < source.children.size(); ++i) {
         const auto status =
             verify_logical_node(source_vault, destination_vault, source.children[i],
-                                destination.children[i], digest_key, cancel, report, ordinal);
+                                destination.children[i], digest_key, cancel, report);
         if (status != LegacyConversionStatus::Ok) return status;
     }
     return LegacyConversionStatus::Ok;
@@ -703,7 +722,7 @@ LegacyConversionStatus copy_legacy_video_object(Vault& source, const IndexNode& 
     const auto status = destination.stage_object_stream(
         destination_node.node_id, v3::ObjectRole::OriginalVideo,
         std::to_underlying(source_node.vmeta.container), source_node.vmeta.orig_size,
-        [&](uint64_t offset, std::span<uint8_t> output) {
+        [&read, &source_failed](uint64_t offset, std::span<uint8_t> output) {
             const bool ok = read(offset, output);
             source_failed = source_failed || !ok;
             return ok;
@@ -862,22 +881,24 @@ private:
         return true;
     }
 
-    bool check_destination(v3::ReadSession& session, LegacyConversionReport& report) const noexcept
+    bool check_destination(const v3::ReadSession& session,
+                           LegacyConversionReport& report) const noexcept
     {
         const auto deep = session.verify(v3::VerifyDepth::Deep, cancellation_token(request_));
-        report.backend_code = static_cast<int>(deep.status);
+        report.backend_code = static_cast<int>(std::to_underlying(deep.status));
         report.objects_checked = deep.objects_checked;
         report.authenticated_bytes = deep.authenticated_bytes;
         if (deep.status == v3::RecoveryStatus::Ok && !deep.has_corruption()) return true;
         report.detail = "Destination integrity check failed";
+        using enum v3::RecoveryStatus;
         switch (deep.status) {
-        case v3::RecoveryStatus::DatabaseError:
+        case DatabaseError:
             report.detail = "Encrypted database integrity check failed";
             break;
-        case v3::RecoveryStatus::FilesystemError:
+        case FilesystemError:
             report.detail = "Cannot read destination filesystem";
             break;
-        case v3::RecoveryStatus::Cancelled:
+        case Cancelled:
             report.detail = "Integrity check cancelled";
             break;
         default:
@@ -940,9 +961,9 @@ private:
             return fail(report, LegacyConversionStatus::VerificationFailed);
         report.operation = "Unlock reopened destination";
         report.detail = "Destination database or wrapped key could not be unlocked";
-        const auto unlocked = record_result(
-            report, reopened.unlock_directory(request_.password, request_.keyfile, true));
-        if (unlocked != VaultResult::Ok)
+        if (const auto unlocked = record_result(
+                report, reopened.unlock_directory(request_.password, request_.keyfile, true));
+            unlocked != VaultResult::Ok)
             return fail(report, unlocked == VaultResult::AuthFailed
                                     ? LegacyConversionStatus::AuthenticationFailed
                                     : LegacyConversionStatus::VerificationFailed);
@@ -964,11 +985,11 @@ private:
         report.detail = "System random generator failed";
         std::array<uint8_t, 32> key{};
         if (!crypto::fill_random(key)) return fail(report, IoError);
-        uint64_t ordinal = 0;
+        report.failed_ordinal = 0;
         report.backend_code = -1;
         const auto logical =
             verify_logical_node(source_, *reopened.v3_, source_.root_, reopened.root_, key,
-                                cancellation_token(request_), report, ordinal);
+                                cancellation_token(request_), report);
         crypto_wipe(key.data(), key.size());
         if (logical != Ok) return fail(report, logical);
         report.failed_ordinal = 0;
@@ -995,17 +1016,15 @@ private:
         platform::safe_println(stderr,
                                "[Converter] {}: {} (status {}, backend {}, item {}, objects {}, "
                                "authenticated bytes {})",
-                               report.operation, report.detail, static_cast<int>(status),
-                               report.backend_code, report.failed_ordinal, report.objects_checked,
+                               report.operation, report.detail,
+                               static_cast<int>(std::to_underlying(status)), report.backend_code,
+                               report.failed_ordinal, report.objects_checked,
                                report.authenticated_bytes);
         if (std::ranges::any_of(report.failed_object, [](uint8_t byte) { return byte != 0; })) {
-            std::array<char, 33> hex{};
-            constexpr std::string_view digits = "0123456789abcdef";
-            for (size_t i = 0; i < report.failed_object.size(); ++i) {
-                hex[2 * i] = digits[report.failed_object[i] >> 4];
-                hex[2 * i + 1] = digits[report.failed_object[i] & 15];
-            }
-            platform::safe_println(stderr, "[Converter] failed encrypted object {}", hex.data());
+            std::string hex;
+            for (const auto byte : report.failed_object)
+                hex += std::format("{:02x}", byte);
+            platform::safe_println(stderr, "[Converter] failed encrypted object {}", hex);
         }
         return false;
     }

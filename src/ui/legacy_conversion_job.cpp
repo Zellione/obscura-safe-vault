@@ -33,7 +33,7 @@ void LegacyConversionJob::run(vault::Vault& source, const std::filesystem::path&
             outcome_.detail =
                 "Conversion checks passed, but the final browsing session could not open. Keep the "
                 "original; reopen the converted vault from the vault manager";
-            outcome_.backend_code = static_cast<int>(unlocked);
+            outcome_.backend_code = std::to_underlying(unlocked);
             platform::safe_println(stderr, "[Converter] {} (vault status {})", outcome_.operation,
                                    outcome_.backend_code);
         }
