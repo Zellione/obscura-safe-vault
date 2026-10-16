@@ -147,14 +147,22 @@ v3 frames while retaining at most one authenticated
 legacy chunk in `SecureBytes`; free-space preflight and `OpProgress` reporting
 are also implemented. The space budget is max(source file size, original sizes
 plus stored derived lengths), plus rounded-up 5%, 16 KiB per node, and 32 MiB
-fixed slack; checked arithmetic rejects overflow. Resume still budgets a full
-destination. Conversion commits every 32 completed nodes; an encrypted
+fixed slack; checked arithmetic rejects overflow. Resume authenticates the marker
+and referenced objects before subtracting authenticated plaintext bytes from the
+content allowance, retaining full DB/node and fixed slack. Conversion commits
+parent-first batches of at most 32 nodes through `commit_conversion_batch`: node
+rows, object references, and resume mappings are one transaction. Session object
+indexes are updated incrementally; tags/settings/searches and the full in-memory
+snapshot are finalized once after copying. An encrypted
 `conversion_nodes` table maps deterministic source traversal identities to fresh
 v3 node IDs, allowing pre-v13 sources with zero node IDs to resume as well. A
 resume rebuilds the same prefix and skips object roles already referenced by the
 destination DB. Before clearing the marker, a cold-reopened destination is
 compared with the source for ordered topology, user-visible metadata, settings,
-saved searches, and a fresh random-keyed BLAKE2b digest of every original;
+saved searches, and fresh random-keyed BLAKE2b digests of originals and derived objects.
+One cold deep scan authenticates all destination objects and collects digests through
+`VerificationObserver`; logical comparison authenticates the source without rereading
+destination originals. Reused thumbnails are authenticated in this final comparison;
 video hashing is bounded to one authenticated legacy chunk or v3 object frame.
 Source authentication failures log only an opaque traversal ordinal and stop
 the conversion; missing derived objects increment a warning count while original

@@ -20,6 +20,7 @@
 #include "ui/clipboard_gate.h"
 #include "ui/clipboard_secret.h"
 #include "ui/passphrase.h"
+#include "ui/progress_modal.h"
 #include "ui/text_input_event.h"
 #include "ui/text_metrics.h"
 #include "ui/unlock_logic.h"
@@ -534,6 +535,19 @@ void UnlockScreen::submit()
 
 void UnlockScreen::render(gfx::Renderer& r)
 {
+    if (conversion_job_.active()) {
+        const auto text = conversion_progress_text(
+            conversion_job_.conversion_progress().phase.load(),
+            conversion_job_.progress().done.load(), conversion_job_.progress().total.load(),
+            conversion_job_.conversion_progress().bytes.load());
+        draw_op_progress(r, font_, static_cast<float>(win_.width()),
+                         static_cast<float>(win_.height()),
+                         {.title = text.title,
+                          .count_line = text.count_line,
+                          .done = text.done,
+                          .total = text.total});
+        return;
+    }
     if (legacy_choice_) {
         render_legacy_choice(r);
         return;
@@ -637,14 +651,7 @@ void UnlockScreen::render_conversion_status(gfx::Renderer& r)
     const auto text = [&](float row, std::string_view label, gfx::Color color) {
         r.draw_text(font_, 60, form.row(row), fit_text(font_, label, width), color);
     };
-    if (conversion_job_.active())
-        text(14,
-             std::format("Converting... {} / {}. Esc cancels safely.",
-                         conversion_job_.progress().done.load(),
-                         conversion_job_.progress().total.load()),
-             TEXT_DIM);
-    else if (conversion_report_ &&
-             conversion_report_->status == vault::LegacyConversionStatus::Ok) {
+    if (conversion_report_ && conversion_report_->status == vault::LegacyConversionStatus::Ok) {
         text(14, "Copy verified. Original preserved. Press Enter to open the new vault.", OK);
         text(15, "Back up and test the new vault before deleting the original.", TEXT_DIM);
         text(16,

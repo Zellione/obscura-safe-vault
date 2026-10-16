@@ -5,6 +5,7 @@
 #include "vault/v3_object_store.h"
 
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <vector>
 #include "vault/op_progress.h"
@@ -75,12 +76,22 @@ struct GarbageCollectionResult {
 collect_garbage(const VaultRoot& root, const WriterLock& writer_lock, const Database& database,
                 std::span<const GarbageObject> candidates, uint64_t grace_seconds) noexcept;
 
+// Optional streaming observer used by conversion to compare authenticated bytes
+// during the cold deep scan. The plaintext span expires when the callback returns.
+// Callbacks run synchronously under the session lock and must not reenter it.
+struct VerificationObserver {
+    std::function<void(const ObjectRecord&, std::span<const uint8_t>)> frame;
+    std::function<void(const ObjectRecord&)> complete;
+    std::atomic<uint64_t>* bytes = nullptr;
+};
+
 // Quick verification checks the encrypted database plus reference/file consistency. Deep
 // verification additionally authenticates every referenced object's header, table and frame.
 // Findings contain opaque IDs only; user metadata and plaintext never enter diagnostics.
-[[nodiscard]] VerificationReport verify_vault(const VaultRoot& root, const Database& database,
-                                              std::span<const uint8_t, crypto::KEY_SIZE> master_key,
-                                              const Id& vault_id, VerifyDepth depth,
-                                              CancellationToken cancel = {}) noexcept;
+[[nodiscard]] VerificationReport
+verify_vault(const VaultRoot& root, const Database& database,
+             std::span<const uint8_t, crypto::KEY_SIZE> master_key, const Id& vault_id,
+             VerifyDepth depth, CancellationToken cancel = {},
+             const VerificationObserver* observer = nullptr) noexcept;
 
 }  // namespace vault::v3

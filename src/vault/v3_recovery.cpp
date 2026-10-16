@@ -119,11 +119,17 @@ bool is_unreadable(const ReconciliationReport& reconciled, const ObjectId& id) n
            std::ranges::find(reconciled.size_mismatches, id) != reconciled.size_mismatches.end();
 }
 
+struct AuthenticationContext {
+    VerificationReport& report;
+    CancellationToken cancel;
+    const VerificationObserver* observer;
+};
+
 void authenticate_object(const VaultRoot& root, const Database& database,
                          std::span<const uint8_t, crypto::KEY_SIZE> master_key, const Id& vault_id,
-                         const ObjectRecord& object, VerificationReport& report,
-                         CancellationToken cancel) noexcept
+                         const ObjectRecord& object, AuthenticationContext context) noexcept
 {
+    auto& [report, cancel, observer] = context;
     bool valid_format = false;
     const auto media_format = media_format_for(database, object, valid_format);
     if (!valid_format) {
@@ -159,21 +165,26 @@ void authenticate_object(const VaultRoot& root, const Database& database,
             return;
         }
         report.authenticated_bytes += plaintext.size();
+        if (observer) {
+            if (observer->bytes) observer->bytes->fetch_add(plaintext.size());
+            if (observer->frame) observer->frame(object, plaintext.as_span());
+        }
     }
     ++report.objects_checked;
+    if (observer && observer->complete) observer->complete(object);
 }
 
 bool authenticate_references(const VaultRoot& root, const Database& database,
                              std::span<const uint8_t, crypto::KEY_SIZE> master_key,
                              const Id& vault_id, const ReconciliationReport& reconciled,
-                             VerificationReport& report, CancellationToken cancel) noexcept
+                             AuthenticationContext context) noexcept
 {
     const auto references = database.object_references();
     if (references.status != DbStatus::Ok) return false;
     for (const auto& object : references.value) {
         if (is_unreadable(reconciled, object.object_id)) continue;
-        authenticate_object(root, database, master_key, vault_id, object, report, cancel);
-        if (report.status == RecoveryStatus::Cancelled) return true;
+        authenticate_object(root, database, master_key, vault_id, object, context);
+        if (context.report.status == RecoveryStatus::Cancelled) return true;
     }
     return true;
 }
@@ -182,8 +193,8 @@ bool authenticate_references(const VaultRoot& root, const Database& database,
 VerificationReport verify_vault(const VaultRoot& root,
                                 const Database& database,  // NOSONAR cpp:S3776
                                 std::span<const uint8_t, crypto::KEY_SIZE> master_key,
-                                const Id& vault_id, VerifyDepth depth,
-                                CancellationToken cancel) noexcept
+                                const Id& vault_id, VerifyDepth depth, CancellationToken cancel,
+                                const VerificationObserver* observer) noexcept
 {
     VerificationReport report;
     report.status = RecoveryStatus::Ok;
@@ -216,8 +227,9 @@ VerificationReport verify_vault(const VaultRoot& root,
     for (const auto& garbage : reconciled.garbage)
         report.findings.push_back({IntegrityFindingKind::UnreferencedGarbage, garbage.id});
 
-    if (depth == VerifyDepth::Deep && !authenticate_references(root, database, master_key, vault_id,
-                                                               reconciled, report, cancel)) {
+    if (depth == VerifyDepth::Deep &&
+        !authenticate_references(root, database, master_key, vault_id, reconciled,
+                                 {report, cancel, observer})) {
         report.status = RecoveryStatus::DatabaseError;
         return report;
     }

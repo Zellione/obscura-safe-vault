@@ -109,3 +109,12 @@ OSV_V3_FACADE_BENCH=5000 build/bin/Release/osv_tests v3_facade_benchmark
 Each media has an original and thumbnail object; reports batched import, cold
 unlock, and 2,000 scattered thumbnail reads. Supports up to 250,000 nodes.
 The separate `OSV_V3_BENCH_SCALE` suite measures SQL repository operations only.
+
+## Legacy conversion benchmark
+```bash
+OSV_CONVERSION_BENCH=1000 build/bin/Release/osv_tests legacy_converter_tiny_media_benchmark
+OSV_CONVERSION_BENCH=10000 build/bin/Release/osv_tests legacy_converter_tiny_media_benchmark
+OSV_CONVERSION_BENCH=100000 build/bin/Release/osv_tests legacy_converter_tiny_media_benchmark
+```
+Tiny originals; reports conversion wall time and metadata batch count, excluding
+source fixture construction. Temporary encrypted vaults are removed after each run.

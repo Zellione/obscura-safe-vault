@@ -144,6 +144,8 @@ verification and finalization operations succeed.
 
 ### Performance findings (code audit; not a 500 GB benchmark)
 
+This is the audit snapshot before the performance implementation described below.
+
 1. **Growing full-tree commits are the largest metadata scalability concern.**
    `count_and_maybe_commit` commits every 32 nodes. `ReadSession::commit_metadata`
    calls `Database::sync_metadata`, which walks all accumulated nodes, updates
@@ -184,3 +186,50 @@ verification and finalization operations succeed.
 
 The screenshot from a prior run cannot identify which old branch failed: the old
 report discarded those details. These diagnostics apply to subsequent attempts.
+
+## Conversion performance and dedicated progress screen
+
+The converter now publishes parent-first batches of at most 32 nodes through a
+conversion-only SQL transaction. Each transaction commits node rows, immutable
+object references, and source-to-destination mappings together. Previously committed
+nodes and object indexes are not rebuilt per batch. Tags, settings, and saved
+searches are synchronized once at the end; the incomplete-conversion marker gates
+browsing until final verification succeeds. Object files retain their existing
+individual durable publication protocol. Interrupted, unreferenced publications
+remain encrypted garbage and are collected on a successful resume.
+
+Verification closes the writing session and independently reopens the destination
+before one deep scan. That scan checks database/reference completeness, authenticates
+every original and derived object, and computes ephemeral keyed BLAKE2b digests.
+The logical comparison then authenticates source originals and thumbnails/posters
+and compares those digests, topology, metadata, settings, and searches. This removes
+the warm deep scan and the additional destination-original digest read: destination
+objects are read once for verification. Digest keys are locked and wiped; retained
+digests and hash state are wiped on every exit. Video buffers remain bounded to one
+legacy chunk or destination frame; copying remains sequential.
+
+Resume authenticates the matching encrypted marker and all referenced destination
+objects before granting space credit. Only authenticated plaintext lengths reduce
+the content allowance; the full per-node DB allowance and fixed working slack remain.
+Directory size and orphan files never earn credit. Existing derived-object lookups
+precede source reads; source authentication remains mandatory in final comparison.
+
+While conversion is active, the unlock screen draws only the shared centered
+operation-progress display, like legacy upgrades. Destination selection and password
+fields are hidden. Atomic phase/byte counters distinguish preparation, copy, cold
+reopen, authentication, source comparison, and finalization. Escape requests safe
+cancellation; errors return to the form with the existing diagnostics.
+
+Regression coverage includes atomic batch rollback/idempotency, cancellation at a
+committed batch and within video/verification frames, authenticated resume space
+credit, corrupt reused source thumbnails, destination tampering, and phase text.
+The opt-in `OSV_CONVERSION_BENCH=1000|10000|100000` tiny-media fixture reports conversion
+wall time and batch count; it excludes source construction and does not represent
+large-video throughput or peak locked-memory usage.
+
+Local Release measurements on tmpfs (with a concurrent sanitizer build): 1,000
+three-byte originals: 0.542 s / 32 batches; 10,000: 6.162 s / 313 batches; 100,000:
+129.022 s / 3,126 batches. All conversions passed cold and logical verification.
+These are absolute measurements, not a before/after speedup claim. The largest
+fixture exceeded the process's lockable-memory allowance; no parallel copy workers
+or increased plaintext buffering were introduced.

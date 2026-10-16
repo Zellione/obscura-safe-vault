@@ -100,12 +100,15 @@ public:
                                              std::span<const uint8_t> old_keyfile,
                                              std::span<const uint8_t> new_password,
                                              std::span<const uint8_t> new_keyfile) noexcept;
-    [[nodiscard]] VerificationReport verify(VerifyDepth depth,
-                                            CancellationToken cancel = {}) const noexcept;
+    [[nodiscard]] VerificationReport
+    verify(VerifyDepth depth, CancellationToken cancel = {},
+           const VerificationObserver* observer = nullptr) const noexcept;
     [[nodiscard]] GarbageCollectionResult garbage_collect(uint64_t grace_seconds) noexcept;
     [[nodiscard]] BackupResult backup(const std::filesystem::path& destination) const noexcept;
     [[nodiscard]] DbStatus maintain_database_storage() noexcept;
     [[nodiscard]] std::optional<uint64_t> database_bytes() const noexcept;
+    [[nodiscard]] DbStatus
+    commit_conversion_batch(std::span<const ConversionEntry> entries) noexcept;
     [[nodiscard]] DbStatus begin_conversion(const ConversionMarker& marker) noexcept;
     [[nodiscard]] DbResult<std::optional<ConversionMarker>> conversion_marker() const noexcept;
     [[nodiscard]] DbResult<std::optional<Id>>

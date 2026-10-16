@@ -581,3 +581,8 @@ Legacy conversion errors show the failing operation and reason, source ordinal o
 opaque encrypted-object ID when available, and recovery guidance. Error text wraps
 and the form scroll range includes every diagnostic line. Final browsing-session
 open failures are distinguished from content-verification failures.
+
+Active legacy conversion hides the selection/credential form entirely and uses the
+shared centered progress modal on a clean background, like legacy upgrades. It
+shows copy item/byte progress, cold reopen, authenticated bytes, source comparison,
+and finalization phases. Escape requests cancellation without leaving the worker.

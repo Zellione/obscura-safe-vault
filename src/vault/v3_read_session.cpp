@@ -391,12 +391,13 @@ ReadStatus ReadSession::digest_object(const Id& node_id, ObjectRole role,
     return ReadStatus::Ok;
 }
 
-VerificationReport ReadSession::verify(VerifyDepth depth, CancellationToken cancel) const noexcept
+VerificationReport ReadSession::verify(VerifyDepth depth, CancellationToken cancel,
+                                       const VerificationObserver* observer) const noexcept
 {
     const std::lock_guard lock(state_mutex_);
     if (!unlocked_ || !database_) return {};
     return verify_vault(root_handle_, *database_, master_key_.as_span(), header_.vault_id, depth,
-                        cancel);
+                        cancel, observer);
 }
 
 GarbageCollectionResult ReadSession::garbage_collect(uint64_t grace_seconds) noexcept
@@ -487,6 +488,19 @@ DbStatus ReadSession::finish_conversion() noexcept
     const std::lock_guard lock(state_mutex_);
     if (!unlocked_ || !database_ || !session_lock_) return DbStatus::InvalidArgument;
     return database_->finish_conversion();
+}
+
+DbStatus ReadSession::commit_conversion_batch(std::span<const ConversionEntry> entries) noexcept
+{
+    const std::lock_guard lock(state_mutex_);
+    if (!unlocked_ || !database_ || !session_lock_) return DbStatus::IoError;
+    const auto status = database_->commit_conversion_batch(entries, staged_objects_);
+    if (status != DbStatus::Ok) return status;
+    for (const auto& [key, info] : staged_index_)
+        object_index_.insert_or_assign(key, info);
+    staged_objects_.clear();
+    staged_index_.clear();
+    return DbStatus::Ok;
 }
 
 ReadStatus ReadSession::commit_metadata(const IndexNode& root, const VaultSettings& settings,

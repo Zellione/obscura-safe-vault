@@ -7,9 +7,19 @@
 
 namespace vault {
 struct LegacyConversionReport;
+enum class ConversionPhase : uint8_t;
 }
 
 namespace ui {
+
+struct ConversionProgressText {
+    std::string_view title;
+    std::string count_line;
+    int done = 0;
+    int total = 0;
+};
+[[nodiscard]] ConversionProgressText conversion_progress_text(vault::ConversionPhase phase,
+                                                              int done, int total, uint64_t bytes);
 
 struct ConversionFormLayout {
     float width;
