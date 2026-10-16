@@ -125,6 +125,20 @@ jobs:
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
             --slave /usr/bin/g++ g++ /usr/bin/g++-14
 
+      - name: Cache encrypted database dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-sqlcipher
+        with:
+          path: |
+            vendor/.openssl-build
+            vendor/openssl-prefix
+            vendor/.sqlcipher-build
+          key: sqlcipher-linux-${{ hashFiles('.gitmodules', 'scripts/build_openssl.sh', 'scripts/build_sqlcipher.sh') }}-${{ runner.arch }}
+
+      - name: Build SQLCipher database library
+        if: steps.cache-sqlcipher.outputs.cache-hit != 'true'
+        run: scripts/build_sqlcipher.sh
+
       - name: Cache vendored codecs build
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-codecs

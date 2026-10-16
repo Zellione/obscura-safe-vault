@@ -144,6 +144,8 @@ production dependencies; local sanitizers prefer separately instrumented builds.
 Release uses PIE, full RELRO/immediate binding, stack protection and fortify.
 `release.yml` builds the Linux release tarball for version tags and attaches it
 with SHA256SUMS.txt to the GitHub release.
+It restores the same SQLCipher/OpenSSL cache as CI and builds those static
+dependencies on a cache miss before generating Ninja files.
 The ASAN job (Linux-only) builds vendored SDL3 (since Phase 4) and the image codecs (since
 Phase 9): running the C decoders under ASAN/UBSan on untrusted input is high value. nasm is
 installed on every leg for libaom.
