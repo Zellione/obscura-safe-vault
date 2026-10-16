@@ -160,8 +160,8 @@ bool UnlockScreen::handle_conversion_input(const SDL_Event& e)
 
 void UnlockScreen::handle_event(const SDL_Event& e)
 {
-    if (handle_conversion_input(e)) return;
     if (handle_blocking_event(e)) return;
+    if (handle_conversion_input(e)) return;
     if (handle_legacy_choice(e)) return;
     if (handle_text_event(e)) return;
 

@@ -107,6 +107,8 @@ public:
     [[nodiscard]] BackupResult backup(const std::filesystem::path& destination) const noexcept;
     [[nodiscard]] DbStatus maintain_database_storage() noexcept;
     [[nodiscard]] std::optional<uint64_t> database_bytes() const noexcept;
+    // Conversion-only: update durable rows and object lookup without rebuilding the tree.
+    // Finalize tags/settings/searches and the snapshot once with commit_metadata.
     [[nodiscard]] DbStatus
     commit_conversion_batch(std::span<const ConversionEntry> entries) noexcept;
     [[nodiscard]] DbStatus begin_conversion(const ConversionMarker& marker) noexcept;
