@@ -16,6 +16,10 @@ production facade benchmarks, and Linux-only cleanup. Validation is in progress.
 
 ## Phase index
 
+Release packaging follow-up: restore/build the static SQLCipher and OpenSSL
+dependencies before generating the tag-triggered Release build, matching CI.
+The first v2.0.0 packaging run exposed the missing dependency setup.
+
 Legacy conversion performance: incremental atomic metadata batches, one cold deep
 verification/digest scan, authenticated resume-space credit, and a dedicated progress
 screen with copy/verify/compare phases. See the [Phase 115 follow-up](docs/roadmap/phase-115-legacy-vault-converter.md#conversion-performance-and-dedicated-progress-screen).
