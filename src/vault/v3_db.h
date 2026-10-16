@@ -94,6 +94,15 @@ struct ConversionNode {
     Id destination_node_id{};
 };
 
+// Parent-first batch; pointers remain valid until the synchronous commit returns.
+// Tags/settings are finalized once after copying; incomplete vaults stay gated.
+struct ConversionEntry {
+    const IndexNode* node = nullptr;
+    std::optional<Id> parent;
+    uint64_t order = 0;
+    Id source_id{};
+};
+
 struct TagCategoryRecord {
     int64_t category_id = 0;
     crypto::SecureString display_name;
@@ -200,6 +209,8 @@ public:
     sync_metadata(const IndexNode& root, const VaultSettings& settings,
                   std::span<const SavedSearch> searches,
                   std::span<const ObjectRecord> staged_objects = {}) noexcept;
+    [[nodiscard]] DbStatus commit_conversion_batch(std::span<const ConversionEntry> entries,
+                                                   std::span<const ObjectRecord> objects) noexcept;
     [[nodiscard]] DbStatus begin_conversion(const ConversionMarker& marker) noexcept;
     [[nodiscard]] DbResult<std::optional<ConversionMarker>> conversion_marker() const noexcept;
     [[nodiscard]] DbResult<std::optional<Id>>

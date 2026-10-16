@@ -333,3 +333,33 @@ TEST(v3_db_invalid_snapshot_preserves_committed_tree)
     reopened.database.reset();
     fs::remove_all(dir);
 }
+
+TEST(v3_db_conversion_batch_rolls_back_nodes_objects_and_mapping_together)
+{
+    using namespace vault::v3;
+    const auto dir = db_temp_dir();
+    auto opened = Database::create(dir / "vault.db", DB_KEY, ROOT_ID);
+    REQUIRE(opened.database);
+    auto& db = *opened.database;
+    REQUIRE(db.begin_conversion({{1}, 1}) == DbStatus::Ok);
+    vault::IndexNode child;
+    child.node_id = CHILD_ID;
+    child.name = "child";
+    const ConversionEntry entry{&child, ROOT_ID, 0, OBJECT_ID};
+    const std::array objects{
+        ObjectRecord{OBJECT_ID, CHILD_ID, ObjectRole::Thumbnail, 100, 4, 4, 1, 1},
+        ObjectRecord{Id{98}, Id{99}, ObjectRole::Thumbnail, 100, 4, 4, 1, 1}};
+    CHECK(db.commit_conversion_batch({&entry, 1}, objects) != DbStatus::Ok);
+    CHECK(db.object_references().value.empty());
+    const auto before = db.settings().value.app_generation;
+    CHECK(!db.find_node(CHILD_ID).value);
+    CHECK(!db.conversion_node_id(OBJECT_ID).value);
+    REQUIRE(db.commit_conversion_batch({&entry, 1}, {}) == DbStatus::Ok);
+    CHECK(db.find_node(CHILD_ID).value.has_value());
+    CHECK_EQ(db.settings().value.app_generation, before + 1);
+    CHECK(db.conversion_node_id(OBJECT_ID).value == CHILD_ID);
+    REQUIRE(db.commit_conversion_batch({&entry, 1}, {}) == DbStatus::Ok);
+    CHECK_EQ(db.list_children(ROOT_ID).value.size(), size_t{1});
+    opened.database.reset();
+    fs::remove_all(dir);
+}

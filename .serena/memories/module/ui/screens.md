@@ -27,6 +27,9 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   `unlock_logic.*` provides pure font-derived conversion geometry and distinct report-to-error
   messages, including required MiB for space/access failures. Mouse clicks select password
   fields; wheel scrolling keeps the form reachable in short windows.
+  Active conversion hides the entire form and renders only `draw_op_progress`,
+  matching the legacy-upgrade screen. `conversion_progress_text` formats atomic
+  preparation/copy/reopen/verify/compare/finalize phases and bytes.
   Escape from the idle form returns to the choice;
   worker cancellation completes before browsing is allowed. A verified conversion promotes
   the destination; read-only browsing retains the source path. Screen event regression tests

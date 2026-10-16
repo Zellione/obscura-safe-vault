@@ -5,7 +5,7 @@ File operations, duplicate scanning, and migration jobs running on background th
 ## Background jobs (mirror each other; each owns the vault's single-thread file handle)
 - `legacy_conversion_job.*` (Phase 115) — cancellable `std::jthread` wrapper around the
   copy-only legacy converter. It copies destination password/keyfile into `SecureBytes`, exposes
-  atomic `OpProgress`, and joins on destruction. On success it independently opens and unlocks
+  atomic `OpProgress` plus conversion phase/byte counters, and joins on destruction. On success it independently opens and unlocks
   the destination before replacing the supplied legacy `Vault` handle, so the UI can never
   promote a destination that failed its final credentialed reopen. Tests cover successful handle
   replacement and rejection of a non-legacy source.

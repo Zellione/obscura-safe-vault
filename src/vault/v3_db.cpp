@@ -121,6 +121,19 @@ NodeMetadata node_metadata(const IndexNode& node) noexcept
     return metadata;
 }
 
+constexpr const char* NODE_UPSERT_SQL =
+    "INSERT INTO nodes(node_id,parent_id,node_type,display_name,sibling_order,favorite,"
+    "created_ts,media_format,width,height,duration_us,codec,original_size,sort_key,animated) "
+    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(node_id) DO UPDATE SET "
+    "parent_id=excluded.parent_id,node_type=excluded.node_type,display_name=excluded.display_"
+    "name,"
+    "sibling_order=excluded.sibling_order,favorite=excluded.favorite,created_ts=excluded."
+    "created_ts,"
+    "media_format=excluded.media_format,width=excluded.width,height=excluded.height,"
+    "duration_us=excluded.duration_us,codec=excluded.codec,original_size=excluded.original_"
+    "size,"
+    "sort_key=excluded.sort_key,animated=excluded.animated";
+
 class MetadataNodeWriter {
 public:
     MetadataNodeWriter(Statement& live, Statement& upsert) noexcept : live_(live), upsert_(upsert)
@@ -128,12 +141,16 @@ public:
 
     bool store(const IndexNode& node, const Id* parent, uint64_t order) const noexcept
     {
-        if (!id_valid(node.node_id) || !mark_live(node.node_id)) return false;
-        if (!bind_node(node, parent, order) || sqlite3_step(upsert_.get()) != SQLITE_DONE)
-            return false;
+        if (!store_one(node, parent, order)) return false;
         for (size_t i = 0; i < node.children.size(); ++i)
             if (!store(node.children[i], &node.node_id, i)) return false;
         return true;
+    }
+
+    bool store_one(const IndexNode& node, const Id* parent, uint64_t order) const noexcept
+    {
+        return id_valid(node.node_id) && mark_live(node.node_id) &&
+               bind_node(node, parent, order) && sqlite3_step(upsert_.get()) == SQLITE_DONE;
     }
 
 private:
@@ -186,6 +203,21 @@ private:
     Statement& live_;
     Statement& upsert_;
 };
+
+DbStatus store_conversion_entry(Database& database, sqlite3* handle,
+                                const MetadataNodeWriter& writer,
+                                const ConversionEntry& entry) noexcept
+{
+    if (!entry.node) return InvalidArgument;
+    if (!writer.store_one(*entry.node, entry.parent ? &*entry.parent : nullptr, entry.order)) {
+        const auto status = map_status(sqlite3_extended_errcode(handle));
+        return status == Ok ? InvalidArgument : status;
+    }
+    const auto prior = database.conversion_node_id(entry.source_id);
+    if (prior.status != Ok) return prior.status;
+    if (prior.value && *prior.value != entry.node->node_id) return Constraint;
+    return database.record_conversion_node({entry.source_id, entry.node->node_id});
+}
 
 std::optional<Id> column_id(sqlite3_stmt* statement, int column) noexcept
 {
@@ -693,6 +725,45 @@ DbStatus Database::insert_node(const NodeRecord& node) noexcept
     return map_status(sqlite3_step(statement.get()));
 }
 
+DbStatus Database::commit_conversion_batch(std::span<const ConversionEntry> entries,
+                                           std::span<const ObjectRecord> objects) noexcept
+{
+    const auto marker = conversion_marker();
+    if (marker.status != Ok) return marker.status;
+    if (!marker.value) return InvalidArgument;
+    auto status = exec(handle_, "BEGIN IMMEDIATE");
+    if (status != Ok) return status;
+    auto generation = settings();
+    if (generation.status != Ok || generation.value.app_generation >=
+                                       static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+        (void)exec(handle_, "ROLLBACK");
+        return generation.status != Ok ? generation.status : Constraint;
+    }
+    ++generation.value.app_generation;
+    Statement upsert{handle_, NODE_UPSERT_SQL};
+    // Keep validation bounded to this batch; never revisit previously copied nodes.
+    status = exec(handle_, "CREATE TEMP TABLE IF NOT EXISTS osv_conversion_batch("
+                           "node_id BLOB PRIMARY KEY) WITHOUT ROWID");
+    if (status == Ok) status = exec(handle_, "DELETE FROM osv_conversion_batch");
+    Statement seen{handle_, "INSERT INTO osv_conversion_batch VALUES(?)"};
+    if (!upsert.get() || !seen.get()) status = IoError;
+    MetadataNodeWriter writer{seen, upsert};
+    for (const auto& entry : entries) {
+        if (status != Ok) break;
+        status = store_conversion_entry(*this, handle_, writer, entry);
+    }
+    for (const auto& object : objects) {
+        if (status != Ok) break;
+        auto committed = object;
+        committed.creation_generation = generation.value.app_generation;
+        status = insert_object(committed);
+    }
+    if (status == Ok) status = set_settings(generation.value);
+    if (status == Ok) status = exec(handle_, "COMMIT");
+    if (status != Ok) (void)exec(handle_, "ROLLBACK");
+    return status;
+}
+
 DbStatus Database::sync_metadata(const IndexNode& root,          // NOSONAR cpp:S3776
                                  const VaultSettings& settings,  // NOSONAR cpp:S3776
                                  std::span<const SavedSearch> searches,
@@ -717,19 +788,7 @@ DbStatus Database::sync_metadata(const IndexNode& root,          // NOSONAR cpp:
         status = exec(handle_, "UPDATE nodes SET sibling_order=sibling_order+2000000");
 
     Statement live{handle_, "INSERT INTO osv_live_nodes(node_id) VALUES(?)"};
-    Statement upsert{
-        handle_,
-        "INSERT INTO nodes(node_id,parent_id,node_type,display_name,sibling_order,favorite,"
-        "created_ts,media_format,width,height,duration_us,codec,original_size,sort_key,animated) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(node_id) DO UPDATE SET "
-        "parent_id=excluded.parent_id,node_type=excluded.node_type,display_name=excluded.display_"
-        "name,"
-        "sibling_order=excluded.sibling_order,favorite=excluded.favorite,created_ts=excluded."
-        "created_ts,"
-        "media_format=excluded.media_format,width=excluded.width,height=excluded.height,"
-        "duration_us=excluded.duration_us,codec=excluded.codec,original_size=excluded.original_"
-        "size,"
-        "sort_key=excluded.sort_key,animated=excluded.animated"};
+    Statement upsert{handle_, NODE_UPSERT_SQL};
     if (status == Ok && (!live.get() || !upsert.get())) status = IoError;
     if (MetadataNodeWriter node_writer{live, upsert};
         status == Ok && !node_writer.store(root, nullptr, 0)) {

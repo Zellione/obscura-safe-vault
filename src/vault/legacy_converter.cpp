@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <format>
 #include <limits>
+#include <map>
 #include <string_view>
 #include <system_error>
 
@@ -19,6 +20,11 @@ namespace vault {
 #ifdef OSV_VAULT_FIXTURE_DIR
 // Deterministic cancellation seam, compiled only into the test binary.
 thread_local std::function<void(bool, uint64_t)> conversion_checkpoint;
+thread_local std::function<void(uint64_t)> conversion_batch_checkpoint;
+void test_only_conversion_batch_checkpoint(std::function<void(uint64_t)> callback)
+{
+    conversion_batch_checkpoint = std::move(callback);
+}
 thread_local std::string_view conversion_fault_operation;
 thread_local int conversion_fault_status = 0;
 void test_only_conversion_backend_fault(std::string_view operation, int status)
@@ -231,7 +237,8 @@ void scan_preflight(const IndexNode& node, PreflightTotals& totals) noexcept
 }
 
 bool preflight_space(const std::filesystem::path& source, const std::filesystem::path& destination,
-                     PreflightTotals totals, LegacyConversionReport& report) noexcept
+                     PreflightTotals totals, LegacyConversionReport& report,
+                     uint64_t reusable = 0) noexcept
 {
     constexpr uint64_t FIXED_SLACK = 32U * 1024U * 1024U;
     std::error_code ec;
@@ -251,8 +258,9 @@ bool preflight_space(const std::filesystem::path& source, const std::filesystem:
     // Budget one destination, not a second full copy. Keep source size as a
     // conservative floor, expanded originals plus stored derived records as the
     // other baseline, and allow for framing, filesystem allocation and DB/WAL.
-    uint64_t required = content_bytes;
-    add_checked(content_bytes / 20 + (content_bytes % 20 != 0 ? 1U : 0U), required, totals.valid);
+    const uint64_t remaining = content_bytes - std::min(content_bytes, reusable);
+    uint64_t required = remaining;
+    add_checked(remaining / 20 + (remaining % 20 != 0 ? 1U : 0U), required, totals.valid);
     add_checked(totals.nodes * PER_NODE_SLACK, required, totals.valid);
     add_checked(FIXED_SLACK, required, totals.valid);
     if (!totals.valid) {
@@ -335,15 +343,17 @@ IndexNode clone_metadata(const IndexNode& source, const v3::Id* root_id = nullpt
     return result;
 }
 
+std::atomic<uint64_t>* conversion_bytes(const LegacyConversionRequest& request) noexcept
+{
+    return request.conversion_progress ? &request.conversion_progress->bytes : nullptr;
+}
+
 struct CopyContext {
     Vault& source;
     v3::ReadSession& destination;
     const LegacyConversionRequest& request;
     LegacyConversionReport& report;
-    const VaultSettings& settings;
-    const std::vector<SavedSearch>& saved_searches;
-    IndexNode* root = nullptr;
-    size_t since_commit = 0;
+    std::vector<v3::ConversionEntry> batch;
     uint64_t source_ordinal = 0;
 };
 
@@ -377,31 +387,29 @@ LegacyConversionStatus mapped_node_id(CopyContext& context, uint64_t source_ordi
         context.report.detail = "System random generator failed";
         return LegacyConversionStatus::IoError;
     }
-    context.report.operation = "Save resume node mapping";
-    if (record_result(context.report, context.destination.record_conversion_node(
-                                          {source_key, destination.node_id})) != v3::DbStatus::Ok)
-        return LegacyConversionStatus::IoError;
     return LegacyConversionStatus::Ok;
 }
 
 LegacyConversionStatus commit_batch(CopyContext& context) noexcept
 {
-    if (!context.root || context.since_commit == 0) return LegacyConversionStatus::Ok;
+    if (context.batch.empty()) return LegacyConversionStatus::Ok;
     context.report.operation = "Commit copied metadata batch";
-    if (record_result(context.report, context.destination.commit_metadata(
-                                          *context.root, context.settings,
-                                          context.saved_searches)) != v3::ReadStatus::Ok)
+    if (record_result(context.report, context.destination.commit_conversion_batch(context.batch)) !=
+        v3::DbStatus::Ok)
         return LegacyConversionStatus::IoError;
-    context.since_commit = 0;
+    ++context.report.metadata_batches;
+#ifdef OSV_VAULT_FIXTURE_DIR
+    if (conversion_batch_checkpoint) conversion_batch_checkpoint(context.report.metadata_batches);
+#endif
+    context.batch.clear();
     return LegacyConversionStatus::Ok;
 }
 
 LegacyConversionStatus count_and_maybe_commit(CopyContext& context) noexcept
 {
     if (context.request.progress) ++context.request.progress->done;
-    ++context.since_commit;
     constexpr size_t BATCH_NODES = 32;
-    return context.since_commit >= BATCH_NODES ? commit_batch(context) : LegacyConversionStatus::Ok;
+    return context.batch.size() >= BATCH_NODES ? commit_batch(context) : LegacyConversionStatus::Ok;
 }
 
 LegacyConversionStatus stage_image_original(CopyContext& context, const IndexNode& source,
@@ -416,6 +424,8 @@ LegacyConversionStatus stage_image_original(CopyContext& context, const IndexNod
     if (const auto read =
             [&context, &original](uint64_t offset, std::span<uint8_t> output) {
                 if (cancelled(context.request)) return false;
+                if (context.request.conversion_progress)
+                    context.request.conversion_progress->bytes.fetch_add(output.size());
                 std::ranges::copy(
                     original.as_span().subspan(static_cast<size_t>(offset), output.size()),
                     output.begin());
@@ -446,9 +456,9 @@ LegacyConversionStatus stage_media(CopyContext& context, const IndexNode& source
         context.report.operation = "Copy video stream";
         context.report.detail = "";
         context.report.backend_code = -1;
-        if (const auto status =
-                copy_legacy_video_object(context.source, source, context.destination, destination,
-                                         cancellation_token(context.request));
+        if (const auto status = copy_legacy_video_object(
+                context.source, source, context.destination, destination,
+                cancellation_token(context.request), conversion_bytes(context.request));
             status != LegacyConversionStatus::Ok) {
             context.report.detail =
                 status == LegacyConversionStatus::SourceCorrupt
@@ -469,11 +479,6 @@ LegacyConversionStatus stage_media(CopyContext& context, const IndexNode& source
         ++context.report.missing_derived;
         return LegacyConversionStatus::Ok;
     }
-    crypto::SecureBytes derived;
-    context.report.operation = "Read source thumbnail/poster";
-    if (record_result(context.report, context.source.read_thumbnail(source, derived)) !=
-        VaultResult::Ok)
-        return LegacyConversionStatus::SourceCorrupt;
     const auto derived_role =
         source.is_image() ? v3::ObjectRole::Thumbnail : v3::ObjectRole::Poster;
     if (const auto existing =
@@ -482,6 +487,11 @@ LegacyConversionStatus stage_media(CopyContext& context, const IndexNode& source
         context.report.derived_bytes += *existing;
         return LegacyConversionStatus::Ok;
     }
+    crypto::SecureBytes derived;
+    context.report.operation = "Read source thumbnail/poster";
+    if (record_result(context.report, context.source.read_thumbnail(source, derived)) !=
+        VaultResult::Ok)
+        return LegacyConversionStatus::SourceCorrupt;
     context.report.operation = "Write destination thumbnail/poster";
     if (record_result(context.report,
                       context.destination.stage_object(destination.node_id, derived_role, format,
@@ -492,7 +502,8 @@ LegacyConversionStatus stage_media(CopyContext& context, const IndexNode& source
 }
 
 LegacyConversionStatus copy_node(CopyContext& context, const IndexNode& source,
-                                 IndexNode& destination, const v3::Id* root_id = nullptr) noexcept
+                                 IndexNode& destination, const v3::Id* root_id = nullptr,
+                                 const v3::Id* parent = nullptr, uint64_t order = 0) noexcept
 {
     using enum LegacyConversionStatus;
     if (cancelled(context.request)) return Cancelled;
@@ -510,19 +521,24 @@ LegacyConversionStatus copy_node(CopyContext& context, const IndexNode& source,
         status != Ok)
         return status;
 
+    context.batch.emplace_back(&destination, parent ? std::optional{*parent} : std::nullopt, order,
+                               conversion_source_key(source_ordinal));
     if (source.is_gallery()) {
         ++context.report.galleries;
+        if (const auto status = count_and_maybe_commit(context); status != Ok) return status;
         try {
             destination.children.reserve(source.children.size());
             for (const auto& child : source.children) {
                 destination.children.emplace_back();
-                const auto status = copy_node(context, child, destination.children.back());
+                const auto status =
+                    copy_node(context, child, destination.children.back(), nullptr,
+                              &destination.node_id, destination.children.size() - 1);
                 if (status != Ok) return status;
             }
         } catch (...) {
             return IoError;
         }
-        return count_and_maybe_commit(context);
+        return Ok;
     }
 
     if (source.is_image())
@@ -653,53 +669,134 @@ struct LegacyVideoReader {
     }
 };
 
-LegacyConversionStatus verify_logical_node(Vault& source_vault, v3::ReadSession& destination_vault,
-                                           const IndexNode& source, const IndexNode& destination,
-                                           std::span<const uint8_t> digest_key,
-                                           CancellationToken cancel,
-                                           LegacyConversionReport& report) noexcept
-{
-    ++report.failed_ordinal;
-    report.operation = "Compare node metadata";
-    report.detail = "Folder structure or node metadata differs";
-    if (cancel.requested()) return LegacyConversionStatus::Cancelled;
-    if (const auto* difference = metadata_difference(source, destination)) {
-        report.detail = difference;
-        return LegacyConversionStatus::VerificationFailed;
+struct ConversionDigests {
+    crypto::SecureBuffer<32> key;
+    crypto_blake2b_ctx hash{};
+    bool hashing = false;
+    std::map<std::pair<v3::Id, v3::ObjectRole>, std::array<uint8_t, 32>> values;
+
+    ~ConversionDigests()
+    {
+        crypto_wipe(&hash, sizeof(hash));
+        for (auto& [id, digest] : values)
+            crypto_wipe(digest.data(), digest.size());
     }
-    if (!source.is_gallery()) {
-        std::array<uint8_t, 32> source_digest{};
-        std::array<uint8_t, 32> destination_digest{};
-        report.operation = "Read source original for comparison";
-        report.detail = "Source original could not be read or authenticated";
-        if (const auto status =
-                digest_legacy_original(source_vault, source, digest_key, source_digest, cancel);
-            status != LegacyConversionStatus::Ok)
-            return status;
-        const auto role =
-            source.is_image() ? v3::ObjectRole::OriginalImage : v3::ObjectRole::OriginalVideo;
-        report.operation = "Compare original media";
-        const auto destination_status = destination_vault.digest_object(
-            destination.node_id, role, digest_key, destination_digest, cancel);
-        report.backend_code = static_cast<int>(std::to_underlying(destination_status));
-        const bool matches = source_digest == destination_digest;
-        crypto_wipe(source_digest.data(), source_digest.size());
-        crypto_wipe(destination_digest.data(), destination_digest.size());
-        if (cancel.requested()) return LegacyConversionStatus::Cancelled;
-        if (destination_status != v3::ReadStatus::Ok || !matches) {
-            report.detail = destination_status != v3::ReadStatus::Ok
-                                ? "Destination original could not be read or authenticated"
-                                : "Original content digest mismatch";
+
+    void frame(const v3::ObjectRecord&, std::span<const uint8_t> bytes)
+    {
+        if (!hashing) {
+            crypto_blake2b_keyed_init(&hash, 32, key.data(), crypto::SecureBuffer<32>::size());
+            hashing = true;
+        }
+        crypto_blake2b_update(&hash, bytes.data(), bytes.size());
+    }
+
+    void complete(const v3::ObjectRecord& object)
+    {
+        if (!hashing)
+            crypto_blake2b_keyed_init(&hash, 32, key.data(), crypto::SecureBuffer<32>::size());
+        auto& digest = values[{object.node_id, object.role}];
+        crypto_blake2b_final(&hash, digest.data());
+        hashing = false;
+    }
+};
+
+LegacyConversionStatus verify_derived(const Vault& source_vault, const IndexNode& source,
+                                      const IndexNode& destination,
+                                      const ConversionDigests& digests,
+                                      LegacyConversionReport& report) noexcept
+{
+    if (const bool has_derived = source.is_image()
+                                     ? source.meta.thumb_length != 0
+                                     : source.is_video() && source.vmeta.poster_length != 0;
+        has_derived) {
+        report.operation = "Compare source thumbnail/poster";
+        report.detail = "Source thumbnail/poster could not be read or authenticated";
+        crypto::SecureBytes bytes;
+        if (source_vault.read_thumbnail(source, bytes) != VaultResult::Ok)
+            return LegacyConversionStatus::SourceCorrupt;
+        const auto role = source.is_image() ? v3::ObjectRole::Thumbnail : v3::ObjectRole::Poster;
+        std::array<uint8_t, 32> digest{};
+        crypto_blake2b_keyed(digest.data(), digest.size(), digests.key.data(),
+                             crypto::SecureBuffer<32>::size(), bytes.data(), bytes.size());
+        const auto found = digests.values.find({destination.node_id, role});
+        const bool matches = found != digests.values.end() && found->second == digest;
+        crypto_wipe(digest.data(), digest.size());
+        if (!matches) {
+            report.detail = "Thumbnail/poster content digest mismatch";
             return LegacyConversionStatus::VerificationFailed;
         }
     }
-    for (size_t i = 0; i < source.children.size(); ++i) {
-        const auto status =
-            verify_logical_node(source_vault, destination_vault, source.children[i],
-                                destination.children[i], digest_key, cancel, report);
-        if (status != LegacyConversionStatus::Ok) return status;
+    return LegacyConversionStatus::Ok;
+}
+
+LegacyConversionStatus verify_original(Vault& source_vault, const IndexNode& source,
+                                       const IndexNode& destination,
+                                       const ConversionDigests& digests, CancellationToken cancel,
+                                       LegacyConversionReport& report,
+                                       ConversionProgress* progress) noexcept
+{
+    if (source.is_gallery()) return LegacyConversionStatus::Ok;
+    std::array<uint8_t, 32> source_digest{};
+    std::array<uint8_t, 32> destination_digest{};
+    report.operation = "Read source original for comparison";
+    report.detail = "Source original could not be read or authenticated";
+    if (const auto status =
+            digest_legacy_original(source_vault, source, digests.key.as_span(), source_digest,
+                                   cancel, progress ? &progress->bytes : nullptr);
+        status != LegacyConversionStatus::Ok)
+        return status;
+    const auto role =
+        source.is_image() ? v3::ObjectRole::OriginalImage : v3::ObjectRole::OriginalVideo;
+    report.operation = "Compare original media";
+    const auto found = digests.values.find({destination.node_id, role});
+    const auto destination_status =
+        found == digests.values.end() ? v3::ReadStatus::BadFormat : v3::ReadStatus::Ok;
+    if (found != digests.values.end()) destination_digest = found->second;
+    report.backend_code = static_cast<int>(std::to_underlying(destination_status));
+    const bool matches = source_digest == destination_digest;
+    crypto_wipe(source_digest.data(), source_digest.size());
+    crypto_wipe(destination_digest.data(), destination_digest.size());
+    if (cancel.requested()) return LegacyConversionStatus::Cancelled;
+    if (destination_status != v3::ReadStatus::Ok || !matches) {
+        report.detail = destination_status != v3::ReadStatus::Ok
+                            ? "Destination original could not be read or authenticated"
+                            : "Original content digest mismatch";
+        return LegacyConversionStatus::VerificationFailed;
     }
     return LegacyConversionStatus::Ok;
+}
+
+LegacyConversionStatus verify_logical_node(Vault& source_vault, const IndexNode& source,
+                                           const IndexNode& destination,
+                                           const ConversionDigests& digests,
+                                           CancellationToken cancel, LegacyConversionReport& report,
+                                           ConversionProgress* progress) noexcept
+{
+    using enum LegacyConversionStatus;
+    ++report.failed_ordinal;
+    report.operation = "Compare node metadata";
+    report.detail = "Folder structure or node metadata differs";
+    if (cancel.requested()) return Cancelled;
+    if (const auto* difference = metadata_difference(source, destination)) {
+        report.detail = difference;
+        return VerificationFailed;
+    }
+    if (const auto status =
+            verify_original(source_vault, source, destination, digests, cancel, report, progress);
+        status != Ok)
+        return status;
+    if (const auto status = verify_derived(source_vault, source, destination, digests, report);
+        status != Ok)
+        return status;
+    for (size_t i = 0; i < source.children.size(); ++i) {
+        if (const auto status =
+                verify_logical_node(source_vault, source.children[i], destination.children[i],
+                                    digests, cancel, report, progress);
+            status != Ok)
+            return status;
+    }
+    return Ok;
 }
 
 }  // namespace
@@ -707,7 +804,8 @@ LegacyConversionStatus verify_logical_node(Vault& source_vault, v3::ReadSession&
 LegacyConversionStatus copy_legacy_video_object(Vault& source, const IndexNode& source_node,
                                                 v3::ReadSession& destination,
                                                 const IndexNode& destination_node,
-                                                CancellationToken cancel) noexcept
+                                                CancellationToken cancel,
+                                                std::atomic<uint64_t>* progress) noexcept
 {
     if (!source.unlocked_ || source.v3_ || !source_node.is_video() ||
         !destination_node.is_video() || source_node.vmeta.orig_size == 0 ||
@@ -722,9 +820,10 @@ LegacyConversionStatus copy_legacy_video_object(Vault& source, const IndexNode& 
     const auto status = destination.stage_object_stream(
         destination_node.node_id, v3::ObjectRole::OriginalVideo,
         std::to_underlying(source_node.vmeta.container), source_node.vmeta.orig_size,
-        [&read, &source_failed](uint64_t offset, std::span<uint8_t> output) {
+        [&read, &source_failed, progress](uint64_t offset, std::span<uint8_t> output) {
             const bool ok = read(offset, output);
             source_failed = source_failed || !ok;
+            if (ok && progress) progress->fetch_add(output.size());
             return ok;
         });
     if (cancel.requested()) return LegacyConversionStatus::Cancelled;
@@ -735,8 +834,8 @@ LegacyConversionStatus copy_legacy_video_object(Vault& source, const IndexNode& 
 
 LegacyConversionStatus digest_legacy_original(Vault& source, const IndexNode& source_node,
                                               std::span<const uint8_t> digest_key,
-                                              std::span<uint8_t> digest,
-                                              CancellationToken cancel) noexcept
+                                              std::span<uint8_t> digest, CancellationToken cancel,
+                                              std::atomic<uint64_t>* progress) noexcept
 {
     if (!source.unlocked_ || source.v3_ || source_node.is_gallery() || digest.empty() ||
         digest.size() > 64 || digest_key.empty() || digest_key.size() > 64)
@@ -754,6 +853,7 @@ LegacyConversionStatus digest_legacy_original(Vault& source, const IndexNode& so
             return LegacyConversionStatus::SourceCorrupt;
         }
         crypto_blake2b_update(&hash, original.data(), original.size());
+        if (progress) progress->fetch_add(original.size());
     } else {
         ChunkStore store(source.read_fp_, source.master_key_.as_span(),
                          framed_chunks(source.header_));
@@ -770,6 +870,7 @@ LegacyConversionStatus digest_legacy_original(Vault& source, const IndexNode& so
                 return LegacyConversionStatus::SourceCorrupt;
             }
             crypto_blake2b_update(&hash, plaintext.data(), plaintext.size());
+            if (progress) progress->fetch_add(plaintext.size());
         }
     }
     crypto_blake2b_final(&hash, digest.data());
@@ -810,6 +911,9 @@ private:
             request_.progress->expanding = false;
         }
         report.operation = "Estimate destination free space";
+        // Existing destinations must be authenticated before granting any reuse credit.
+        if (std::error_code ec; std::filesystem::exists(request_.destination, ec) && !ec)
+            return true;
         return preflight_space(platform::utf8_to_path(source_.path_), request_.destination, totals,
                                report) ||
                fail(report, InsufficientSpace);
@@ -860,31 +964,48 @@ private:
             existing.value->source_fingerprint != marker.source_fingerprint)
             return fail(report, LegacyConversionStatus::ResumeMismatch);
         report.resumed = true;
-        return true;
+        set_phase(ConversionPhase::Verifying);
+        report.operation = "Authenticate reusable destination objects";
+        if (const v3::VerificationObserver observer{{}, {}, conversion_bytes(request_)};
+            !check_destination(*destination.v3_, report, &observer))
+            return false;
+        const uint64_t reusable = report.authenticated_bytes;
+        PreflightTotals totals;
+        scan_preflight(source_.root_, totals);
+        report.operation = "Estimate remaining destination free space";
+        return preflight_space(platform::utf8_to_path(source_.path_), request_.destination, totals,
+                               report, reusable) ||
+               fail(report, LegacyConversionStatus::InsufficientSpace);
     }
 
     bool copy(Vault& destination, LegacyConversionReport& report) const noexcept
     {
+        set_phase(ConversionPhase::Copying);
         IndexNode root;
         const v3::Id root_id = destination.root_.node_id;
-        CopyContext context{source_,           *destination.v3_,        request_, report,
-                            source_.settings_, source_.saved_searches_, &root};
+        CopyContext context{source_, *destination.v3_, request_, report, {}, 0};
         if (const auto status = copy_node(context, source_.root_, root, &root_id);
             status != LegacyConversionStatus::Ok) {
             return fail(report, status);
         }
         if (const auto status = commit_batch(context); status != LegacyConversionStatus::Ok)
             return fail(report, status);
+        report.operation = "Finalize copied metadata";
+        if (record_result(report, destination.v3_->commit_metadata(root, source_.settings_,
+                                                                   source_.saved_searches_)) !=
+            v3::ReadStatus::Ok)
+            return fail(report, LegacyConversionStatus::IoError);
         destination.root_ = std::move(root);
         destination.settings_ = source_.settings_;
         destination.saved_searches_ = source_.saved_searches_;
         return true;
     }
 
-    bool check_destination(const v3::ReadSession& session,
-                           LegacyConversionReport& report) const noexcept
+    bool check_destination(const v3::ReadSession& session, LegacyConversionReport& report,
+                           const v3::VerificationObserver* observer = nullptr) const noexcept
     {
-        const auto deep = session.verify(v3::VerifyDepth::Deep, cancellation_token(request_));
+        const auto deep =
+            session.verify(v3::VerifyDepth::Deep, cancellation_token(request_), observer);
         report.backend_code = static_cast<int>(std::to_underlying(deep.status));
         report.objects_checked = deep.objects_checked;
         report.authenticated_bytes = deep.authenticated_bytes;
@@ -939,9 +1060,6 @@ private:
 #endif
         report.failed_ordinal = 0;
         report.backend_code = -1;
-        report.operation = "Verify written destination";
-        if (!check_destination(*destination.v3_, report)) return false;
-        report.deep_verified = true;
         report.operation = "Clean up resumed destination";
         report.detail = "Garbage collection could not complete";
         if (report.resumed && record_result(report, destination.v3_->garbage_collect(0).status) !=
@@ -953,6 +1071,7 @@ private:
 
     bool cold_verify(LegacyConversionReport& report) const noexcept
     {
+        set_phase(ConversionPhase::Reopening);
         Vault reopened;
         report.operation = "Reopen destination from disk";
         report.detail = "Destination header or directory could not be opened";
@@ -967,10 +1086,24 @@ private:
             return fail(report, unlocked == VaultResult::AuthFailed
                                     ? LegacyConversionStatus::AuthenticationFailed
                                     : LegacyConversionStatus::VerificationFailed);
-        report.operation = "Verify reopened destination";
-        if (!check_destination(*reopened.v3_, report)) return false;
         report.cold_reopened = true;
-        if (!logical_verify(reopened, report)) return false;
+        ConversionDigests digests;
+        report.operation = "Prepare comparison digests";
+        report.detail = "System random generator failed";
+        report.backend_code = -1;
+        if (!crypto::fill_random({digests.key.data(), crypto::SecureBuffer<32>::size()}))
+            return fail(report, LegacyConversionStatus::IoError);
+        const v3::VerificationObserver observer{
+            [&digests](const auto& object, auto bytes) { digests.frame(object, bytes); },
+            [&digests](const auto& object) { digests.complete(object); },
+            conversion_bytes(request_)};
+        set_phase(ConversionPhase::Verifying);
+        report.operation = "Verify reopened destination";
+        if (!check_destination(*reopened.v3_, report, &observer)) return false;
+        report.deep_verified = true;
+        set_phase(ConversionPhase::Comparing);
+        if (!logical_verify(reopened, report, digests)) return false;
+        set_phase(ConversionPhase::Finalizing);
         report.operation = "Mark conversion complete";
         report.detail = "Could not commit conversion completion to the database";
         if (record_result(report, reopened.v3_->finish_conversion()) != v3::DbStatus::Ok)
@@ -978,20 +1111,19 @@ private:
         return true;
     }
 
-    bool logical_verify(Vault& reopened, LegacyConversionReport& report) const noexcept
+    bool logical_verify(Vault& reopened, LegacyConversionReport& report,
+                        const ConversionDigests& digests) const noexcept
     {
         using enum LegacyConversionStatus;
         report.operation = "Prepare original comparison";
         report.detail = "System random generator failed";
-        std::array<uint8_t, 32> key{};
-        if (!crypto::fill_random(key)) return fail(report, IoError);
         report.failed_ordinal = 0;
         report.backend_code = -1;
-        const auto logical =
-            verify_logical_node(source_, *reopened.v3_, source_.root_, reopened.root_, key,
-                                cancellation_token(request_), report);
-        crypto_wipe(key.data(), key.size());
-        if (logical != Ok) return fail(report, logical);
+        if (const auto logical = verify_logical_node(source_, source_.root_, reopened.root_,
+                                                     digests, cancellation_token(request_), report,
+                                                     request_.conversion_progress);
+            logical != Ok)
+            return fail(report, logical);
         report.failed_ordinal = 0;
         report.operation = "Compare vault settings";
         report.detail = "Copied vault settings differ from the source";
@@ -1005,6 +1137,14 @@ private:
             return fail(report, VerificationFailed);
         report.logical_verified = true;
         return true;
+    }
+
+    void set_phase(ConversionPhase phase) const noexcept
+    {
+        if (request_.conversion_progress) {
+            request_.conversion_progress->bytes = 0;
+            request_.conversion_progress->phase = phase;
+        }
     }
 
     bool fail(LegacyConversionReport& report, LegacyConversionStatus status) const noexcept

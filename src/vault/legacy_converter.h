@@ -32,6 +32,20 @@ enum class LegacyConversionStatus : uint8_t {
     InsufficientSpace,
 };
 
+enum class ConversionPhase : uint8_t {
+    Preparing,
+    Copying,
+    Reopening,
+    Verifying,
+    Comparing,
+    Finalizing
+};
+
+struct ConversionProgress {
+    std::atomic<ConversionPhase> phase{ConversionPhase::Preparing};
+    std::atomic<uint64_t> bytes{0};
+};
+
 struct LegacyConversionRequest {
     std::filesystem::path destination;
     std::span<const uint8_t> password;
@@ -39,6 +53,7 @@ struct LegacyConversionRequest {
     crypto::KdfParams kdf;
     const std::atomic_bool* cancel = nullptr;
     OpProgress* progress = nullptr;
+    ConversionProgress* conversion_progress = nullptr;
 };
 
 struct LegacyConversionReport {
@@ -50,6 +65,7 @@ struct LegacyConversionReport {
     std::array<uint8_t, 16> failed_object{};
     uint64_t objects_checked = 0;
     uint64_t authenticated_bytes = 0;
+    uint64_t metadata_batches = 0;
     uint64_t galleries = 0;
     uint64_t images = 0;
     uint64_t videos = 0;
@@ -75,12 +91,13 @@ convert_legacy_vault(Vault& source, const LegacyConversionRequest& request) noex
 // fixed-size object frames.
 [[nodiscard]] LegacyConversionStatus
 copy_legacy_video_object(Vault& source, const IndexNode& source_node, v3::ReadSession& destination,
-                         const IndexNode& destination_node, CancellationToken cancel = {}) noexcept;
+                         const IndexNode& destination_node, CancellationToken cancel = {},
+                         std::atomic<uint64_t>* progress = nullptr) noexcept;
 
-[[nodiscard]] LegacyConversionStatus digest_legacy_original(Vault& source,
-                                                            const IndexNode& source_node,
-                                                            std::span<const uint8_t> digest_key,
-                                                            std::span<uint8_t> digest,
-                                                            CancellationToken cancel = {}) noexcept;
+[[nodiscard]] LegacyConversionStatus
+digest_legacy_original(Vault& source, const IndexNode& source_node,
+                       std::span<const uint8_t> digest_key, std::span<uint8_t> digest,
+                       CancellationToken cancel = {},
+                       std::atomic<uint64_t>* progress = nullptr) noexcept;
 
 }  // namespace vault

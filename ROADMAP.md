@@ -16,6 +16,10 @@ production facade benchmarks, and Linux-only cleanup. Validation is in progress.
 
 ## Phase index
 
+Legacy conversion performance: incremental atomic metadata batches, one cold deep
+verification/digest scan, authenticated resume-space credit, and a dedicated progress
+screen with copy/verify/compare phases. See the [Phase 115 follow-up](docs/roadmap/phase-115-legacy-vault-converter.md#conversion-performance-and-dedicated-progress-screen).
+
 Legacy conversion diagnostics: retain failing operations, integrity findings, object IDs,
 and metadata differences; audit full-tree commits, repeated verification reads, and resume
 space requirements. See the [Phase 115 audit](docs/roadmap/phase-115-legacy-vault-converter.md#conversion-diagnostics-and-performance-audit).

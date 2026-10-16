@@ -15,7 +15,8 @@ void LegacyConversionJob::run(vault::Vault& source, const std::filesystem::path&
                               const crypto::KdfParams& kdf) noexcept
 {
     const vault::LegacyConversionRequest request{
-        destination, password_.as_span(), keyfile_.as_span(), kdf, &cancel_, &progress_};
+        destination, password_.as_span(), keyfile_.as_span(),   kdf,
+        &cancel_,    &progress_,          &conversion_progress_};
     outcome_ = vault::convert_legacy_vault(source, request);
     if (outcome_.status == vault::LegacyConversionStatus::Ok) {
         vault::Vault converted;
@@ -67,6 +68,10 @@ bool LegacyConversionJob::start(vault::Vault& source, std::filesystem::path dest
         keyfile_ = {};
         return false;
     }
+    conversion_progress_.phase = vault::ConversionPhase::Preparing;
+    conversion_progress_.bytes = 0;
+    progress_.done = 0;
+    progress_.total = 0;
     cancel_.store(false);
     done_.store(false);
     active_.store(true);

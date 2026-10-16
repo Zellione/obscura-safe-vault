@@ -10,6 +10,8 @@
 #include "vault/vault.h"
 
 #include <array>
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -526,7 +528,7 @@ TEST(legacy_converter_reports_destination_object_corruption)
         vault::test_only_conversion_checkpoint({});
         REQUIRE(removed);
         CHECK(result.status == vault::LegacyConversionStatus::VerificationFailed);
-        CHECK(std::string_view(result.operation) == "Verify written destination");
+        CHECK(std::string_view(result.operation) == "Verify reopened destination");
         CHECK(std::string_view(result.detail) == reasons[mode]);
         CHECK(std::ranges::any_of(result.failed_object, [](uint8_t byte) { return byte != 0; }));
         CHECK_FALSE(result.deep_verified);
@@ -630,14 +632,17 @@ TEST(legacy_converter_preserves_backend_failures_at_operation_boundaries)
         Failure{"Write destination image", code(vault::v3::ReadStatus::UnsupportedVersion),
                 "unsupported"},
         Failure{"Write destination image", code(vault::v3::ReadStatus::AlreadyExists), "exists"},
-        Failure{"Save resume node mapping", code(vault::v3::DbStatus::InvalidArgument), "invalid"},
-        Failure{"Save resume node mapping", code(vault::v3::DbStatus::IoError), "sync"},
-        Failure{"Save resume node mapping", code(vault::v3::DbStatus::WrongKeyOrCorrupt),
+        Failure{"Commit copied metadata batch", code(vault::v3::DbStatus::InvalidArgument),
+                "invalid"},
+        Failure{"Commit copied metadata batch", code(vault::v3::DbStatus::IoError), "sync"},
+        Failure{"Commit copied metadata batch", code(vault::v3::DbStatus::WrongKeyOrCorrupt),
                 "integrity"},
-        Failure{"Save resume node mapping", code(vault::v3::DbStatus::Busy), "busy"},
-        Failure{"Save resume node mapping", code(vault::v3::DbStatus::DiskFull), "disk is full"},
-        Failure{"Save resume node mapping", code(vault::v3::DbStatus::Constraint), "constraint"},
-        Failure{"Save resume node mapping", code(vault::v3::DbStatus::UnsupportedVersion),
+        Failure{"Commit copied metadata batch", code(vault::v3::DbStatus::Busy), "busy"},
+        Failure{"Commit copied metadata batch", code(vault::v3::DbStatus::DiskFull),
+                "disk is full"},
+        Failure{"Commit copied metadata batch", code(vault::v3::DbStatus::Constraint),
+                "constraint"},
+        Failure{"Commit copied metadata batch", code(vault::v3::DbStatus::UnsupportedVersion),
                 "unsupported"},
     };
     for (const auto& failure : failures) {
@@ -765,4 +770,137 @@ TEST(legacy_converter_identifies_settings_differences_after_reopen)
         CHECK(std::string_view(result.operation) == "Compare vault settings");
         CHECK(std::string_view(result.detail).find(difference.reason) != std::string_view::npos);
     }
+}
+
+namespace vault {
+void test_only_conversion_batch_checkpoint(std::function<void(uint64_t)> callback);
+}
+
+TEST(legacy_converter_batches_resume_and_authenticate_derived_content)
+{
+    TempDir temp;
+    vault::Vault source;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(temp.path / "source.osv"), SOURCE_PASSWORD,
+                                 {}, TEST_KDF, source) == vault::VaultResult::Ok);
+    vault::StagedThumb thumb;
+    thumb.format = vault::ImageFormat::JPEG;
+    REQUIRE(thumb.thumb_jpeg.assign(std::array<uint8_t, 3>{4, 5, 6}));
+    for (int i = 0; i < 70; ++i)
+        REQUIRE(vault::attach_image_prestaged(source, "", std::array<uint8_t, 3>{1, 2, 3},
+                                              std::to_string(i), thumb,
+                                              0) == vault::VaultResult::Ok);
+    REQUIRE(vault::commit_staged(source) == vault::VaultResult::Ok);
+    std::atomic_bool stop{false};
+    vault::ConversionProgress phases;
+    const vault::LegacyConversionRequest request{
+        temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF, &stop, nullptr, &phases};
+    vault::test_only_conversion_batch_checkpoint([&stop](uint64_t n) {
+        if (n == 1) stop = true;
+    });
+    const auto cancelled = vault::convert_legacy_vault(source, request);
+    vault::test_only_conversion_batch_checkpoint({});
+    REQUIRE(cancelled.status == vault::LegacyConversionStatus::Cancelled);
+    CHECK_EQ(cancelled.metadata_batches, uint64_t{1});
+    stop = false;
+    const auto resumed = vault::convert_legacy_vault(source, request);
+    REQUIRE(resumed.status == vault::LegacyConversionStatus::Ok);
+    CHECK(resumed.resumed);
+    CHECK_EQ(resumed.metadata_batches, uint64_t{3});
+    CHECK(resumed.required_free_bytes < cancelled.required_free_bytes);
+    CHECK_EQ(resumed.objects_checked, uint64_t{140});
+    CHECK_EQ(resumed.authenticated_bytes, uint64_t{420});
+    CHECK(phases.phase == vault::ConversionPhase::Finalizing);
+}
+
+TEST(legacy_converter_tiny_media_benchmark)
+{
+    const char* scale = std::getenv("OSV_CONVERSION_BENCH");
+    if (!scale) return;
+    const int count = std::atoi(scale);
+    REQUIRE(count > 0 && count <= 100000);
+    TempDir temp;
+    vault::Vault source;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(temp.path / "source.osv"), SOURCE_PASSWORD,
+                                 {}, TEST_KDF, source) == vault::VaultResult::Ok);
+    vault::StagedThumb thumb;
+    thumb.format = vault::ImageFormat::JPEG;
+    auto* root = source.resolve_node("");
+    REQUIRE(root);
+    root->children.reserve(static_cast<size_t>(count));
+    for (int i = 0; i < count; ++i) {
+        auto staged =
+            vault::stage_image(source, std::array<uint8_t, 3>{1, 2, 3}, std::to_string(i), &thumb);
+        REQUIRE(staged.status == vault::VaultResult::Ok);
+        root->children.push_back(std::move(staged.node));
+    }
+    REQUIRE(vault::commit_staged(source) == vault::VaultResult::Ok);
+    const auto start = std::chrono::steady_clock::now();
+    const auto result = vault::convert_legacy_vault(
+        source, {temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF});
+    REQUIRE(result.status == vault::LegacyConversionStatus::Ok);
+    const auto elapsed =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    std::fprintf(stderr, "conversion bench: %d media, %llu batches, %.3f seconds\n", count,
+                 static_cast<unsigned long long>(result.metadata_batches), elapsed);
+    CHECK_EQ(result.metadata_batches, static_cast<uint64_t>((count + 32) / 32));
+}
+
+TEST(legacy_converter_resume_still_authenticates_reused_source_thumbnail)
+{
+    TempDir temp;
+    vault::Vault source;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(temp.path / "source.osv"), SOURCE_PASSWORD,
+                                 {}, TEST_KDF, source) == vault::VaultResult::Ok);
+    vault::StagedThumb thumb;
+    thumb.format = vault::ImageFormat::JPEG;
+    REQUIRE(thumb.thumb_jpeg.assign(std::array<uint8_t, 3>{4, 5, 6}));
+    REQUIRE(vault::attach_image_prestaged(source, "", std::array<uint8_t, 3>{1, 2, 3}, "image",
+                                          thumb, 0) == vault::VaultResult::Ok);
+    REQUIRE(vault::commit_staged(source) == vault::VaultResult::Ok);
+    std::atomic_bool stop{false};
+    const vault::LegacyConversionRequest request{
+        temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF, &stop};
+    vault::test_only_conversion_checkpoint([&](bool verifying, uint64_t) {
+        if (verifying) stop = true;
+    });
+    const auto interrupted = vault::convert_legacy_vault(source, request);
+    vault::test_only_conversion_checkpoint({});
+    REQUIRE(interrupted.status == vault::LegacyConversionStatus::Cancelled);
+    stop = false;
+    auto* node = source.resolve_node("image");
+    REQUIRE(node);
+    ++node->meta.thumb_length;
+    const auto resumed = vault::convert_legacy_vault(source, request);
+    CHECK(resumed.status == vault::LegacyConversionStatus::SourceCorrupt);
+    CHECK(std::string_view(resumed.operation) == "Compare source thumbnail/poster");
+    vault::Vault gated;
+    REQUIRE(vault::Vault::open(platform::path_to_utf8(request.destination), gated) ==
+            vault::VaultResult::Ok);
+    CHECK(gated.unlock(DEST_PASSWORD, {}) == vault::VaultResult::IncompleteConversion);
+}
+
+namespace vault::v3 {
+void test_only_verification_frame_checkpoint(std::function<void(uint32_t)> callback);
+}
+
+TEST(legacy_converter_authenticates_destination_frames_once_after_reopen)
+{
+    TempDir temp;
+    vault::Vault source;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(temp.path / "source.osv"), SOURCE_PASSWORD,
+                                 {}, TEST_KDF, source) == vault::VaultResult::Ok);
+    vault::StagedThumb thumb;
+    thumb.format = vault::ImageFormat::JPEG;
+    REQUIRE(thumb.thumb_jpeg.assign(std::array<uint8_t, 3>{4, 5, 6}));
+    REQUIRE(vault::attach_image_prestaged(source, "", std::array<uint8_t, 3>{1, 2, 3}, "image",
+                                          thumb, 0) == vault::VaultResult::Ok);
+    REQUIRE(vault::commit_staged(source) == vault::VaultResult::Ok);
+    int frames = 0;
+    vault::v3::test_only_verification_frame_checkpoint([&](uint32_t) { ++frames; });
+    const auto result = vault::convert_legacy_vault(
+        source, {temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF});
+    vault::v3::test_only_verification_frame_checkpoint({});
+    REQUIRE(result.status == vault::LegacyConversionStatus::Ok);
+    CHECK_EQ(frames, 2);
+    CHECK(result.deep_verified && result.cold_reopened && result.logical_verified);
 }

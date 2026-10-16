@@ -124,3 +124,18 @@ TEST(conversion_diagnostics_retain_opaque_object_and_verification_counts)
     CHECK(message.find("17 objects") != std::string::npos);
     CHECK(message.find("5 MiB") != std::string::npos);
 }
+
+TEST(conversion_progress_distinguishes_copy_and_verification)
+{
+    const auto copy = ui::conversion_progress_text(vault::ConversionPhase::Copying, 4, 12, 1048576);
+    CHECK(copy.title == "Copying vault...");
+    CHECK(copy.count_line.find("4 / 12") != std::string::npos);
+    CHECK_EQ(copy.total, 12);
+    const auto verify =
+        ui::conversion_progress_text(vault::ConversionPhase::Verifying, 12, 12, 2097152);
+    CHECK(verify.title == "Verifying converted vault...");
+    CHECK(verify.count_line.find("2 MiB") != std::string::npos);
+    CHECK_EQ(verify.total, 0);
+    const auto reopen = ui::conversion_progress_text(vault::ConversionPhase::Reopening, 12, 12, 0);
+    CHECK(reopen.count_line.find("Original") != std::string::npos);
+}

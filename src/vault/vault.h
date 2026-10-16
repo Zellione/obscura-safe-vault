@@ -232,11 +232,12 @@ public:
     friend class LegacyConverter;
     friend LegacyConversionStatus copy_legacy_video_object(Vault&, const IndexNode&,
                                                            v3::ReadSession&, const IndexNode&,
-                                                           CancellationToken) noexcept;
+                                                           CancellationToken,
+                                                           std::atomic<uint64_t>*) noexcept;
     friend LegacyConversionStatus digest_legacy_original(Vault&, const IndexNode&,
                                                          std::span<const uint8_t>,
-                                                         std::span<uint8_t>,
-                                                         CancellationToken) noexcept;
+                                                         std::span<uint8_t>, CancellationToken,
+                                                         std::atomic<uint64_t>*) noexcept;
 
     // Phase 99: true when this vault's index blob + master-key wrap are sealed
     // with the context-bound AEAD (header FLAG_CONTEXT_BOUND_CHUNKS). A clear

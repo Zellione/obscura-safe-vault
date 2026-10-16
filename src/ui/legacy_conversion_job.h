@@ -31,6 +31,10 @@ public:
     {
         return progress_;
     }
+    [[nodiscard]] const vault::ConversionProgress& conversion_progress() const noexcept
+    {
+        return conversion_progress_;
+    }
     [[nodiscard]] std::optional<vault::LegacyConversionReport> take_outcome();
 
 private:
@@ -44,6 +48,7 @@ private:
     std::atomic_bool active_{false};
     std::atomic_bool done_{false};
     vault::OpProgress progress_;
+    vault::ConversionProgress conversion_progress_;
     vault::LegacyConversionReport outcome_;
     std::jthread thread_;
 };

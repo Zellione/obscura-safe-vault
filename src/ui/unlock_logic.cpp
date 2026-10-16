@@ -7,6 +7,29 @@
 
 namespace ui {
 
+ConversionProgressText conversion_progress_text(vault::ConversionPhase phase, int done, int total,
+                                                uint64_t bytes)
+{
+    using enum vault::ConversionPhase;
+    const uint64_t mib = bytes / (1024 * 1024);
+    switch (phase) {
+    case Copying:
+        return {"Copying vault...", std::format("{} / {} items - {} MiB copied", done, total, mib),
+                done, total};
+    case Verifying:
+        return {"Verifying converted vault...", std::format("{} MiB authenticated", mib)};
+    case Comparing:
+        return {"Comparing source contents...", std::format("{} MiB compared", mib)};
+    case Reopening:
+        return {"Reopening converted vault...", "Original vault preserved."};
+    case Finalizing:
+        return {"Finalizing conversion...", "Original vault preserved."};
+    case Preparing:
+        return {"Preparing conversion...", "Original vault preserved."};
+    }
+    return {};
+}
+
 ConversionFormLayout conversion_form_layout(float window_width, float font_px,
                                             float scroll) noexcept
 {
