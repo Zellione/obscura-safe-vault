@@ -39,7 +39,7 @@ size_t conversion_error_line_end(std::string_view text, const gfx::FontAtlas& fo
     size_t end = text.size();
     while (end > 0 && static_cast<float>(font.measure(text.substr(0, end))) > width) {
         const auto space = text.rfind(' ', end - 1);
-        if (space == std::string_view::npos) break;
+        if (space == std::string_view::npos || space == 0) break;
         end = space;
     }
     return end;
@@ -132,8 +132,15 @@ bool UnlockScreen::handle_conversion_input(const SDL_Event& e)
         const auto form = conversion_form_layout(static_cast<float>(win_.width()),
                                                  font_.pixel_height(), conversion_scroll_);
         if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+            size_t error_rows = 0;
+            std::string_view remaining = error_;
+            while (!remaining.empty()) {
+                remaining.remove_prefix(conversion_error_line_end(remaining, font_, form.width));
+                ++error_rows;
+            }
+            const float rows = std::max(19.0f, 15.0f + static_cast<float>(error_rows));
             const float max_scroll =
-                std::max(0.0f, 24 + 19 * form.step - static_cast<float>(win_.height()));
+                std::max(0.0f, 24 + rows * form.step - static_cast<float>(win_.height()));
             conversion_scroll_ =
                 std::clamp(conversion_scroll_ - e.wheel.y * form.step, 0.0f, max_scroll);
             mark_dirty();
@@ -655,7 +662,7 @@ void UnlockScreen::render_conversion_status(gfx::Renderer& r)
         // eliding the middle of the diagnostic on smaller windows.
         std::string_view remaining = error_;
         int row = 14;
-        while (!remaining.empty() && row < 18) {
+        while (!remaining.empty()) {
             const size_t end = conversion_error_line_end(remaining, font_, width);
             text(static_cast<float>(row), remaining.substr(0, end), DANGER);
             ++row;

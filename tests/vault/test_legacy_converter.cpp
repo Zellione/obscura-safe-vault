@@ -470,3 +470,70 @@ TEST(legacy_converter_space_budget_rejects_overflow_before_creating_destination)
         CHECK(!std::filesystem::exists(request.destination));
     }
 }
+
+namespace vault {
+void test_only_conversion_checkpoint(std::function<void(bool, uint64_t)> callback);
+}
+
+TEST(legacy_converter_reports_missing_destination_object)
+{
+    TempDir temp;
+    vault::Vault source;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(temp.path / "source.osv"), SOURCE_PASSWORD,
+                                 {}, TEST_KDF, source) == vault::VaultResult::Ok);
+    const std::array<uint8_t, 7> original{9, 8, 7, 6, 5, 4, 3};
+    vault::StagedThumb thumb;
+    thumb.format = vault::ImageFormat::JPEG;
+    REQUIRE(vault::attach_image_prestaged(source, "", original, "photo", thumb, 0) ==
+            vault::VaultResult::Ok);
+    REQUIRE(vault::commit_staged(source) == vault::VaultResult::Ok);
+    const auto destination = temp.path / "converted.osv";
+    bool removed = false;
+    vault::test_only_conversion_checkpoint([&](bool verifying, uint64_t) {
+        if (!verifying) return;
+        for (const auto& entry :
+             std::filesystem::recursive_directory_iterator(destination / "objects")) {
+            if (entry.is_regular_file()) {
+                removed = std::filesystem::remove(entry.path());
+                break;
+            }
+        }
+    });
+    const auto result =
+        vault::convert_legacy_vault(source, {destination, DEST_PASSWORD, {}, TEST_KDF});
+    vault::test_only_conversion_checkpoint({});
+    REQUIRE(removed);
+    CHECK(result.status == vault::LegacyConversionStatus::VerificationFailed);
+    CHECK(std::string_view(result.operation) == "Verify written destination");
+    CHECK(std::string_view(result.detail) == "Referenced encrypted object is missing");
+    CHECK_FALSE(result.deep_verified);
+    CHECK_FALSE(result.logical_verified);
+}
+
+TEST(legacy_converter_reports_metadata_field_and_source_ordinal)
+{
+    TempDir temp;
+    vault::Vault source;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(temp.path / "source.osv"), SOURCE_PASSWORD,
+                                 {}, TEST_KDF, source) == vault::VaultResult::Ok);
+    const std::array<uint8_t, 7> original{9, 8, 7, 6, 5, 4, 3};
+    vault::StagedThumb thumb;
+    thumb.format = vault::ImageFormat::JPEG;
+    thumb.width = 640;
+    REQUIRE(vault::attach_image_prestaged(source, "", original, "private-name", thumb, 0) ==
+            vault::VaultResult::Ok);
+    REQUIRE(vault::commit_staged(source) == vault::VaultResult::Ok);
+    vault::test_only_conversion_checkpoint([&](bool verifying, uint64_t) {
+        if (verifying) source.resolve_node("private-name")->meta.width = 641;
+    });
+    const auto result = vault::convert_legacy_vault(
+        source, {temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF});
+    vault::test_only_conversion_checkpoint({});
+    CHECK(result.status == vault::LegacyConversionStatus::VerificationFailed);
+    CHECK(std::string_view(result.operation) == "Compare node metadata");
+    CHECK(std::string_view(result.detail) == "Image width differs");
+    CHECK_EQ(result.failed_ordinal, 2U);
+    CHECK(result.deep_verified);
+    CHECK(result.cold_reopened);
+    CHECK_FALSE(result.logical_verified);
+}

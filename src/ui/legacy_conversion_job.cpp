@@ -14,27 +14,34 @@ namespace ui {
 void LegacyConversionJob::run(vault::Vault& source, const std::filesystem::path& destination,
                               const crypto::KdfParams& kdf) noexcept
 {
-            const vault::LegacyConversionRequest request{
-                destination, password_.as_span(), keyfile_.as_span(), kdf, &cancel_, &progress_};
-            outcome_ = vault::convert_legacy_vault(source, request);
-            if (outcome_.status == vault::LegacyConversionStatus::Ok) {
-                vault::Vault converted;
-                const auto path = platform::path_to_utf8(destination);
-                const auto opened = vault::Vault::open(path, converted);
+    const vault::LegacyConversionRequest request{
+        destination, password_.as_span(), keyfile_.as_span(), kdf, &cancel_, &progress_};
+    outcome_ = vault::convert_legacy_vault(source, request);
+    if (outcome_.status == vault::LegacyConversionStatus::Ok) {
+        vault::Vault converted;
+        const auto path = platform::path_to_utf8(destination);
+        const auto opened = vault::Vault::open(path, converted);
         const auto unlocked = opened == vault::VaultResult::Ok
-                        ? converted.unlock(password_.as_span(), keyfile_.as_span())
-                        : opened;
-                if (unlocked == vault::VaultResult::Ok) {
-                    source.lock();
-                    source = std::move(converted);
-                } else {
-                    outcome_.status = vault::LegacyConversionStatus::VerificationFailed;
-                }
-            }
-            password_.wipe();
-            keyfile_.wipe();
-            done_.store(true);
+                                  ? converted.unlock(password_.as_span(), keyfile_.as_span())
+                                  : opened;
+        if (unlocked == vault::VaultResult::Ok) {
+            source.lock();
+            source = std::move(converted);
+        } else {
+            outcome_.status = vault::LegacyConversionStatus::VerificationFailed;
+            outcome_.operation = "Open verified copy for browsing";
+            outcome_.detail =
+                "Conversion checks passed, but the final browsing session could not open. Keep the "
+                "original; reopen the converted vault from the vault manager";
+            outcome_.backend_code = static_cast<int>(unlocked);
+            platform::safe_println(stderr, "[Converter] {} (vault status {})", outcome_.operation,
+                                   outcome_.backend_code);
+        }
     }
+    password_.wipe();
+    keyfile_.wipe();
+    done_.store(true);
+}
 
 void LegacyConversionJob::fail_start() noexcept
 {

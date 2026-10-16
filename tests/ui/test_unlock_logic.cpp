@@ -95,3 +95,32 @@ TEST(conversion_form_keeps_labels_and_inputs_separate_at_different_font_sizes)
         }
     }
 }
+
+TEST(conversion_diagnostics_include_operation_reason_and_item)
+{
+    vault::LegacyConversionReport report;
+    report.status = vault::LegacyConversionStatus::VerificationFailed;
+    report.operation = "Compare original media";
+    report.detail = "Original content digest mismatch";
+    report.failed_ordinal = 42;
+    const auto message = ui::conversion_error_message(report);
+    CHECK(message.find("Compare original media") != std::string::npos);
+    CHECK(message.find("Original content digest mismatch") != std::string::npos);
+    CHECK(message.find("42") != std::string::npos);
+    CHECK(message.find("Keep the original") != std::string::npos);
+}
+
+TEST(conversion_diagnostics_retain_opaque_object_and_verification_counts)
+{
+    vault::LegacyConversionReport report;
+    report.status = vault::LegacyConversionStatus::VerificationFailed;
+    report.operation = "Verify reopened destination";
+    report.detail = "Encrypted object authentication failed";
+    report.failed_object.fill(0xab);
+    report.objects_checked = 17;
+    report.authenticated_bytes = 5 * 1024 * 1024;
+    const auto message = ui::conversion_error_message(report);
+    CHECK(message.find("abababababababababababababababab") != std::string::npos);
+    CHECK(message.find("17 objects") != std::string::npos);
+    CHECK(message.find("5 MiB") != std::string::npos);
+}

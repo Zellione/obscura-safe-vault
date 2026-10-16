@@ -124,3 +124,63 @@ remain handled by the existing safe interruption/resume path.
 
 Regression coverage exercises a sparse large source without a second-copy
 budget, compressed media expansion, arithmetic overflow, and source preservation.
+
+## Conversion diagnostics and performance audit
+
+Conversion failures now retain the operation, backend status, first integrity finding
+and opaque object ID, checked-object/authenticated-byte counts, and source DFS item
+ordinal where applicable. Logical comparison identifies the differing metadata field,
+settings group, original digest, or saved-search comparison. These diagnostics appear
+in the conversion form and stderr without filenames, tags, passwords, or plaintext.
+Long messages wrap and scroll without a four-line cutoff. A failure opening the final
+browsing session is distinguished from failed content verification. Video destination
+write failures are no longer automatically classified as source corruption.
+
+The verifier uses one shared report-to-diagnostic path for both deep passes, including
+checking corruption findings on the cold reopen. Redundant node-ID generation in
+metadata cloning was removed; resume mapping remains responsible for checked ID creation.
+The source remains read-only, and the incomplete destination stays gated until all
+verification and finalization operations succeed.
+
+### Performance findings (code audit; not a 500 GB benchmark)
+
+1. **Growing full-tree commits are the largest metadata scalability concern.**
+   `count_and_maybe_commit` commits every 32 nodes. `ReadSession::commit_metadata`
+   calls `Database::sync_metadata`, which walks all accumulated nodes, updates
+   sibling order, rebuilds tag/search joins, and revisits accumulated staged objects.
+   The session then copies the full tree and reloads object references. Across N
+   imported nodes this entails roughly quadratic aggregate metadata work, even
+   though media copying itself is streaming. Prioritize a converter-specific
+   incremental transaction API with atomic node/object/resume-map publication.
+   Merely increasing batch size trades crash recovery granularity for speed and
+   does not remove the scaling problem. Validate with 1k/10k/100k tiny-media cases,
+   transaction counts, wall time, and interruption/resume tests before changing it.
+2. **Verification rereads substantial data.** There are two deep destination scans
+   (before close and after reopen), followed by original-content digest comparison
+   that rereads the source and destination. For 500 GB of originals, verification
+   alone reads approximately 2 TB of logical original data, plus derived objects
+   and metadata. Physical I/O depends on compression and filesystem caches. A
+   future fused cold verification/digest traversal could authenticate each object
+   once while checking completeness and comparing source digests. Retain independent
+   reopen, every derived-object authentication, and crash/corruption tests. This
+   change retains the existing verification passes; no throughput gain is claimed.
+3. **Resume space accounting remains conservative.** Preflight still asks for the
+   full destination allowance before inspecting an incomplete copy. A nearly full
+   disk can therefore reject a mostly completed resume. A future estimate must
+   authenticate the resume marker and account only for valid reusable objects,
+   remaining writes, and DB/WAL slack; subtracting directory size is unsafe.
+4. **Resume rereads source thumbnails/posters before checking destination reuse.**
+   Moving reuse lookup earlier saves reads but also removes a source-authentication
+   check; preserve that coverage in the final verification before changing it.
+5. **Durability and memory limits constrain parallelism.** Per-object durable
+   publication and per-node resume mapping can dominate small-file workloads.
+   Batch publication only with an explicit crash protocol. Keep video buffers
+   bounded, and measure peak locked-memory use before adding concurrent copy jobs.
+   Image copying and later digest comparison each materialize one full image.
+6. **Progress currently counts copied nodes only.** Verification can occupy a long
+   interval at the final node count. Follow up with explicit copy/verify/compare
+   phases and byte progress, using atomics rather than reading the worker's mutable
+   report from the UI thread.
+
+The screenshot from a prior run cannot identify which old branch failed: the old
+report discarded those details. These diagnostics apply to subsequent attempts.

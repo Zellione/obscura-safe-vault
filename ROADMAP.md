@@ -16,6 +16,10 @@ production facade benchmarks, and Linux-only cleanup. Validation is in progress.
 
 ## Phase index
 
+Legacy conversion diagnostics: retain failing operations, integrity findings, object IDs,
+and metadata differences; audit full-tree commits, repeated verification reads, and resume
+space requirements. See the [Phase 115 audit](docs/roadmap/phase-115-legacy-vault-converter.md#conversion-diagnostics-and-performance-audit).
+
 Legacy conversion space follow-up: budget one destination plus 5%, per-node
 metadata allowance, and fixed working slack instead of requiring 2× free space.
 See the [Phase 115 follow-up](docs/roadmap/phase-115-legacy-vault-converter.md#conversion-free-space-estimate-follow-up).

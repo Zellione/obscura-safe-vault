@@ -622,3 +622,9 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
 
 ## Tag renaming
 `vault::rename_tag` renames case-insensitive direct assignments plus description/field keys and saved-search tag conditions in one metadata commit, rolling back live values on failure. It rejects locked/read-only sessions, empty/NUL/oversized names, existing target vocabulary (including metadata-only entries), and category changes incompatible with stored fields. Case-only changes are allowed; node identity and media objects stay intact.
+
+Conversion reports retain static operation/reason labels, backend codes, opaque failing
+object IDs, verification counters, and DFS source ordinals. Both deep verification
+passes share corruption-finding handling. Metadata comparison identifies the specific
+field; video write failures are distinguished from source-reader failure. Node IDs
+are generated once by resume mapping, not by metadata cloning.
