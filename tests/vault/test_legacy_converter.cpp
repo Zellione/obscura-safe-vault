@@ -537,3 +537,26 @@ TEST(legacy_converter_reports_metadata_field_and_source_ordinal)
     CHECK(result.cold_reopened);
     CHECK_FALSE(result.logical_verified);
 }
+
+TEST(legacy_converter_video_write_failure_does_not_blame_source)
+{
+    TempDir temp;
+    vault::Vault source;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(temp.path / "source.osv"), SOURCE_PASSWORD,
+                                 {}, TEST_KDF, source) == vault::VaultResult::Ok);
+    const auto video = file_bytes(std::filesystem::path{OSV_VAULT_FIXTURE_DIR} / "tiny.mp4");
+    REQUIRE(source.add_video("", video, "video", 17) == vault::VaultResult::Ok);
+    const auto* node = source.resolve_node("video");
+    REQUIRE(node != nullptr);
+    auto destination =
+        vault::v3::ReadSession::create(temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF);
+    REQUIRE(destination.status == vault::v3::ReadStatus::Ok);
+    REQUIRE(destination.session != nullptr);
+    vault::v3::inject_fs_fault(vault::v3::FsFault::FileSync);
+    const auto status = vault::copy_legacy_video_object(source, *node, *destination.session, *node);
+    vault::v3::clear_fs_faults();
+    CHECK(status == vault::LegacyConversionStatus::IoError);
+    crypto::SecureBytes original;
+    REQUIRE(source.read_video(*node, original) == vault::VaultResult::Ok);
+    CHECK(std::ranges::equal(original.as_span(), video));
+}
