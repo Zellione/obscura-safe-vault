@@ -470,3 +470,299 @@ TEST(legacy_converter_space_budget_rejects_overflow_before_creating_destination)
         CHECK(!std::filesystem::exists(request.destination));
     }
 }
+
+namespace vault {
+void test_only_conversion_checkpoint(std::function<void(bool, uint64_t)> callback);
+}
+
+TEST(legacy_converter_reports_destination_object_corruption)
+{
+    const std::array reasons{
+        "Referenced encrypted object is missing", "Encrypted object size differs from database",
+        "Encrypted object authentication failed", "Encrypted object has malformed framing"};
+    for (size_t mode = 0; mode < reasons.size(); ++mode) {
+        TempDir temp;
+        vault::Vault source;
+        REQUIRE(vault::Vault::create(platform::path_to_utf8(temp.path / "source.osv"),
+                                     SOURCE_PASSWORD, {}, TEST_KDF,
+                                     source) == vault::VaultResult::Ok);
+        const std::array<uint8_t, 7> original{9, 8, 7, 6, 5, 4, 3};
+        vault::StagedThumb thumb;
+        thumb.format = vault::ImageFormat::JPEG;
+        REQUIRE(vault::attach_image_prestaged(source, "", original, "photo", thumb, 0) ==
+                vault::VaultResult::Ok);
+        REQUIRE(vault::commit_staged(source) == vault::VaultResult::Ok);
+        const auto destination = temp.path / "converted.osv";
+        bool removed = false;
+        vault::test_only_conversion_checkpoint([&](bool verifying, uint64_t) {
+            if (!verifying) return;
+            for (const auto& entry :
+                 std::filesystem::recursive_directory_iterator(destination / "objects")) {
+                if (entry.is_regular_file()) {
+                    if (mode == 0) {
+                        removed = std::filesystem::remove(entry.path());
+                    } else if (mode == 1) {
+                        std::filesystem::resize_file(entry.path(), entry.file_size() - 1);
+                        removed = true;
+                    } else {
+                        std::fstream file(entry.path(),
+                                          std::ios::binary | std::ios::in | std::ios::out);
+                        const auto offset =
+                            mode == 2 ? static_cast<std::streamoff>(entry.file_size() - 1) : 0;
+                        file.seekg(offset);
+                        char byte = 0;
+                        file.read(&byte, 1);
+                        byte ^= 1;
+                        file.seekp(offset);
+                        file.write(&byte, 1);
+                        removed = file.good();
+                    }
+                    break;
+                }
+            }
+        });
+        const auto result =
+            vault::convert_legacy_vault(source, {destination, DEST_PASSWORD, {}, TEST_KDF});
+        vault::test_only_conversion_checkpoint({});
+        REQUIRE(removed);
+        CHECK(result.status == vault::LegacyConversionStatus::VerificationFailed);
+        CHECK(std::string_view(result.operation) == "Verify written destination");
+        CHECK(std::string_view(result.detail) == reasons[mode]);
+        CHECK(std::ranges::any_of(result.failed_object, [](uint8_t byte) { return byte != 0; }));
+        CHECK_FALSE(result.deep_verified);
+        CHECK_FALSE(result.logical_verified);
+    }
+}
+
+TEST(legacy_converter_reports_metadata_field_and_source_ordinal)
+{
+    TempDir temp;
+    vault::Vault source;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(temp.path / "source.osv"), SOURCE_PASSWORD,
+                                 {}, TEST_KDF, source) == vault::VaultResult::Ok);
+    const std::array<uint8_t, 7> original{9, 8, 7, 6, 5, 4, 3};
+    vault::StagedThumb thumb;
+    thumb.format = vault::ImageFormat::JPEG;
+    thumb.width = 640;
+    REQUIRE(vault::attach_image_prestaged(source, "", original, "private-name", thumb, 0) ==
+            vault::VaultResult::Ok);
+    REQUIRE(vault::commit_staged(source) == vault::VaultResult::Ok);
+    vault::test_only_conversion_checkpoint([&](bool verifying, uint64_t) {
+        if (verifying) source.resolve_node("private-name")->meta.width = 641;
+    });
+    const auto result = vault::convert_legacy_vault(
+        source, {temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF});
+    vault::test_only_conversion_checkpoint({});
+    CHECK(result.status == vault::LegacyConversionStatus::VerificationFailed);
+    CHECK(std::string_view(result.operation) == "Compare node metadata");
+    CHECK(std::string_view(result.detail) == "Image width differs");
+    CHECK_EQ(result.failed_ordinal, 2U);
+    CHECK(result.deep_verified);
+    CHECK(result.cold_reopened);
+    CHECK_FALSE(result.logical_verified);
+}
+
+TEST(legacy_converter_video_write_failure_does_not_blame_source)
+{
+    TempDir temp;
+    vault::Vault source;
+    REQUIRE(vault::Vault::create(platform::path_to_utf8(temp.path / "source.osv"), SOURCE_PASSWORD,
+                                 {}, TEST_KDF, source) == vault::VaultResult::Ok);
+    const auto video = file_bytes(std::filesystem::path{OSV_VAULT_FIXTURE_DIR} / "tiny.mp4");
+    REQUIRE(source.add_video("", video, "video", 17) == vault::VaultResult::Ok);
+    const auto* node = source.resolve_node("video");
+    REQUIRE(node != nullptr);
+    auto destination =
+        vault::v3::ReadSession::create(temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF);
+    REQUIRE(destination.status == vault::v3::ReadStatus::Ok);
+    REQUIRE(destination.session != nullptr);
+    vault::v3::inject_fs_fault(vault::v3::FsFault::FileSync);
+    const auto status = vault::copy_legacy_video_object(source, *node, *destination.session, *node);
+    vault::v3::clear_fs_faults();
+    CHECK(status == vault::LegacyConversionStatus::IoError);
+    crypto::SecureBytes original;
+    REQUIRE(source.read_video(*node, original) == vault::VaultResult::Ok);
+    CHECK(std::ranges::equal(original.as_span(), video));
+}
+
+namespace vault {
+void test_only_conversion_backend_fault(std::string_view operation, int status);
+}
+
+TEST(legacy_converter_preserves_backend_failures_at_operation_boundaries)
+{
+    struct Failure {
+        const char* operation;
+        int status;
+        const char* reason;
+    };
+    const auto code = [](auto status) { return static_cast<int>(std::to_underlying(status)); };
+    const std::array failures{
+        Failure{"Create destination vault and conversion marker", code(vault::VaultResult::IoError),
+                "sync"},
+        Failure{"Create destination vault and conversion marker",
+                code(vault::VaultResult::BadFormat), "format"},
+        Failure{"Create destination vault and conversion marker",
+                code(vault::VaultResult::AuthFailed), "authentication"},
+        Failure{"Create destination vault and conversion marker", code(vault::VaultResult::Locked),
+                "locked"},
+        Failure{"Create destination vault and conversion marker",
+                code(vault::VaultResult::NotFound), "missing"},
+        Failure{"Create destination vault and conversion marker",
+                code(vault::VaultResult::AlreadyExists), "exists"},
+        Failure{"Create destination vault and conversion marker",
+                code(vault::VaultResult::InvalidArg), "invalid"},
+        Failure{"Create destination vault and conversion marker",
+                code(vault::VaultResult::CryptoError), "derivation"},
+        Failure{"Create destination vault and conversion marker", code(vault::VaultResult::Busy),
+                "lease"},
+        Failure{"Create destination vault and conversion marker",
+                code(vault::VaultResult::IncompleteConversion), "incomplete"},
+        Failure{"Create destination vault and conversion marker", code(vault::VaultResult::Damaged),
+                "damaged"},
+        Failure{"Create destination vault and conversion marker",
+                code(vault::VaultResult::UnsupportedVersion), "unsupported"},
+        Failure{"Write destination image", code(vault::v3::ReadStatus::IoError), "sync"},
+        Failure{"Write destination image", code(vault::v3::ReadStatus::BadFormat), "format"},
+        Failure{"Write destination image", code(vault::v3::ReadStatus::AuthenticationFailed),
+                "authentication"},
+        Failure{"Write destination image", code(vault::v3::ReadStatus::Busy), "lease"},
+        Failure{"Write destination image", code(vault::v3::ReadStatus::UnsupportedVersion),
+                "unsupported"},
+        Failure{"Write destination image", code(vault::v3::ReadStatus::AlreadyExists), "exists"},
+        Failure{"Save resume node mapping", code(vault::v3::DbStatus::InvalidArgument), "invalid"},
+        Failure{"Save resume node mapping", code(vault::v3::DbStatus::IoError), "sync"},
+        Failure{"Save resume node mapping", code(vault::v3::DbStatus::WrongKeyOrCorrupt),
+                "integrity"},
+        Failure{"Save resume node mapping", code(vault::v3::DbStatus::Busy), "busy"},
+        Failure{"Save resume node mapping", code(vault::v3::DbStatus::DiskFull), "disk is full"},
+        Failure{"Save resume node mapping", code(vault::v3::DbStatus::Constraint), "constraint"},
+        Failure{"Save resume node mapping", code(vault::v3::DbStatus::UnsupportedVersion),
+                "unsupported"},
+    };
+    for (const auto& failure : failures) {
+        TempDir temp;
+        vault::Vault source;
+        REQUIRE(vault::Vault::create(platform::path_to_utf8(temp.path / "source.osv"),
+                                     SOURCE_PASSWORD, {}, TEST_KDF,
+                                     source) == vault::VaultResult::Ok);
+        vault::StagedThumb thumb;
+        thumb.format = vault::ImageFormat::JPEG;
+        REQUIRE(vault::attach_image_prestaged(source, "", std::array<uint8_t, 3>{1, 2, 3},
+                                              "secret-name", thumb, 0) == vault::VaultResult::Ok);
+        REQUIRE(vault::commit_staged(source) == vault::VaultResult::Ok);
+        const auto before = file_bytes(temp.path / "source.osv");
+        vault::test_only_conversion_backend_fault(failure.operation, failure.status);
+        const auto result = vault::convert_legacy_vault(
+            source, {temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF});
+        vault::test_only_conversion_backend_fault({}, 0);
+        CHECK(result.status != vault::LegacyConversionStatus::Ok);
+        CHECK(std::string_view(result.operation) == failure.operation);
+        CHECK_EQ(result.backend_code, failure.status);
+        CHECK(std::string_view(result.detail).find(failure.reason) != std::string_view::npos);
+        CHECK(std::string_view(result.detail).find("secret-name") == std::string_view::npos);
+        CHECK(file_bytes(temp.path / "source.osv") == before);
+    }
+}
+
+TEST(legacy_converter_identifies_individual_metadata_differences)
+{
+    struct Difference {
+        bool video;
+        void (*change)(vault::IndexNode&);
+        const char* reason;
+    };
+    const std::array differences{
+        Difference{false, [](auto& n) { n.type = vault::IndexNode::Type::Gallery; }, "type"},
+        Difference{false, [](auto& n) { n.name = "changed"; }, "name"},
+        Difference{false, [](auto& n) { n.tags.emplace_back("changed"); }, "tags"},
+        Difference{false, [](auto& n) { n.favorite = !n.favorite; }, "favorite"},
+        Difference{false, [](auto& n) { n.sort_key = vault::SortKey::NameDesc; }, "sort order"},
+        Difference{false, [](auto& n) { n.children.emplace_back(); }, "children count"},
+        Difference{false, [](auto& n) { n.meta.format = vault::ImageFormat::PNG; }, "format"},
+        Difference{false, [](auto& n) { ++n.meta.width; }, "width"},
+        Difference{false, [](auto& n) { ++n.meta.height; }, "height"},
+        Difference{false, [](auto& n) { ++n.meta.orig_size; }, "original size"},
+        Difference{false, [](auto& n) { ++n.meta.created_ts; }, "creation timestamp"},
+        Difference{false, [](auto& n) { n.meta.animated = !n.meta.animated; }, "animated"},
+        Difference{true, [](auto& n) { n.vmeta.container = vault::VideoContainer::Unknown; },
+                   "container"},
+        Difference{true, [](auto& n) { n.vmeta.codec = static_cast<vault::VideoCodec>(99); },
+                   "codec"},
+        Difference{true, [](auto& n) { ++n.vmeta.width; }, "width"},
+        Difference{true, [](auto& n) { ++n.vmeta.height; }, "height"},
+        Difference{true, [](auto& n) { ++n.vmeta.duration_us; }, "duration"},
+        Difference{true, [](auto& n) { ++n.vmeta.orig_size; }, "original size"},
+        Difference{true, [](auto& n) { ++n.vmeta.created_ts; }, "creation timestamp"},
+    };
+    for (const auto& difference : differences) {
+        TempDir temp;
+        vault::Vault source;
+        REQUIRE(vault::Vault::create(platform::path_to_utf8(temp.path / "source.osv"),
+                                     SOURCE_PASSWORD, {}, TEST_KDF,
+                                     source) == vault::VaultResult::Ok);
+        if (difference.video) {
+            const auto video =
+                file_bytes(std::filesystem::path{OSV_VAULT_FIXTURE_DIR} / "tiny.mp4");
+            REQUIRE(source.add_video("", video, "item", 17) == vault::VaultResult::Ok);
+        } else {
+            vault::StagedThumb thumb;
+            thumb.format = vault::ImageFormat::JPEG;
+            REQUIRE(vault::attach_image_prestaged(source, "", std::array<uint8_t, 3>{1, 2, 3},
+                                                  "item", thumb, 0) == vault::VaultResult::Ok);
+            REQUIRE(vault::commit_staged(source) == vault::VaultResult::Ok);
+        }
+        auto* node = source.resolve_node("item");
+        REQUIRE(node != nullptr);
+        vault::test_only_conversion_checkpoint([&difference, node](bool verifying, uint64_t) {
+            if (verifying) difference.change(*node);
+        });
+        const auto result = vault::convert_legacy_vault(
+            source, {temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF});
+        vault::test_only_conversion_checkpoint({});
+        CHECK(result.status == vault::LegacyConversionStatus::VerificationFailed);
+        CHECK(result.cold_reopened);
+        CHECK_FALSE(result.logical_verified);
+        CHECK_EQ(result.failed_ordinal, 2U);
+        CHECK(std::string_view(result.detail).find(difference.reason) != std::string_view::npos);
+    }
+}
+
+TEST(legacy_converter_identifies_settings_differences_after_reopen)
+{
+    struct Difference {
+        void (*change)(vault::VaultSettings&);
+        const char* reason;
+    };
+    const std::array differences{
+        Difference{[](auto& s) { s.default_sort = vault::SortKey::NameDesc; }, "default sort"},
+        Difference{[](auto& s) { s.tiles_show_tags = !s.tiles_show_tags; }, "tiles show tags"},
+        Difference{[](auto& s) { s.categories.clear(); }, "categories"},
+        Difference{[](auto& s) { s.tag_descriptions.emplace_back(); }, "tag descriptions"},
+        Difference{[](auto& s) { s.tag_field_values.emplace_back(); }, "tag field values"},
+        Difference{[](auto& s) { ++s.migrated_index_version; }, "migrated index version"},
+        Difference{[](auto& s) { ++s.migrated_probe_caps; }, "migrated probe caps"},
+        Difference{[](auto& s) { ++s.migrated_thumb_side; }, "migrated thumb side"},
+    };
+    for (const auto& difference : differences) {
+        TempDir temp;
+        vault::Vault source;
+        REQUIRE(vault::Vault::create(platform::path_to_utf8(temp.path / "source.osv"),
+                                     SOURCE_PASSWORD, {}, TEST_KDF,
+                                     source) == vault::VaultResult::Ok);
+        vault::test_only_conversion_checkpoint([&source, &difference](bool verifying, uint64_t) {
+            // Change only the in-memory comparison input after copying. The source file
+            // remains unchanged, and the independently reopened destination stays valid.
+            if (verifying)
+                difference.change(const_cast<vault::VaultSettings&>(vault::vault_settings(source)));
+        });
+        const auto result = vault::convert_legacy_vault(
+            source, {temp.path / "converted.osv", DEST_PASSWORD, {}, TEST_KDF});
+        vault::test_only_conversion_checkpoint({});
+        CHECK(result.status == vault::LegacyConversionStatus::VerificationFailed);
+        CHECK(result.cold_reopened);
+        CHECK_FALSE(result.logical_verified);
+        CHECK(std::string_view(result.operation) == "Compare vault settings");
+        CHECK(std::string_view(result.detail).find(difference.reason) != std::string_view::npos);
+    }
+}

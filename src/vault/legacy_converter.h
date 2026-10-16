@@ -3,6 +3,7 @@
 #include "crypto/kdf.h"
 #include "vault/op_progress.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
@@ -42,6 +43,13 @@ struct LegacyConversionRequest {
 
 struct LegacyConversionReport {
     LegacyConversionStatus status = LegacyConversionStatus::IoError;
+    // Static, non-secret diagnostic labels only; never source names or paths.
+    const char* operation = "Check conversion prerequisites";
+    const char* detail = "";
+    int backend_code = -1;
+    std::array<uint8_t, 16> failed_object{};
+    uint64_t objects_checked = 0;
+    uint64_t authenticated_bytes = 0;
     uint64_t galleries = 0;
     uint64_t images = 0;
     uint64_t videos = 0;

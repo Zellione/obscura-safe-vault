@@ -576,3 +576,8 @@ use none) and show the selected path plus the requirement for future unlocks.
 Explain that resume uses the original destination credentials. Use font-derived
 rows, bounded field widths, clickable password focus and wheel scrolling. Show
 specific conversion errors and required free MiB instead of a generic failure.
+
+Legacy conversion errors show the failing operation and reason, source ordinal or
+opaque encrypted-object ID when available, and recovery guidance. Error text wraps
+and the form scroll range includes every diagnostic line. Final browsing-session
+open failures are distinguished from content-verification failures.

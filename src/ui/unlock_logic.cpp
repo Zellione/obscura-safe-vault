@@ -20,7 +20,7 @@ SDL_FRect ConversionFormLayout::password_field(bool confirm) const noexcept
     return {confirm ? 84 + field_width : 60, row(7), field_width, step - 8};
 }
 
-std::string conversion_error_message(const vault::LegacyConversionReport& report)
+static std::string conversion_recovery_message(const vault::LegacyConversionReport& report)
 {
     using enum vault::LegacyConversionStatus;
     switch (report.status) {
@@ -46,7 +46,11 @@ std::string conversion_error_message(const vault::LegacyConversionReport& report
     case Cancelled:
         return "Cancelled. Retry with the same destination password and keyfile to resume.";
     case VerificationFailed:
-        return "Converted copy failed verification. Keep the original; do not use the copy yet.";
+        if (report.logical_verified)
+            return "All content checks passed. Keep the original; conversion finalization or "
+                   "opening failed.";
+        return "Keep the original; do not use the unverified copy. The failed check must be "
+               "resolved before retrying.";
     case InsufficientSpace:
         if (report.required_free_bytes == 0)
             return "Cannot estimate required space. Check that the source is accessible.";
@@ -58,20 +62,36 @@ std::string conversion_error_message(const vault::LegacyConversionReport& report
     return "Unknown conversion error. Keep the original vault.";
 }
 
-SubmitDecision decide_submit(bool                     create_mode,
-                             std::span<const uint8_t> password,
+std::string conversion_error_message(const vault::LegacyConversionReport& report)
+{
+    if (report.status == vault::LegacyConversionStatus::Ok) return {};
+    std::string message = std::format("{}: {}", report.operation, report.detail);
+    if (report.failed_ordinal) message += std::format(" (source item {}).", report.failed_ordinal);
+    if (std::ranges::any_of(report.failed_object, [](uint8_t byte) { return byte != 0; })) {
+        message += " Encrypted object ";
+        for (const auto byte : report.failed_object)
+            message += std::format("{:02x}", byte);
+        message += ".";
+    }
+    if (report.backend_code > 0) message += std::format(" Backend status {}.", report.backend_code);
+    if (report.objects_checked)
+        message += std::format(" Checked {} objects ({} MiB authenticated).",
+                               report.objects_checked, report.authenticated_bytes / (1024 * 1024));
+    message += " " + conversion_recovery_message(report);
+    return message;
+}
+
+SubmitDecision decide_submit(bool create_mode, std::span<const uint8_t> password,
                              std::span<const uint8_t> confirm) noexcept
 {
     using enum SubmitAction;
-    if (password.empty())
-        return {None, "Password cannot be empty."};
+    if (password.empty()) return {None, "Password cannot be empty."};
 
     if (create_mode) {
-        if (!std::ranges::equal(password, confirm))
-            return {None, "Passwords do not match."};
+        if (!std::ranges::equal(password, confirm)) return {None, "Passwords do not match."};
         return {Create, nullptr};
     }
     return {Unlock, nullptr};
 }
 
-} // namespace ui
+}  // namespace ui
