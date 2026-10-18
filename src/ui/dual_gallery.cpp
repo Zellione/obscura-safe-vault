@@ -28,6 +28,15 @@
 
 namespace ui {
 
+namespace {
+GalleryGrid* busy_pane(GalleryGrid& left, GalleryGrid& right)
+{
+    if (vault_busy(left)) return &left;
+    if (vault_busy(right)) return &right;
+    return nullptr;
+}
+}  // namespace
+
 struct DualGalleryScreen::OtherPane {
     vault::Vault vault;
     std::string path;
@@ -132,9 +141,11 @@ void DualGalleryScreen::close_other_vault()
 // host could leave a modal worker behind or let the sibling read its live tree.
 bool DualGalleryScreen::route_modal(const SDL_Event& e)
 {
-    GalleryGrid* modal = grid_modal_open(*left_)    ? left_.get()
-                         : grid_modal_open(*right_) ? right_.get()
-                                                    : nullptr;
+    GalleryGrid* modal = nullptr;
+    if (grid_modal_open(*left_))
+        modal = left_.get();
+    else if (grid_modal_open(*right_))
+        modal = right_.get();
     if (!modal) return false;
     const auto split =
         dual_split(static_cast<float>(win_.width()), static_cast<float>(win_.height()));
@@ -515,8 +526,8 @@ void DualGalleryScreen::open_transfer_prompt()
 
     // Open the prompt at the destination's leaf name
     const std::string dst_leaf = dst_path.empty() ? "Root" : dst_path.substr(dst_path.rfind('/') + 1);
-    const std::string label =
-        other_ ? (active_ == 0 ? other_->label : "Active vault") + ": " + dst_leaf : dst_leaf;
+    const std::string vault_label = other_ && active_ == 0 ? other_->label : "Active vault";
+    const std::string label = other_ ? vault_label + ": " + dst_leaf : dst_leaf;
     prompt_.open(label, conflicts, other_ != nullptr);
 }
 
@@ -595,10 +606,7 @@ void DualGalleryScreen::update(double dt)
         mark_dirty();
         return;
     }
-    GalleryGrid* busy = vault_busy(*left_)    ? left_.get()
-                        : vault_busy(*right_) ? right_.get()
-                                              : nullptr;
-    if (busy) {
+    if (GalleryGrid* busy = busy_pane(*left_, *right_); busy) {
         busy->update(dt);
         if (!vault_busy(*busy)) on_vault_changed();
         mark_dirty();
@@ -772,7 +780,18 @@ bool DualGalleryScreen::blocks_idle_lock() const
 std::vector<HelpGroup> DualGalleryScreen::help_groups() const
 {
     if (job_.active()) return {{"Transfer", {{"Esc", "Cancel transfer; keep completed copies"}}}};
-    auto groups = active().help_groups();
+    std::vector<HelpGroup> groups;
+    if (other_ && active_ == 1) {
+        groups = {{"Second vault",
+                   {{"Enter / Esc", "Enter gallery / go up"},
+                    {"Space / Ctrl+A", "Select items / select all"},
+                    {"Shift+Space", "Select range"},
+                    {"Home / End", "First / last item"},
+                    {"L", "Cycle list / grid view"},
+                    {"D", "Toggle details"}}}};
+    } else {
+        groups = active().help_groups();
+    }
 
     // Add split-view-specific help group
     HelpGroup split_group;
@@ -781,7 +800,7 @@ std::vector<HelpGroup> DualGalleryScreen::help_groups() const
         {"Ctrl+O", "Open another vault in right pane"},
         {"Ctrl+W", "Close and lock second vault"},
         {"Tab", "Switch pane"},
-        {"M", "Move/copy to other pane"},
+        {"M", other_ ? "Copy to other pane" : "Move/copy to other pane"},
         {"F3", "Leave split view"},
     };
     groups.push_back(split_group);

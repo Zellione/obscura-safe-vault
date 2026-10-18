@@ -1,6 +1,6 @@
 # Phase 119 — Split-view cross-vault copy and transfer lifetime safety
 
-Status: implemented; local gates passed, CI and owner review pending.
+Status: implemented; awaiting owner merge after green gates and review.
 Branch: `phase-119-split-vault-copy`.
 
 ## Plan

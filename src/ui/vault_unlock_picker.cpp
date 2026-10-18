@@ -224,15 +224,15 @@ bool VaultUnlockPicker::handle_event(const SDL_Event& e)
 
 void VaultUnlockPicker::update()
 {
+    using enum platform::FileDialog::Purpose;
     if (for_pane_ && stage_ == Stage::PickVault) {
-        for (const auto purpose : {platform::FileDialog::Purpose::VaultDirectory,
-                                   platform::FileDialog::Purpose::Vault}) {
+        for (const auto purpose : {VaultDirectory, Vault}) {
             if (auto paths = dlg_.take_result(purpose); paths && !paths->empty())
                 select_path(paths->front());
         }
     }
     if (!dest_.awaiting_keyfile) return;
-    if (auto res = dlg_.take_result(platform::FileDialog::Purpose::Keyfile)) {
+    if (auto res = dlg_.take_result(Keyfile)) {
         dest_.awaiting_keyfile = false;
         if (!res->empty()) dest_.keyfile_path = (*res)[0];
     }
