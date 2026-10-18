@@ -1,6 +1,6 @@
 # Phase 120 — Export gallery folders
 
-Status: implemented; validation and PR gates in progress.
+Status: implemented and locally validated; PR gates and owner merge pending.
 
 ## Behavior
 
@@ -53,4 +53,15 @@ leave empty or partial files, as in the existing individual-media exporter.
 - Required gates: Debug, Release, no-AV, ASAN/UBSan/LSan, CI and SonarCloud.
 
 The initial TDD run reproduced four failing recursive-export tests (19 failed
-checks) before implementation. Final gate results will be recorded before handoff.
+checks) before implementation.
+
+Local results:
+
+- Debug: 2,468 tests passed.
+- Release: 2,468 tests passed.
+- ASAN/UBSan/LSan: 2,468 tests passed outside the sandbox (the sandbox prevented
+  LeakSanitizer from performing its exit check).
+- No-FFmpeg: build and all 2,272 tests passed.
+- `git diff --check` and `serena memories check` passed.
+
+CI and SonarCloud results are tracked on the phase PR; the owner performs the merge.
