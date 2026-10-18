@@ -193,8 +193,10 @@ void DualGalleryScreen::update_pane(GalleryGrid& grid, double dt)
 void DualGalleryScreen::apply_split_layout()
 {
     const auto split = dual_split(static_cast<float>(win_.width()), static_cast<float>(win_.height()));
-    left_->set_layout_override(split.left.w, split.left.h);
-    right_->set_layout_override(split.right.w, split.right.h);
+    // Keep each pane's own status/footer visible above the split-view commands.
+    const float footer = line_pitch(font_.pixel_height()) + 12;
+    left_->set_layout_override(split.left.w, std::max(0.0f, split.left.h - footer));
+    right_->set_layout_override(split.right.w, std::max(0.0f, split.right.h - footer));
 }
 
 void DualGalleryScreen::on_enter()
@@ -602,8 +604,10 @@ void DualGalleryScreen::update(double dt)
         mark_dirty();
         return;
     }
-    update_pane(*left_, dt);
-    update_pane(*right_, dt);
+    // Drain the input-owning pane's synchronous modal completion first (for
+    // example rename), refreshing its sibling before that sibling can update.
+    update_pane(active(), dt);
+    update_pane(inactive(), dt);
     if (left_->consume_dirty() || right_->consume_dirty()) mark_dirty();
 }
 

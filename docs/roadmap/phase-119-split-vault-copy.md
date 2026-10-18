@@ -1,6 +1,6 @@
 # Phase 119 — Split-view cross-vault copy and transfer lifetime safety
 
-Status: implemented; validation in progress.
+Status: implemented; local gates passed, CI and owner review pending.
 Branch: `phase-119-split-vault-copy`.
 
 ## Plan
@@ -52,7 +52,9 @@ normal pull-import regression exercises 40 incoming gallery trees. A paused
 worker regression detects the original stale-node read under ASAN. Picker tests
 also cover opening an unregistered directory and moving its unlocked ownership.
 
-Initial full gates: Debug 2,461/0; ASAN/UBSan/LSan 2,460/0 outside the sandbox.
-Native SDL input/render coverage and the final same-vault regression pass.
-Release, no-AV, final sanitizer confirmation, and PR gates remain in progress.
-`serena memories check` reports no referential integrity issues.
+Local gates passed: Debug and Release each 2,461/0; ASAN/UBSan/LSan
+2,461/0 outside the sandbox; no-AV Debug 2,265/0. Native SDL input/render
+coverage and the paused-worker/same-vault regressions pass. Normal build files
+are restored. `serena memories check` reports no referential integrity issues.
+CI and SonarCloud are checked on [PR #256](https://github.com/Zellione/obscura-safe-vault/pull/256).
+The owner merges after review and green gates.
