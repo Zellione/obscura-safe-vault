@@ -81,6 +81,37 @@ TEST(file_op_job_exports_on_worker_thread)
     cleanup_dir(out);
 }
 
+TEST(file_op_job_exports_v3_gallery_tree_on_worker_thread)
+{
+    const auto dir = fresh_dir("osv_fj_export_v3");
+    const auto out = fresh_dir("osv_fj_export_v3_out");
+    {
+        vault::Vault v;
+        const std::string password = "pw";
+        const auto pw = std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(password.data()),
+                                                 password.size());
+        const crypto::KdfParams kdf{.t_cost = 1, .m_cost_kib = 8, .parallelism = 1};
+        REQUIRE(vault::Vault::create_directory((dir / "v.osv").string(), pw, {}, kdf, v) ==
+                vault::VaultResult::Ok);
+        REQUIRE(seed_images(v, "album", 2));
+        REQUIRE(v.create_gallery("album/empty") == vault::VaultResult::Ok);
+        ui::FileOpJob job;
+        REQUIRE(job.start_export(v, list_copy(v, ""), out, "out"));
+        const auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK_EQ(oc->done, 4);
+        CHECK_EQ(oc->total, 4);
+        CHECK_EQ(oc->failed, 0);
+        CHECK(oc->status.find("4 items") != std::string::npos);
+        CHECK(fs::is_directory(out / "album/empty"));
+        CHECK_EQ(fs::file_size(out / "album/1.jpg"), fake_jpeg(1).size());
+        CHECK_EQ(fs::file_size(out / "album/2.jpg"), fake_jpeg(2).size());
+    }
+    cleanup_dir(dir);
+    cleanup_dir(out);
+}
+
 TEST(file_op_job_deletes_gallery_on_worker_thread)
 {
     auto dir = fresh_dir("osv_fj_delete");

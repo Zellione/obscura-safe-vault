@@ -46,7 +46,7 @@ vendor/      git submodules — pinned versions, build mechanics, CI matrix in m
    wipe-on-release heap buffers; opaque third-party codec/driver allocations that cannot accept
    caller storage are documented and must set the F1 degraded status (Phase 97).
    EXCEPTION (documented, gated): `src/ui/export.*` deliberately writes decrypted originals to
-   disk on explicit user consent (selection-only, never thumbnails, buffer wiped right after
+   disk on explicit user consent (explicit selections including gallery subtrees, never thumbnails, buffer wiped right after
    write, and since Phase 98 the sink is an ATOMIC no-follow create —
    `platform::create_new_file_within`, see `mem:module/app`). No other path may write plaintext.
 2. All key/KEK/password buffers wiped with `crypto_wipe` before free.
@@ -58,7 +58,7 @@ vendor/      git submodules — pinned versions, build mechanics, CI matrix in m
    (`vault::sanitize_node_name`), and claim atomically on export
    (`platform::create_new_file_within` — Phase 98: no-follow, containment-enforced, the write
    goes through the already-open handle, never a checked-earlier path; `ui::export_path_within`
-   remains only as a post-create assertion); never
+   is diagnostic only; `platform::OutputDirectory` pins recursive export parents); never
    build `dest_dir / node.name` directly (CWE-22). See `mem:module/vault` safe_name.*.
 
 ## Key hierarchy

@@ -6,7 +6,7 @@
 // SECURITY NOTE: this module is the ONE place that intentionally violates
 // invariant #1 ("no plaintext to disk"). It is gated by explicit per-export
 // consent (ExportConsent::Confirm), only ever writes the current explicit
-// selection (never a whole-tree dump), and the decrypted bytes live only in an
+// selection (including selected gallery subtrees), and decrypted bytes live in an
 // mlock'd SecureBytes right up to the write() call and are crypto_wipe'd
 // immediately afterwards. Thumbnails are never exported.
 //
@@ -21,7 +21,8 @@
 // no-follow, containment-enforced create that doubles as the collision test and
 // returns an already-open handle, so the write happens strictly inside the
 // picked folder and a path that was merely "checked earlier" is never reopened.
-// export_path_within remains as a post-create invariant assertion.
+// Phase 120 pins directories with platform::OutputDirectory throughout a
+// recursive export. Display paths are never reopened or used to authorize writes.
 //
 // SDL-free by design so the write/collision logic stays headlessly testable;
 // the consent dialog and folder picker live in the UI/platform layers.
@@ -40,6 +41,7 @@ namespace ui {
 // The user's answer to the per-export consent dialog. Cancel is the default.
 enum class ExportConsent { Cancel, Confirm };
 
+// Counts filesystem entries: original files and gallery directories.
 struct ExportSummary {
     int written = 0;
     int failed  = 0;
@@ -48,10 +50,9 @@ struct ExportSummary {
 // True iff `candidate` resolves to a location strictly inside `dest_dir`.
 //
 // Phase 98 (OSV-AUD-005) retired the old check-then-truncating-open path, so
-// this is no longer the security boundary — it is a post-create invariant
-// assertion on the ATOMICALLY created display path (weakly_canonical both
-// operands, containment via lexically_relative). Kept because it is cheap,
-// harmless, and catches a buggy helper returning an escaping name. A relative
+// this is a diagnostic for tests (weakly_canonical both operands, containment
+// via lexically_relative). Production exports rely on pinned directory
+// descriptors. A relative
 // path that is empty, is ".", or contains any ".." component means the
 // candidate escaped. Fails closed: a filesystem error resolving either operand
 // returns false.
@@ -78,11 +79,12 @@ struct ExportSummary {
                                                   platform::NewOutputFile  out,
                                                   crypto::SecureBytes&     scratch);
 
-// Export every image/video in `images` to `dest_dir`, collision-suffixing names.
-// A no-op returning {0,0} unless `consent == Confirm`. Gallery / failed nodes
-// increment `failed` and are skipped. Thumbnails are never written. `progress`
-// (optional) is set to images.size() up front and bumped per node; a set cancel
-// flag stops between files, leaving the files written so far in place (Phase 25).
+// Export the explicit selection: originals as files, galleries as directories
+// containing their full subtree (including empty galleries). Overlapping or
+// duplicate selections are exported once. Every name is sanitized and claimed
+// exclusively; existing folders are never merged. A no-op unless Confirm.
+// Progress counts files and directories, including skipped failed subtrees.
+// Cancel stops between entries and leaves completed output in place.
 [[nodiscard]] ExportSummary export_images(const vault::Vault&                          vault,
                                           std::span<const vault::IndexNode* const>     images,
                                           const std::filesystem::path&                 dest_dir,

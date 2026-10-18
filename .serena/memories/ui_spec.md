@@ -595,3 +595,12 @@ Distinct-vault transfers are copy-only; read-only destinations are refused.
 The secondary pane is a copy browser; full viewer/editing uses the manager.
 Ctrl+W or leaving split locks the additional vault. During transfers only
 progress and Esc cancellation are available, with partial copies retained.
+
+## Gallery export (Phase 120)
+
+Space/Ctrl+A selects galleries and media; X opens the default-cancel plaintext
+warning, Y confirms, then the destination picker opens. Selected galleries include
+all nested originals and empty galleries. This applies to grid, favorites/tag
+collections, and advanced search. Overlapping selections export once. Existing
+names are suffixed, never merged/overwritten. Progress counts files and folders
+as items; Esc keeps completed output and stops between entries.

@@ -86,18 +86,6 @@ void clear_atomic_create_collision() noexcept
 
 namespace {
 
-// RAII close for the directory descriptor.
-struct FdGuard {
-    int fd = -1;
-    ~FdGuard()
-    {
-        if (fd >= 0) ::close(fd);
-    }
-    FdGuard() = default;
-    FdGuard(const FdGuard&) = delete;
-    FdGuard& operator=(const FdGuard&) = delete;
-};
-
 // Atomic exclusive create of `name` as a direct child of `dirfd`, refusing to
 // follow any symlink. Prefers openat2 (RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS:
 // no component may escape the directory, none may be a link) and falls back to
@@ -131,20 +119,58 @@ struct FdGuard {
 
 }  // namespace
 
-std::optional<NewOutputFile>
-create_new_file_within(const std::filesystem::path& directory, std::string_view safe_component)
+OutputDirectory::~OutputDirectory()
 {
-    if (!is_plain_component(safe_component)) return std::nullopt;
+    if (fd_ >= 0) ::close(fd_);
+}
 
-    // Hold the directory open so a concurrent rename/replace of the NAME
-    // `directory` cannot redirect our create: every operation resolves
-    // relative to this descriptor. Opening the directory also follows only the
-    // user's own choice of directory (symlinks in ITS ancestry are the user's
-    // setup, not an attacker's); what we refuse is following a link at or below
-    // the point of create.
-    FdGuard dir;
-    dir.fd = ::open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (dir.fd < 0) return std::nullopt;
+OutputDirectory::OutputDirectory(OutputDirectory&& other) noexcept
+    : fd_(std::exchange(other.fd_, -1)), path_(std::move(other.path_))
+{}
+
+OutputDirectory& OutputDirectory::operator=(OutputDirectory&& other) noexcept
+{
+    if (this != &other) {
+        if (fd_ >= 0) ::close(fd_);
+        fd_ = std::exchange(other.fd_, -1);
+        path_ = std::move(other.path_);
+    }
+    return *this;
+}
+
+std::optional<OutputDirectory> OutputDirectory::open(const std::filesystem::path& path)
+{
+    // Only the user-picked root may follow symlinks in the user's own setup.
+    // Construct the owning object before opening so allocation cannot leak fd.
+    OutputDirectory dir(-1, path);
+    dir.fd_ = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dir.fd_ < 0) return std::nullopt;
+    return dir;
+}
+
+std::optional<OutputDirectory> OutputDirectory::create_directory(std::string_view component) const
+{
+    if (fd_ < 0 || !is_plain_component(component)) return std::nullopt;
+    for (int n = 0; n <= MAX_COLLISION_ATTEMPTS; ++n) {
+        const std::string name =
+            n == 0 ? std::string(component) : std::format("{} ({})", component, n);
+        OutputDirectory child(-1, path_ / utf8_to_path(name));
+        if (::mkdirat(fd_, name.c_str(), 0700) != 0) {
+            if (errno == EEXIST) continue;
+            return std::nullopt;
+        }
+        child.fd_ = ::openat(fd_, name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        // If someone replaces our directory before open, never follow a link
+        // or remove their replacement. A failed export may leave an empty dir.
+        if (child.fd_ < 0) return std::nullopt;
+        return child;
+    }
+    return std::nullopt;
+}
+
+std::optional<NewOutputFile> OutputDirectory::create_file(std::string_view safe_component) const
+{
+    if (fd_ < 0 || !is_plain_component(safe_component)) return std::nullopt;
 
     // The FIRST attempt runs the injected "attacker claimed it" seam (if armed)
     // too, so the race is exercised from the very first candidate.
@@ -153,18 +179,18 @@ create_new_file_within(const std::filesystem::path& directory, std::string_view 
 
         const std::string name = (n == 0) ? std::string{safe_component}
                                           : collided_name(safe_component, n);
-        if (const int fd = openat_creat(dir.fd, name); fd >= 0) {
+        NewOutputFile out;
+        out.display_path = path_ / utf8_to_path(name);
+        if (const int fd = openat_creat(fd_, name); fd >= 0) {
             std::FILE* fp = ::fdopen(fd, "wb");
             if (!fp) {
                 const int saved = errno;
                 ::close(fd);
-                (void)::unlinkat(dir.fd, name.c_str(), 0);  // discard the stub
+                (void)::unlinkat(fd_, name.c_str(), 0);  // discard the stub
                 errno = saved;
                 return std::nullopt;
             }
-            NewOutputFile out;
             out.fp = fp;
-            out.display_path = directory / utf8_to_path(name);
             return out;
         }
         if (errno == EEXIST) continue;  // name taken (file, dir, or symlink) -> suffix
@@ -176,6 +202,13 @@ create_new_file_within(const std::filesystem::path& directory, std::string_view 
         return std::nullopt;  // permission / quota / I/O: fail closed, nothing left behind
     }
     return std::nullopt;  // collision streak exhausted
+}
+
+std::optional<NewOutputFile> create_new_file_within(const std::filesystem::path& directory,
+                                                    std::string_view safe_component)
+{
+    auto dir = OutputDirectory::open(directory);
+    return dir ? dir->create_file(safe_component) : std::nullopt;
 }
 
 }  // namespace platform

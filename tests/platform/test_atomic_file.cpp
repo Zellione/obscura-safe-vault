@@ -56,6 +56,48 @@ std::vector<uint8_t> read_all(const fs::path& p)
 
 }  // namespace
 
+TEST(atomic_export_directory_pins_nested_writes_across_symlink_replacement)
+{
+    TempDir d("nested");
+    TempDir victim("nested_victim");
+    auto root = platform::OutputDirectory::open(d.path);
+    REQUIRE(root.has_value());
+    auto child = root->create_directory("album");
+    REQUIRE(child.has_value());
+    fs::rename(d.path / "album", d.path / "original");
+    fs::create_directory_symlink(victim.path, d.path / "album");
+    auto sub = child->create_directory("sub");
+    REQUIRE(sub.has_value());
+    auto file = sub->create_file("photo.png");
+    REQUIRE(file.has_value());
+    CHECK_EQ(std::fwrite("original", 1, 8, file->fp), 8);
+    file.reset();
+    CHECK_EQ(read_all(d.path / "original/sub/photo.png").size(), 8);
+    CHECK_TRUE(fs::is_empty(victim.path));
+}
+
+TEST(atomic_export_directory_rejects_unsafe_names_and_suffixes_collisions)
+{
+    TempDir d("dir_names");
+    auto root = platform::OutputDirectory::open(d.path);
+    REQUIRE(root.has_value());
+    for (const auto name : {"", ".", "..", "a/b", "a\\b", "/absolute"}) {
+        CHECK_FALSE(root->create_directory(name).has_value());
+        CHECK_FALSE(root->create_file(name).has_value());
+    }
+    CHECK_TRUE(fs::is_empty(d.path));
+    {
+        std::ofstream f(d.path / "album.v1");
+        f << "keep";
+    }
+    fs::create_directory(d.path / "album.v1 (1)");
+    auto child = root->create_directory("album.v1");
+    REQUIRE(child.has_value());
+    CHECK_TRUE(fs::is_directory(d.path / "album.v1 (2)"));
+    CHECK_EQ(read_all(d.path / "album.v1").size(), 4);
+    CHECK_FALSE(platform::OutputDirectory::open(d.path / "absent").has_value());
+}
+
 // --- Basic creation + write-through-handle ---------------------------------
 
 TEST(atomic_create_makes_writable_file_and_reports_path)

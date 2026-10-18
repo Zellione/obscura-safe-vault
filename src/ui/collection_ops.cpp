@@ -161,7 +161,7 @@ void CollectionBatchOps::render(gfx::Renderer& r, gfx::FontAtlas& font, float W,
     if (job_.active()) {
         const int done  = job_.done();
         const int total = job_.total();
-        const std::string count = std::format("{} / {} files", done, total);
+        const std::string count = std::format("{} / {} items", done, total);
         draw_op_progress(r, font, W, H,
                          {.title = job_.kind() == FileOpKind::Delete ? "Deleting…" : "Exporting…",
                           .count_line = count, .done = done, .total = total});

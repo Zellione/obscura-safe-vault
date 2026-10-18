@@ -41,7 +41,7 @@ FileOpOutcome run_export(const vault::Vault& v, const std::vector<const vault::I
     if (oc.cancelled)
         oc.status = std::format("Export cancelled — {} written to {}", oc.done, label);
     else
-        oc.status = std::format("Exported {} to {}", count_noun(oc.done, "image"), label);
+        oc.status = std::format("Exported {} to {}", count_noun(oc.done, "item"), label);
     if (oc.failed > 0) oc.status += std::format(" ({} failed)", oc.failed);
     return oc;
 }

@@ -223,6 +223,11 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   window; symlinks/reparse points at the candidate count as collisions and are suffixed past.
   Rejects separators/`.`/`..`/NUL/≥256-byte components up front. `inject_atomic_create_collision()`
   is the deterministic attacker-race seam. SDL-free, layering exception like path_utf8.h.
+  `OutputDirectory` (Phase 120) is the move-only directory descriptor owner:
+  `open` follows the user-picked root; `create_directory` claims a 0700 directory
+  with mkdirat and opens it with O_DIRECTORY|O_NOFOLLOW; `create_file` uses the
+  existing exclusive no-follow mechanism. Nested exports retain ancestor handles
+  and never reopen display paths. Folder collisions append ` (n)` to the full name.
 - `locale_init.h` (Phase 72) — header-only `platform::init_locale()`: switches **LC_CTYPE
   only** (never LC_NUMERIC — decimal-comma corruption) to a UTF-8 locale; env locale with
   `C.UTF-8` fallback. Called first

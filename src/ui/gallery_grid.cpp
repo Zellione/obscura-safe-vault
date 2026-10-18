@@ -131,11 +131,24 @@ void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
     std::string_view unit  = "items";
     using enum FileOpKind;
     switch (job.kind()) {
-        case Export:   title = "Exporting…"; unit = "images"; break;
-        case Delete:   title = "Deleting…";  unit = "items";  break;
-        case Transfer: title = "Moving…";    unit = "files";  break;
-        case Compact:  title = "Compacting…"; unit = "chunks"; break;
-        case None:     break;
+    case Export:
+        title = "Exporting…";
+        unit = "items";
+        break;
+    case Delete:
+        title = "Deleting…";
+        unit = "items";
+        break;
+    case Transfer:
+        title = "Moving…";
+        unit = "files";
+        break;
+    case Compact:
+        title = "Compacting…";
+        unit = "chunks";
+        break;
+    case None:
+        break;
     }
     const int total = job.total();
     const int done  = job.done();
