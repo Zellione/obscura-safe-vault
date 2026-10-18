@@ -3,10 +3,10 @@
 #include "vault/staging.h"
 #include "vault/vault.h"
 
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
-using ziptest::make_vault;
 
 TEST(uncommitted_staged_chunks_are_clean_orphans)
 {
@@ -15,7 +15,7 @@ TEST(uncommitted_staged_chunks_are_clean_orphans)
     uint64_t   wasted_before = 0;
     {
         vault::Vault v;
-        make_vault(v, path);
+        REQUIRE(make_legacy_writable_vault(v, path));
         REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
         REQUIRE(v.add_image("g", fake_jpeg(1), "committed.jpg") == vault::VaultResult::Ok);
         wasted_before = vault::vault_wasted_bytes(v);

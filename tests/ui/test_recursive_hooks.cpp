@@ -51,7 +51,7 @@ TEST(recursive_hooks_import_a_zip_nested_inside_a_zip)
     REQUIRE(!outer_bytes.empty());
 
     vault::Vault v;
-    ziptest::make_vault(v, dir / "v.osv");
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, dir / "v.osv"));
     REQUIRE(v.create_gallery("Dest") == vault::VaultResult::Ok);
 
     ui::DirectVaultSink sink(v, "Dest", "");
@@ -91,7 +91,7 @@ TEST(recursive_hooks_do_not_descend_into_an_entry_whose_magic_disagrees)
     const auto outer_bytes = read_bytes(outer_path);
 
     vault::Vault v;
-    ziptest::make_vault(v, dir / "v.osv");
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, dir / "v.osv"));
     REQUIRE(v.create_gallery("D") == vault::VaultResult::Ok);
 
     ui::DirectVaultSink sink(v, "D", "");
@@ -114,7 +114,7 @@ TEST(recursive_hooks_import_three_levels_of_nesting)
     const auto l0 = read_bytes(make_archive({{"one.zip", l1}}, dir / "l0.zip"));
 
     vault::Vault v;
-    ziptest::make_vault(v, dir / "v.osv");
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, dir / "v.osv"));
     REQUIRE(v.create_gallery("D") == vault::VaultResult::Ok);
 
     ui::DirectVaultSink sink(v, "D", "");
@@ -142,7 +142,7 @@ TEST(import_archive_recursive_creates_nested_sub_galleries_in_a_vault)
         make_archive({{"top.jpg", fake_jpeg(12)}, {"bonus.zip", inner}}, dir / "outer.zip");
 
     vault::Vault v;
-    ziptest::make_vault(v, dir / "v.osv");
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, dir / "v.osv"));
 
     // Same shape as import_zip's own vault overload: the sink base is
     // base_gallery + new_gallery_name.
@@ -170,7 +170,7 @@ TEST(import_archive_recursive_rejects_a_file_that_is_not_an_archive)
     { std::ofstream f(bad, std::ios::binary); f << "plain text, not a zip"; }
 
     vault::Vault v;
-    ziptest::make_vault(v, dir / "v.osv");
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, dir / "v.osv"));
     ui::DirectVaultSink sink(v, "", "X");
 
     const auto out = ui::import_archive_recursive(sink, bad, "X", "X");
@@ -201,7 +201,7 @@ TEST(recursive_hooks_tag_a_nested_gallery_from_its_own_meta_json)
         dir / "outer.zip"));
 
     vault::Vault v;
-    ziptest::make_vault(v, dir / "v.osv");
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, dir / "v.osv"));
     REQUIRE(v.create_gallery("D") == vault::VaultResult::Ok);
 
     ui::DirectVaultSink sink(v, "D", "");
@@ -269,7 +269,7 @@ TEST(recursive_hooks_open_each_archive_once)
     REQUIRE(!outer_bytes.empty());
 
     vault::Vault v;
-    ziptest::make_vault(v, dir / "v.osv");
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, dir / "v.osv"));
     REQUIRE(v.create_gallery("Dest") == vault::VaultResult::Ok);
 
     ui::DirectVaultSink       sink(v, "Dest", "");

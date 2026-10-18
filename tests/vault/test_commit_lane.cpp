@@ -4,10 +4,10 @@
 #include "vault/staging.h"
 #include "vault/vault.h"
 
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
-using ziptest::make_vault;
 
 TEST(commit_lane_stop_releases_directory_vault_for_move_and_lock)
 {
@@ -64,7 +64,7 @@ TEST(commit_lane_persists_attached_nodes)
     const auto path = dir / "a.osv";
     {
         vault::Vault v;
-        ziptest::make_vault(v, path);
+        REQUIRE(vaulttest::make_legacy_writable_vault(v, path));
         REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
         vault::CommitLane lane;
         lane.start(v);
@@ -91,7 +91,7 @@ TEST(commit_lane_coalesces_and_keeps_newest)
     const auto path = dir / "a.osv";
     {
         vault::Vault v;
-        ziptest::make_vault(v, path);
+        REQUIRE(vaulttest::make_legacy_writable_vault(v, path));
         REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
         vault::CommitLane lane;
         lane.start(v);
@@ -118,7 +118,7 @@ TEST(commit_router_routes_user_ops_through_lane)
     const auto path = dir / "a.osv";
     {
         vault::Vault v;
-        ziptest::make_vault(v, path);
+        REQUIRE(vaulttest::make_legacy_writable_vault(v, path));
         REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
         vault::CommitLane lane;
         lane.start(v);
@@ -142,7 +142,7 @@ TEST(commit_lane_refuses_work_after_failure)
     const auto path = dir / "a.osv";
     {
         vault::Vault v;
-        ziptest::make_vault(v, path);
+        REQUIRE(vaulttest::make_legacy_writable_vault(v, path));
         vault::CommitLane lane;
         lane.start(v);
 
@@ -174,7 +174,7 @@ TEST(commit_lane_header_mutex_tsan_coverage)
     const auto path = dir / "a.osv";
     {
         vault::Vault v;
-        ziptest::make_vault(v, path);
+        REQUIRE(vaulttest::make_legacy_writable_vault(v, path));
         REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
         vault::CommitLane lane;
         lane.start(v);
@@ -212,7 +212,7 @@ TEST(commit_lane_enqueue_snapshot_rejects_stopped_lane)
     const auto path = dir / "a.osv";
     {
         vault::Vault v;
-        ziptest::make_vault(v, path);
+        REQUIRE(vaulttest::make_legacy_writable_vault(v, path));
         vault::CommitLane lane;
         lane.start(v);
 
@@ -234,7 +234,7 @@ TEST(commit_lane_flush_stopped_lane_returns_immediately)
     const auto path = dir / "a.osv";
     {
         vault::Vault v;
-        ziptest::make_vault(v, path);
+        REQUIRE(vaulttest::make_legacy_writable_vault(v, path));
         vault::CommitLane lane;
         lane.start(v);
 

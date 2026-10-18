@@ -1,21 +1,21 @@
 #include "test_framework.h"
-#include "ui/zip_test_helpers.h"   // ziptest::make_vault, fake_jpeg, fresh_dir, cleanup_dir
-#include "vault/vault.h"
+#include "ui/zip_test_helpers.h"  // vaulttest::make_legacy_writable_vault, fake_jpeg, fresh_dir, cleanup_dir
 #include "vault/staging.h"
+#include "vault/vault.h"
 
 #include <thread>
 
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
-using ziptest::make_vault;
 
 // Basic test: read_fp_ is opened and reads work correctly.
 TEST(read_handle_basic_read)
 {
     const auto dir = fresh_dir("read_handle_basic");
     vault::Vault v;
-    make_vault(v, dir / "a.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "a.osv"));
     REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("g", fake_jpeg(1), "1.jpg") == vault::VaultResult::Ok);
     const auto* node = v.list("g").at(0);
@@ -38,7 +38,7 @@ TEST(read_handle_survives_concurrent_appends)
 {
     const auto dir = fresh_dir("read_handle");
     vault::Vault v;
-    make_vault(v, dir / "a.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "a.osv"));
     REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("g", fake_jpeg(1), "1.jpg") == vault::VaultResult::Ok);
     // Get the node after adding the image (adding invalidates previous list() pointers).

@@ -3,7 +3,7 @@
 #include "crypto/kdf.h"
 #include "ui/file_op_job.h"
 #include "ui/waste_threshold.h"
-#include "ui/zip_test_helpers.h"   // make_vault, fake_jpeg, fresh_dir, cleanup_dir
+#include "ui/zip_test_helpers.h"  // make_legacy_writable_vault, fake_jpeg, fresh_dir, cleanup_dir
 #include "vault/transfer.h"
 #include "vault/vault.h"
 
@@ -16,10 +16,10 @@
 #include <thread>
 #include <vector>
 
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
-using ziptest::make_vault;
 
 namespace {
 namespace fs = std::filesystem;
@@ -58,7 +58,7 @@ TEST(file_op_job_exports_on_worker_thread)
     auto out = fresh_dir("osv_fj_export_out");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(seed_images(v, "g", 3));
 
         ui::FileOpJob job;
@@ -117,7 +117,7 @@ TEST(file_op_job_deletes_gallery_on_worker_thread)
     auto dir = fresh_dir("osv_fj_delete");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(seed_images(v, "album", 4));
 
         ui::FileOpJob job;
@@ -136,7 +136,7 @@ TEST(file_op_job_deletes_single_media)
     auto dir = fresh_dir("osv_fj_del1");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(seed_images(v, "g", 2));
 
         ui::FileOpJob job;
@@ -155,7 +155,7 @@ TEST(file_op_job_delete_of_missing_item_reports_error)
     auto dir = fresh_dir("osv_fj_delmiss");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(seed_images(v, "g", 1));
 
         ui::FileOpJob job;
@@ -173,8 +173,8 @@ TEST(file_op_job_copies_images_leaving_source)
     auto dir = fresh_dir("osv_fj_copy");
     {
         vault::Vault src, dst;
-        make_vault(src, dir / "s.osv");
-        make_vault(dst, dir / "d.osv");
+        REQUIRE(make_legacy_writable_vault(src, dir / "s.osv"));
+        REQUIRE(make_legacy_writable_vault(dst, dir / "d.osv"));
         REQUIRE(seed_images(src, "a", 2));
         REQUIRE(dst.create_gallery("b") == vault::VaultResult::Ok);
 
@@ -196,8 +196,8 @@ TEST(file_op_job_transfers_images_between_vaults)
     auto dir = fresh_dir("osv_fj_xfer");
     {
         vault::Vault src, dst;
-        make_vault(src, dir / "s.osv");
-        make_vault(dst, dir / "d.osv");
+        REQUIRE(make_legacy_writable_vault(src, dir / "s.osv"));
+        REQUIRE(make_legacy_writable_vault(dst, dir / "d.osv"));
         REQUIRE(seed_images(src, "a", 2));
         REQUIRE(dst.create_gallery("b") == vault::VaultResult::Ok);
 
@@ -219,8 +219,8 @@ TEST(file_op_job_transfers_gallery_subtree)
     auto dir = fresh_dir("osv_fj_gxfer");
     {
         vault::Vault src, dst;
-        make_vault(src, dir / "s.osv");
-        make_vault(dst, dir / "d.osv");
+        REQUIRE(make_legacy_writable_vault(src, dir / "s.osv"));
+        REQUIRE(make_legacy_writable_vault(dst, dir / "d.osv"));
         REQUIRE(seed_images(src, "album", 3));
 
         ui::FileOpJob job;
@@ -242,7 +242,7 @@ TEST(file_op_job_runs_one_at_a_time)
     auto out = fresh_dir("osv_fj_one_out");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(seed_images(v, "g", 3));
 
         ui::FileOpJob job;
@@ -327,7 +327,7 @@ TEST(file_op_job_transfers_mixed_media_and_galleries)
     auto dir = fresh_dir("osv_fj_mixed");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(seed_images(v, "a", 2));
         const auto mp4 = read_fixture(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
         REQUIRE(!mp4.empty());
@@ -358,7 +358,7 @@ TEST(file_op_job_transfer_includes_videos)
     auto dir = fresh_dir("osv_fj_video_sel");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(v.create_gallery("a") == vault::VaultResult::Ok);
         const auto mp4 = read_fixture(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
         REQUIRE(!mp4.empty());
@@ -386,7 +386,7 @@ TEST(file_op_job_grouped_transfer_moves_across_parents)
     auto dir = fresh_dir("osv_fj_grouped");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(seed_images(v, "a", 1));
         REQUIRE(seed_images(v, "b", 2));
         REQUIRE(v.create_gallery("dst") == vault::VaultResult::Ok);
@@ -417,8 +417,8 @@ TEST(file_op_job_transfer_reports_skips)
     auto dir = fresh_dir("osv_fj_skip");
     {
         vault::Vault src, dst;
-        make_vault(src, dir / "s.osv");
-        make_vault(dst, dir / "d.osv");
+        REQUIRE(make_legacy_writable_vault(src, dir / "s.osv"));
+        REQUIRE(make_legacy_writable_vault(dst, dir / "d.osv"));
         REQUIRE(seed_images(src, "g", 2));
         REQUIRE(dst.add_image("", fake_jpeg(3), "2.jpg") == vault::VaultResult::Ok);
 
@@ -491,7 +491,7 @@ TEST(file_op_job_combine_copy_keeps_source)
     auto dir = fresh_dir("osv_fj_combine_copy");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(seed_images(v, "src", 2));
         REQUIRE(v.create_gallery("dst") == vault::VaultResult::Ok);
 
@@ -515,7 +515,7 @@ TEST(file_op_job_combine_move_empties_source)
     auto dir = fresh_dir("osv_fj_combine_move");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(seed_images(v, "src", 2));
         REQUIRE(v.create_gallery("dst") == vault::VaultResult::Ok);
 

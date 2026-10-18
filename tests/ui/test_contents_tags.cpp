@@ -14,10 +14,10 @@
 // and respect depth bounds.
 
 namespace fs = std::filesystem;
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
-using ziptest::make_vault;
 
 namespace {
 
@@ -33,7 +33,7 @@ TEST(contents_tags_unions_descendant_tags)
     auto dir = fresh_dir("osv_contents_union");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(v.create_gallery("trip") == vault::VaultResult::Ok);
         REQUIRE(v.add_tag("trip", "vacation") == vault::VaultResult::Ok);
         REQUIRE(v.create_gallery("trip/day1") == vault::VaultResult::Ok);
@@ -55,7 +55,7 @@ TEST(contents_tags_excludes_the_gallerys_own_tags)
     auto dir = fresh_dir("osv_contents_own");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(v.create_gallery("trip") == vault::VaultResult::Ok);
         REQUIRE(v.add_tag("trip", "vacation") == vault::VaultResult::Ok);
         REQUIRE(v.create_gallery("trip/day1") == vault::VaultResult::Ok);
@@ -75,7 +75,7 @@ TEST(contents_tags_excludes_inherited_tags)
     auto dir = fresh_dir("osv_contents_inherit");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(v.create_gallery("trip") == vault::VaultResult::Ok);
         REQUIRE(v.add_tag("trip", "vacation") == vault::VaultResult::Ok);
         REQUIRE(v.create_gallery("trip/day1") == vault::VaultResult::Ok);
@@ -94,7 +94,7 @@ TEST(contents_tags_dedupes_case_insensitively)
     auto dir = fresh_dir("osv_contents_dupe");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(v.create_gallery("trip") == vault::VaultResult::Ok);
         REQUIRE(v.create_gallery("trip/day1") == vault::VaultResult::Ok);
         REQUIRE(v.add_tag("trip/day1", "Beach") == vault::VaultResult::Ok);
@@ -114,7 +114,7 @@ TEST(contents_tags_of_an_empty_gallery_is_empty)
     auto dir = fresh_dir("osv_contents_empty");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(v.create_gallery("empty_gallery") == vault::VaultResult::Ok);
         CHECK(ui::contents_tags(v, "empty_gallery").empty());
     }
@@ -126,7 +126,7 @@ TEST(contents_tags_of_a_missing_path_is_empty)
     auto dir = fresh_dir("osv_contents_missing");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         CHECK(ui::contents_tags(v, "no/such/gallery").empty());
     }
     cleanup_dir(dir);

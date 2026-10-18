@@ -20,7 +20,7 @@ TEST(import_pipeline_stall_site_identified)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
 
     // Create 20 REAL decodable PNG files
     const auto files_dir = temp_dir / "files";
@@ -38,8 +38,9 @@ TEST(import_pipeline_stall_site_identified)
         files.push_back(path);
     }
 
-    ui::ImportQueue q;
     vault::CommitLane lane;
+
+    ui::ImportQueue q;
     lane.start(v);
     v.set_commit_router(&lane);
     q.begin_session(v, lane);

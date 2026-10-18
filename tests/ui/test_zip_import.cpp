@@ -13,11 +13,11 @@
 // coupling to a real codec. Shared fixtures (fake_jpeg, make_archive, vault +
 // temp-dir helpers) live in zip_test_helpers.h.
 namespace fs = std::filesystem;
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
 using ziptest::make_archive;
-using ziptest::make_vault;
 
 TEST(zip_import_new_gallery_mirrors_tree)
 {
@@ -28,7 +28,7 @@ TEST(zip_import_new_gallery_mirrors_tree)
 
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         auto out = ui::import_zip(v, zip, "", "Album");
         CHECK(out.ok);
         CHECK_EQ(out.imported, 2);
@@ -61,7 +61,7 @@ TEST(zip_import_stores_mixed_folder_as_mixed_gallery)
 
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         auto out = ui::import_zip(v, zip, "", "G");
         CHECK(out.ok);
         CHECK_EQ(out.imported, 2);
@@ -79,7 +79,7 @@ TEST(zip_import_rejects_malformed_archive)
 
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         auto out = ui::import_zip(v, dir / "bad.zip", "", "G");
         CHECK_FALSE(out.ok);
         CHECK_FALSE(out.error.empty());
@@ -95,7 +95,7 @@ TEST(zip_import_writes_no_extra_files)
 
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         auto out = ui::import_zip(v, zip, "", "G");
         CHECK(out.ok);
         // The only files in `dir` are the input zip and the vault — no decompressed temp.
@@ -122,7 +122,7 @@ TEST(zip_import_meta_json_tags_top_gallery_passed_name_wins)
                             dir / "in.zip");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         // The caller's name is authoritative: the UI prefills it from the
         // meta.json title via peek_archive_meta, so the user's (possibly
         // edited) popup text must never be silently overridden here.
@@ -205,7 +205,7 @@ TEST(zip_import_decodes_legacy_cp437_entry_name)
 
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         auto out = ui::import_zip(v, zip, "", "Album");
         CHECK(out.ok);
         CHECK_EQ(out.imported, 1);
@@ -258,7 +258,7 @@ TEST(zip_import_cjk_archive_name_and_entries)
 
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         auto out = ui::import_zip(v, zip, "", "\xE7\x9B\xB8\xE5\x86\x8C");
         CHECK(out.ok);
         CHECK_EQ(out.imported, 2);

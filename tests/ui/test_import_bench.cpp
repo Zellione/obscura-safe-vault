@@ -44,10 +44,10 @@
 //   OSV_BENCH=1 OSV_BENCH_DIR=/home/zellione/.cache build/bin/Debug/osv_tests
 
 namespace fs = std::filesystem;
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fresh_dir;
 using ziptest::make_archive;
-using ziptest::make_vault;
 
 // Generate a deterministic synthetic 64x64 PNG.
 static std::vector<uint8_t> synthetic_png(size_t seed)
@@ -95,7 +95,7 @@ TEST(import_bench_bulk_images)
 
     // Create a fresh vault and measure import time.
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     auto start = std::chrono::steady_clock::now();
 
@@ -166,7 +166,7 @@ TEST(import_bench_import_queue_vs_sync)
 
     // (a) Benchmark: legacy synchronous add_image loop
     vault::Vault v_sync;
-    make_vault(v_sync, dir / "v_sync.osv");
+    REQUIRE(make_legacy_writable_vault(v_sync, dir / "v_sync.osv"));
 
     auto start_sync = std::chrono::steady_clock::now();
 
@@ -187,7 +187,7 @@ TEST(import_bench_import_queue_vs_sync)
 
     // (b) Benchmark: async ImportQueue pipeline
     vault::Vault v_async;
-    make_vault(v_async, dir / "v_async.osv");
+    REQUIRE(make_legacy_writable_vault(v_async, dir / "v_async.osv"));
 
     vault::CommitLane lane;
     lane.start(v_async);

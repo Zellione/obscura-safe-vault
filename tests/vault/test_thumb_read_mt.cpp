@@ -1,13 +1,13 @@
+#include "image/fixtures.h"  // fixtures::solid_jpeg
 #include "test_framework.h"
-#include "ui/zip_test_helpers.h"   // ziptest::make_vault, fresh_dir, cleanup_dir
-#include "image/fixtures.h"        // fixtures::solid_jpeg
+#include "ui/zip_test_helpers.h"  // vaulttest::make_legacy_writable_vault, fresh_dir, cleanup_dir
 #include "vault/vault.h"
 
 #include <thread>
 
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fresh_dir;
-using ziptest::make_vault;
 
 // Concurrent thumbnail reads from multiple threads are thread-safe. Four worker threads
 // hammer read_thumbnail and read_thumb_span on different images while the main thread
@@ -16,7 +16,7 @@ TEST(thumbnail_reads_are_thread_safe)
 {
     const auto dir = fresh_dir("thumb_read_mt");
     vault::Vault v;
-    make_vault(v, dir / "a.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "a.osv"));
     REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
 
     // Add two images using a real decodable JPEG so thumbnails are actually generated.
@@ -81,7 +81,7 @@ TEST(thumbnail_read_after_lock_returns_locked)
 {
     const auto dir = fresh_dir("thumb_read_locked");
     vault::Vault v;
-    make_vault(v, dir / "a.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "a.osv"));
     REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
 
     // Add an image using a real decodable JPEG so a thumbnail is actually generated.
@@ -124,7 +124,7 @@ TEST(vault_move_assignment_preserves_thumb_handle)
 {
     const auto dir = fresh_dir("thumb_move_assign");
     vault::Vault v1;
-    make_vault(v1, dir / "v1.osv");
+    REQUIRE(make_legacy_writable_vault(v1, dir / "v1.osv"));
     REQUIRE(v1.create_gallery("g") == vault::VaultResult::Ok);
 
     // Add an image with a real JPEG thumbnail.
@@ -168,7 +168,7 @@ TEST(vault_open_initializes_thumb_handle_for_reads)
 
     // Phase 1: Create and populate a vault.
     vault::Vault v1;
-    make_vault(v1, dir / "test.osv");
+    REQUIRE(make_legacy_writable_vault(v1, dir / "test.osv"));
     REQUIRE(v1.create_gallery("g") == vault::VaultResult::Ok);
 
     const auto real_jpeg = fixtures::solid_jpeg(16, 16, 0x42, 0x43, 0x44);

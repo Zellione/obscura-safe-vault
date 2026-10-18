@@ -15,10 +15,10 @@
 
 using ui::DualTransferPrompt;
 using P = DualTransferPrompt;
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
-using ziptest::make_vault;
 
 namespace {
 namespace fs = std::filesystem;
@@ -164,7 +164,7 @@ TEST(file_op_job_same_vault_move_transfers_items)
     auto dir = fresh_dir("osv_dual_move");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(seed_images(v, "galA", 2));
         REQUIRE(v.create_gallery("galA/sub") == vault::VaultResult::Ok);
         REQUIRE(v.create_gallery("galB") == vault::VaultResult::Ok);
@@ -208,7 +208,7 @@ TEST(file_op_job_same_vault_copy_leaves_source)
     auto dir = fresh_dir("osv_dual_copy");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(seed_images(v, "galA", 1));
         REQUIRE(v.create_gallery("galB") == vault::VaultResult::Ok);
 
@@ -243,7 +243,7 @@ TEST(file_op_job_same_vault_transfer_with_suffix_collision_policy)
     auto dir = fresh_dir("osv_dual_suffix");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(seed_images(v, "galA", 1));
         REQUIRE(v.create_gallery("galA/sub") == vault::VaultResult::Ok);
         REQUIRE(v.create_gallery("galB") == vault::VaultResult::Ok);

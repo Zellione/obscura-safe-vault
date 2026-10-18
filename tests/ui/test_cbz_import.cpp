@@ -10,11 +10,11 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
 using ziptest::make_archive;
-using ziptest::make_vault;
 
 TEST(cbz_import_one_gallery_natural_order_and_checksums)
 {
@@ -28,7 +28,7 @@ TEST(cbz_import_one_gallery_natural_order_and_checksums)
                         dir / "MyComic.cbz");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         auto out = ui::import_cbz(v, cbz, "", "MyComic");
         CHECK(out.ok);
         CHECK_EQ(out.imported, 3);
@@ -64,7 +64,7 @@ TEST(cbz_import_flattens_internal_subfolders)
                         dir / "Vol.cbz");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         auto out = ui::import_cbz(v, cbz, "", "Vol");
         CHECK(out.ok);
         CHECK_EQ(out.imported, 3);
@@ -85,7 +85,7 @@ TEST(cbz_import_reports_progress)
                             dir / "P.cbz");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         ui::ImportProgress prog;
         auto out = ui::import_cbz(v, cbz, "", "P", &prog);
         CHECK(out.ok);
@@ -105,7 +105,7 @@ TEST(cbz_import_stops_early_on_cancel)
                             dir / "C.cbz");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         ui::ImportProgress prog;
         prog.cancel.store(true);   // pre-cancelled: no page should be imported
         auto out = ui::import_cbz(v, cbz, "", "C", &prog);
@@ -122,7 +122,7 @@ TEST(cbz_import_rejects_malformed_archive)
     std::ofstream(dir / "bad.cbz", std::ios::binary) << "this is not a zip";
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         auto out = ui::import_cbz(v, dir / "bad.cbz", "", "Bad");
         CHECK_FALSE(out.ok);
         CHECK_FALSE(out.error.empty());
@@ -137,7 +137,7 @@ TEST(cbz_import_writes_nothing_to_disk)
     auto cbz = make_archive({{"1.jpg", fake_jpeg(1)}, {"2.jpg", fake_jpeg(2)}}, dir / "C.cbz");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         auto out = ui::import_cbz(v, cbz, "", "C");
         CHECK(out.ok);
         CHECK_EQ(out.imported, 2);
@@ -163,7 +163,7 @@ TEST(cbz_import_meta_json_tags_gallery_passed_name_wins)
                             dir / "Comic.cbz");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         // The caller's name is authoritative: the UI prefills it from the
         // meta.json title via peek_archive_meta, so the user's (possibly
         // edited) popup text must never be silently overridden here.
@@ -198,7 +198,7 @@ TEST(cbz_import_malformed_meta_json_degrades_gracefully)
                             dir / "Comic.cbz");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         auto out = ui::import_cbz(v, cbz, "", "Comic");
         CHECK(out.ok);                     // a bad meta.json never blocks the import
         CHECK_EQ(out.imported, 1);
