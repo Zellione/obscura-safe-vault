@@ -9,16 +9,16 @@
 
 #include <thread>
 
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
-using ziptest::make_vault;
 
 TEST(stage_then_attach_equals_add_image)
 {
     const auto dir = fresh_dir("staging1");
     vault::Vault v;
-    make_vault(v, dir / "a.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "a.osv"));
     REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
 
     auto staged = vault::stage_image(v, fake_jpeg(7), "x.jpg");
@@ -37,7 +37,7 @@ TEST(attach_staged_rejects_collision_and_orphans_chunks)
 {
     const auto dir = fresh_dir("staging2");
     vault::Vault v;
-    make_vault(v, dir / "a.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "a.osv"));
     REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("g", fake_jpeg(1), "x.jpg") == vault::VaultResult::Ok);
 
@@ -53,7 +53,7 @@ TEST(ensure_gallery_path_creates_without_commit)
 {
     const auto dir = fresh_dir("staging3");
     vault::Vault v;
-    make_vault(v, dir / "a.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "a.osv"));
     REQUIRE(vault::ensure_gallery_path(v, "a/b/c") == vault::VaultResult::Ok);
     REQUIRE(vault::ensure_gallery_path(v, "a/b/c") == vault::VaultResult::Ok);  // idempotent
     CHECK_EQ(static_cast<int>(v.list("a/b").size()), 1);
@@ -68,7 +68,7 @@ TEST(stage_image_is_safe_beside_main_thread_reads)
 {
     const auto dir = fresh_dir("staging4");
     vault::Vault v;
-    make_vault(v, dir / "a.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "a.osv"));
     REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("g", fake_jpeg(1), "1.jpg") == vault::VaultResult::Ok);
     const auto* node = v.list("g").at(0);
@@ -100,7 +100,7 @@ TEST(stage_image_thumbnail_uses_512_budget)
 
     const auto dir = fresh_dir("staging5");
     vault::Vault v;
-    make_vault(v, dir / "a.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "a.osv"));
 
     auto staged = vault::stage_image(v, png, "big.png", nullptr);
     REQUIRE(staged.status == vault::VaultResult::Ok);

@@ -1,6 +1,6 @@
+#include "image/fixtures.h"  // fixtures::solid_jpeg
 #include "test_framework.h"
-#include "ui/zip_test_helpers.h"   // ziptest::make_vault, fresh_dir, cleanup_dir, kTestKdf
-#include "image/fixtures.h"        // fixtures::solid_jpeg
+#include "ui/zip_test_helpers.h"  // vaulttest::make_legacy_writable_vault, fresh_dir, cleanup_dir, kTestKdf
 #include "vault/vault.h"
 
 #ifdef __linux__

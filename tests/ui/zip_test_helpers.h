@@ -4,9 +4,8 @@
 // the round-trip fixtures (archive writer, throwaway vault, temp dir) exist in a
 // single place rather than copy-pasted per test TU.
 
-#include "crypto/kdf.h"
 #include "ui/zip_plan.h"
-#include "vault/vault.h"
+#include "vault/fixtures.h"
 
 #include "miniz.h"
 
@@ -70,26 +69,9 @@ inline fs::path make_archive(const std::vector<std::pair<std::string, std::vecto
     return out;
 }
 
-// Fast Argon2 params for tests (mirrors tests/vault/*). Production cost is far higher.
-inline const crypto::KdfParams kTestKdf{.t_cost = 1, .m_cost_kib = 8, .parallelism = 1};
-
-// Fill `v` in place with a fresh password-only vault at `p`.
-inline void make_vault(vault::Vault& v, const fs::path& p)
-{
-    const std::vector<uint8_t> pw{'p', 'w'};
-    (void)vault::Vault::create(p.string(), pw, {}, kTestKdf, v);
-}
-
-// Open an existing vault at `p` and unlock it with the test password.
-// Returns true on success, false on any error (open or unlock).
-inline bool open_vault(const fs::path& p, vault::Vault& v)
-{
-    if (vault::Vault::open(p.string(), v) != vault::VaultResult::Ok) {
-        return false;
-    }
-    const std::vector<uint8_t> pw{'p', 'w'};
-    return v.unlock(pw, {}) == vault::VaultResult::Ok;
-}
+// Compatibility names for existing archive tests; creation must name its backend.
+using vaulttest::kTestKdf;
+using vaulttest::open_vault;
 
 // Fresh empty temp dir. Non-throwing: a still-open vault file from a crashed
 // prior run can't be deleted on Windows, and the throwing overload would abort.

@@ -20,7 +20,7 @@ TEST(import_queue_crosses_lookahead_boundary)
 
     // Create vault
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
 
     // Create 25 REAL decodable PNG files (not fake_jpeg)
     const auto files_dir = temp_dir / "files";
@@ -40,8 +40,8 @@ TEST(import_queue_crosses_lookahead_boundary)
     }
 
     // Import via ImportQueue
-    ui::ImportQueue q;
     vault::CommitLane lane;
+    ui::ImportQueue q;
     lane.start(v);
     v.set_commit_router(&lane);
     q.begin_session(v, lane);

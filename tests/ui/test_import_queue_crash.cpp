@@ -76,7 +76,7 @@ TEST(import_queue_mid_batch_crash_recovers)
     // open file handles (compact), and a real OS crash closes handles too.)
     {
         vault::Vault v;
-        ziptest::make_vault(v, vault_path);
+        REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
 
         vault::CommitLane lane;
         ui::ImportQueue q;

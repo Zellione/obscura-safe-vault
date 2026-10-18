@@ -27,8 +27,8 @@ void pull_into_empty_gallery(const std::string& target, int& _failures)
     const auto dir = ziptest::fresh_dir(target.empty() ? "pull_empty_root" : "pull_empty_nested");
     {
         vault::Vault source, destination;
-        ziptest::make_vault(source, dir / "source.osv");
-        ziptest::make_vault(destination, dir / "destination.osv");
+        REQUIRE(vaulttest::make_legacy_writable_vault(source, dir / "source.osv"));
+        REQUIRE(vaulttest::make_legacy_writable_vault(destination, dir / "destination.osv"));
         CHECK(source.create_gallery("Photos") == vault::VaultResult::Ok);
         CHECK(source.add_image("Photos", ziptest::fake_jpeg(7), "photo.jpg") == vault::VaultResult::Ok);
         source.lock();

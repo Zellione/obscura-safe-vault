@@ -14,8 +14,8 @@
 using archivetest::fake_bytes;
 using archivetest::fresh_path;
 using archivetest::make_archive;
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
-using ziptest::make_vault;
 
 namespace {
 
@@ -30,7 +30,7 @@ TEST(archive_import_tar_new_gallery_mirrors_tree)
 {
     auto dir = fresh_dir_local("archive_import_new_gallery");
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     auto archive = make_archive({{"ch1/01.jpg", fake_bytes(1)}, {"ch1/02.jpg", fake_bytes(2)},
                                  {"ch2/01.jpg", fake_bytes(3)}},
@@ -54,7 +54,7 @@ TEST(archive_import_7z_round_trip_checksums)
 {
     auto dir = fresh_dir_local("archive_import_7z_checksum");
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     const auto data = fake_bytes(9, 400);
     auto archive = make_archive({{"only.jpg", data}}, "7zip", dir / "one.7z");
@@ -79,7 +79,7 @@ TEST(archive_import_targz_round_trip_checksums)
 {
     auto dir = fresh_dir_local("archive_import_targz_checksum");
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     const auto data1 = fake_bytes(3, 250);
     const auto data2 = fake_bytes(4, 250);
@@ -109,7 +109,7 @@ TEST(archive_import_cb7_style_7z_imports_as_one_gallery)
 {
     auto dir = fresh_dir_local("archive_import_cb7");
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     auto archive = make_archive({{"2.jpg", fake_bytes(2)}, {"10.jpg", fake_bytes(10)},
                                  {"1.jpg", fake_bytes(1)}},
@@ -133,7 +133,7 @@ TEST(archive_import_rejects_malformed_archive)
 {
     auto dir = fresh_dir_local("archive_import_malformed");
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     auto bad = dir / "bad.tar";
     std::ofstream(bad, std::ios::binary) << "not a tar file at all, just junk bytes";
@@ -151,7 +151,7 @@ TEST(archive_import_writes_no_extra_files)
 {
     auto dir = fresh_dir_local("archive_import_no_fs_write");
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     auto archive = make_archive({{"a.jpg", fake_bytes(1)}}, "ustar", dir / "a.tar");
 
@@ -174,7 +174,7 @@ TEST(archive_import_cbr_style_tar_imports_as_one_gallery_natural_order)
 {
     auto dir = fresh_dir_local("archive_import_cbr_natural");
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     auto archive = make_archive({{"2.jpg", fake_bytes(2)}, {"10.jpg", fake_bytes(10)},
                                  {"1.jpg", fake_bytes(1)}},
@@ -198,7 +198,7 @@ TEST(archive_import_encrypted_zip_correct_password_imports)
 {
     auto dir = fresh_dir_local("archive_import_enc_ok");
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     const auto data = fake_bytes(21, 300);
     auto archive = archivetest::make_encrypted_zip({{"one.jpg", data}}, "swordfish",
@@ -241,7 +241,7 @@ TEST(archive_import_encrypted_zip_wrong_password_writes_nothing)
     for (int attempt = 0; attempt < 5 && !saw_needs_password; ++attempt) {
         auto dir = fresh_dir_local("archive_import_enc_wrong");
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
         auto archive = archivetest::make_encrypted_zip(
             {{"one.jpg", fake_bytes(static_cast<uint8_t>(22 + attempt))}}, "swordfish",
@@ -265,7 +265,7 @@ TEST(archive_import_encrypted_zip_no_password_writes_nothing)
 {
     auto dir = fresh_dir_local("archive_import_enc_none");
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     auto archive = archivetest::make_encrypted_zip({{"one.jpg", fake_bytes(23)}}, "swordfish",
                                                     dir / "secret.zip");
@@ -286,7 +286,7 @@ TEST(archive_import_cbz_encrypted_zip_correct_password_imports)
 {
     auto dir = fresh_dir_local("archive_import_cbz_enc_ok");
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     auto archive = archivetest::make_encrypted_zip(
         {{"2.jpg", fake_bytes(2)}, {"1.jpg", fake_bytes(1)}}, "pw123", dir / "comic.zip");
@@ -322,7 +322,7 @@ TEST(archive_import_7z_cjk_entry_names)
 {
     auto dir = fresh_dir_local("archive_import_7z_cjk");
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     const std::filesystem::path fixture_dir = OSV_UI_FIXTURE_DIR;
     const std::filesystem::path archive = dir / "cjk.7z";
@@ -348,7 +348,7 @@ TEST(archive_import_tar_cjk_entry_names)
 {
     auto dir = fresh_dir_local("archive_import_tar_cjk");
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     auto archive = make_archive(
         {{"\xE5\x86\x99\xE7\x9C\x9F/\xE9\xA2\xA8\xE6\x99\xAF.jpg", fake_bytes(3)}},
@@ -373,7 +373,7 @@ TEST(archive_import_cjk_archive_filename)
 {
     auto dir = fresh_dir_local("archive_import_cjk_name");
     vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
 
     // Write under an ASCII name, then rename — the fixture writer's own path
     // handling (archive_write_open_filename is narrow) is not under test.

@@ -153,7 +153,7 @@ TEST(gallery_pull_keeps_updates_off_worker_owned_tree)
         REQUIRE(vault::Vault::create_directory((dir / "primary.osv").string(), pw, {},
                                                ziptest::kTestKdf,
                                                primary) == vault::VaultResult::Ok);
-        ziptest::make_vault(secondary, dir / "secondary.osv");
+        REQUIRE(vaulttest::make_legacy_writable_vault(secondary, dir / "secondary.osv"));
         REQUIRE(primary.add_image("", ziptest::fake_jpeg(3), "existing.jpg") ==
                 vault::VaultResult::Ok);
         constexpr int galleries = 40;
@@ -228,7 +228,7 @@ TEST(gallery_transfer_paused_after_tree_reallocation_does_not_read_stale_nodes)
     const auto dir = ziptest::fresh_dir("transfer_paused_tree");
     {
         vault::Vault primary;
-        ziptest::make_vault(primary, dir / "primary.osv");
+        REQUIRE(vaulttest::make_legacy_writable_vault(primary, dir / "primary.osv"));
         REQUIRE(primary.add_image("", ziptest::fake_jpeg(3), "existing.jpg") ==
                 vault::VaultResult::Ok);
         platform::VaultRegistry registry(dir / "vaults.list");
@@ -273,7 +273,7 @@ TEST(dual_gallery_warm_vault_is_owned_until_cancel_or_shutdown)
             REQUIRE(vault::Vault::create_directory((dir / "primary.osv").string(), pw, {},
                                                    ziptest::kTestKdf,
                                                    primary) == vault::VaultResult::Ok);
-            ziptest::make_vault(source, dir / "source.osv");
+            REQUIRE(vaulttest::make_legacy_writable_vault(source, dir / "source.osv"));
             REQUIRE(source.create_gallery("Photos") == vault::VaultResult::Ok);
             for (int i = 0; i < 50; ++i)
                 REQUIRE(source.add_image("Photos", ziptest::fake_jpeg(4),
@@ -326,7 +326,7 @@ TEST(dual_gallery_same_vault_move_blocks_navigation_and_refreshes_both_panes)
     const auto dir = ziptest::fresh_dir("split_same_vault");
     {
         vault::Vault vault;
-        ziptest::make_vault(vault, dir / "vault.osv");
+        REQUIRE(vaulttest::make_legacy_writable_vault(vault, dir / "vault.osv"));
         REQUIRE(vault.create_gallery("A") == vault::VaultResult::Ok);
         REQUIRE(vault.create_gallery("B") == vault::VaultResult::Ok);
         REQUIRE(vault.add_image("A", ziptest::fake_jpeg(1), "photo.jpg") == vault::VaultResult::Ok);

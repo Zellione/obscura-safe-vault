@@ -16,6 +16,17 @@ production facade benchmarks, and Linux-only cleanup. Validation is in progress.
 
 ## Phase index
 
+Refactoring audit: prioritized proposals for session ownership, commit semantics,
+SQL transactions, import/gallery decomposition, media helpers, and backend-specific
+test fixtures. See the
+[code refactoring and simplification audit](docs/audit/refactoring-simplification-2026-10.md).
+
+Refactoring step 1 implements explicit checked vault fixtures and targeted
+directory/legacy import, cancellation, collision, tag-review, commit-failure,
+and transfer regressions. Local Debug, Release, ASAN, and no-AV checks pass;
+the remaining audit items are proposed work. See the
+[implementation details](docs/roadmap/refactoring-01-vault-fixtures.md).
+
 Release packaging follow-up: restore/build the static SQLCipher and OpenSSL
 dependencies before generating the tag-triggered Release build, matching CI.
 The first v2.0.0 packaging run exposed the missing dependency setup.

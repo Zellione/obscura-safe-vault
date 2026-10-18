@@ -3,15 +3,15 @@
 #include <fstream>
 #include <iterator>
 
-#include "ui/zip_test_helpers.h"   // make_vault, fake_jpeg, fresh_dir, cleanup_dir
+#include "ui/zip_test_helpers.h"  // make_legacy_writable_vault, fake_jpeg, fresh_dir, cleanup_dir
 #include "vault/op_progress.h"
 #include "vault/transfer.h"
 #include "vault/vault.h"
 
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
-using ziptest::make_vault;
 
 namespace {
 
@@ -40,8 +40,8 @@ TEST(transfer_images_progress_counts)
     auto dir = fresh_dir("osv_xferprog");
     {
         vault::Vault src, dst;
-        make_vault(src, dir / "s.osv");
-        make_vault(dst, dir / "d.osv");
+        REQUIRE(make_legacy_writable_vault(src, dir / "s.osv"));
+        REQUIRE(make_legacy_writable_vault(dst, dir / "d.osv"));
         REQUIRE(seed_images(src, "a", 3));
         REQUIRE(dst.create_gallery("b") == vault::VaultResult::Ok);
 
@@ -66,8 +66,8 @@ TEST(transfer_images_cancel_before_start_is_noop)
     auto dir = fresh_dir("osv_xfercancel");
     {
         vault::Vault src, dst;
-        make_vault(src, dir / "s.osv");
-        make_vault(dst, dir / "d.osv");
+        REQUIRE(make_legacy_writable_vault(src, dir / "s.osv"));
+        REQUIRE(make_legacy_writable_vault(dst, dir / "d.osv"));
         REQUIRE(seed_images(src, "a", 3));
         REQUIRE(dst.create_gallery("b") == vault::VaultResult::Ok);
 
@@ -90,8 +90,8 @@ TEST(transfer_gallery_progress_counts_media)
     auto dir = fresh_dir("osv_gxferprog");
     {
         vault::Vault src, dst;
-        make_vault(src, dir / "s.osv");
-        make_vault(dst, dir / "d.osv");
+        REQUIRE(make_legacy_writable_vault(src, dir / "s.osv"));
+        REQUIRE(make_legacy_writable_vault(dst, dir / "d.osv"));
         REQUIRE(seed_images(src, "album", 4));
 
         vault::OpProgress prog;
@@ -113,8 +113,8 @@ TEST(transfer_images_counts_failures)
     auto dir = fresh_dir("osv_xferfail");
     {
         vault::Vault src, dst;
-        make_vault(src, dir / "s.osv");
-        make_vault(dst, dir / "d.osv");
+        REQUIRE(make_legacy_writable_vault(src, dir / "s.osv"));
+        REQUIRE(make_legacy_writable_vault(dst, dir / "d.osv"));
         REQUIRE(seed_images(src, "a", 2));
         REQUIRE(dst.create_gallery("b") == vault::VaultResult::Ok);
 
@@ -138,8 +138,8 @@ TEST(transfer_gallery_moves_a_video)
     auto dir = fresh_dir("osv_vidxfer");
     {
         vault::Vault src, dst;
-        make_vault(src, dir / "s.osv");
-        make_vault(dst, dir / "d.osv");
+        REQUIRE(make_legacy_writable_vault(src, dir / "s.osv"));
+        REQUIRE(make_legacy_writable_vault(dst, dir / "d.osv"));
         REQUIRE(src.create_gallery("clips") == Ok);
         auto mp4 = read_bytes(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
         REQUIRE(!mp4.empty());
@@ -166,8 +166,8 @@ TEST(transfer_gallery_cancel_leaves_source_intact)
     auto dir = fresh_dir("osv_gxfercancel");
     {
         vault::Vault src, dst;
-        make_vault(src, dir / "s.osv");
-        make_vault(dst, dir / "d.osv");
+        REQUIRE(make_legacy_writable_vault(src, dir / "s.osv"));
+        REQUIRE(make_legacy_writable_vault(dst, dir / "d.osv"));
         REQUIRE(seed_images(src, "album", 4));
 
         vault::OpProgress prog;

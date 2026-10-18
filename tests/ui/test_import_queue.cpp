@@ -1,6 +1,7 @@
 #include "test_framework.h"
 
 #include "ui/import_queue.h"
+#include "ui/import_queue_test_helpers.h"
 #include "ui/zip_test_helpers.h"
 #include "vault/commit_lane.h"
 #ifdef OSV_VENDORED_ARCHIVE
@@ -23,18 +24,7 @@ void test_only_set_task_hook(ImportQueue& q, std::function<void()> hook);
 
 namespace {
 
-// Helper: pump drain() until the queue idles
-void pump_until_idle(ui::ImportQueue& q, int max_ms = 30000)
-{
-    for (int i = 0; i < max_ms; ++i) {
-        (void)q.drain(0.001);
-        if (!q.busy()) {
-            (void)q.drain(0.001);
-            return;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-}
+using importtest::drain_until_idle;
 
 }  // namespace
 
@@ -45,7 +35,7 @@ TEST(import_queue_files_end_to_end)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
 
     // Create 5 fake jpegs in a temp directory
     const auto files_dir = temp_dir / "files";
@@ -60,13 +50,13 @@ TEST(import_queue_files_end_to_end)
     }
 
     // Import
-    ui::ImportQueue q;
     vault::CommitLane lane;
+    ui::ImportQueue q;
     lane.start(v);
     v.set_commit_router(&lane);
     q.begin_session(v, lane);
     const uint64_t task_id = q.enqueue_files(files, "dest");
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
 
     // Check snapshot before cleanup
     const auto snap = q.snapshot();
@@ -102,7 +92,7 @@ TEST(import_queue_directory_durability_and_empty_shutdown)
         .write(reinterpret_cast<const char*>(bytes.data()),
                static_cast<std::streamsize>(bytes.size()));
     (void)queue.enqueue_files({input}, "photos");
-    pump_until_idle(queue);
+    REQUIRE(drain_until_idle(queue));
     const auto snapshot = queue.snapshot();
     REQUIRE(snapshot.size() == 1);
     CHECK(snapshot.front().state == ui::ImportTaskState::Done);
@@ -132,7 +122,7 @@ TEST(import_queue_cancel_queued_is_deterministic)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -164,7 +154,7 @@ TEST(import_queue_cancel_queued_is_deterministic)
 
     // Release worker and pump
     q.set_exclusive(false);
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
 
     // Verify Cancelled with zero imports
     snap = q.snapshot();
@@ -183,7 +173,7 @@ TEST(import_queue_runs_tasks_fifo_and_reorders)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -219,7 +209,7 @@ TEST(import_queue_runs_tasks_fifo_and_reorders)
     // Reorder: move task 3 up one position
     CHECK(q.reorder(task_ids[2], -1));
 
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
 
     // Check order (should be reordered)
     const auto snap = q.snapshot();
@@ -236,7 +226,7 @@ TEST(import_queue_cancel_running_is_clean_partial)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -278,7 +268,7 @@ TEST(import_queue_cancel_running_is_clean_partial)
         CHECK(snap[0].state == ui::ImportTaskState::Done);
     }
 
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
 
     // Check state: either Cancelled (if we caught it running) or Done (if it finished first)
     snap = q.snapshot();
@@ -298,7 +288,7 @@ TEST(import_queue_zip_task_preserves_cbz_page_order)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -315,7 +305,7 @@ TEST(import_queue_zip_task_preserves_cbz_page_order)
     ui::ImportQueue q;
     q.begin_session(v, lane);
     (void)q.enqueue_archive(cbz_path, "", "test_cbz", ui::ImportTaskKind::Cbz);
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
 
     const auto snap = q.snapshot();
     REQUIRE(snap.size() == 1);
@@ -334,7 +324,7 @@ TEST(import_queue_collision_skips_and_tallies)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -361,7 +351,7 @@ TEST(import_queue_collision_skips_and_tallies)
     ui::ImportQueue q;
     q.begin_session(v, lane);
     (void)q.enqueue_files(files, "");
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
 
     const auto snap = q.snapshot();
     REQUIRE(snap.size() == 1);
@@ -380,7 +370,7 @@ TEST(import_queue_exclusive_gate_defers_start)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -411,7 +401,7 @@ TEST(import_queue_exclusive_gate_defers_start)
     q.set_exclusive(false);
 
     // Pump and check
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
 
     snap = q.snapshot();
     REQUIRE(snap.size() == 1);
@@ -428,7 +418,7 @@ TEST(import_queue_abort_and_flush_discards_queue)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -485,7 +475,7 @@ TEST(import_queue_abort_wipes_queued_passwords)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -531,7 +521,7 @@ TEST(import_queue_abort_and_flush_idempotent)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -574,7 +564,7 @@ TEST(import_queue_exclusive_gate_reset_on_begin_session)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -612,7 +602,7 @@ TEST(import_queue_recurses_into_a_nested_archive)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -631,7 +621,7 @@ TEST(import_queue_recurses_into_a_nested_archive)
     ui::ImportQueue q;
     q.begin_session(v, lane);
     (void)q.enqueue_archive(outer_path, "", "Album", ui::ImportTaskKind::Zip);
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
     q.end_session();
 
     // The nested archive became a sub-gallery holding its own image.
@@ -655,7 +645,7 @@ TEST(import_queue_flat_cbz_creates_its_gallery)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -667,7 +657,7 @@ TEST(import_queue_flat_cbz_creates_its_gallery)
     ui::ImportQueue q;
     q.begin_session(v, lane);
     (void)q.enqueue_archive(cbz, "", "MyBook", ui::ImportTaskKind::Cbz);
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
     q.end_session();
 
     // A CBZ imported through the queue must land in a gallery named after the
@@ -695,7 +685,7 @@ TEST(import_queue_folder_into_a_subgallery_lands_in_one_place)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -711,7 +701,7 @@ TEST(import_queue_folder_into_a_subgallery_lands_in_one_place)
     ui::ImportQueue q;
     q.begin_session(v, lane);
     (void)q.enqueue_folder(src, "Parent", "MyFolder");
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
     q.end_session();
 
     // The image belongs in Parent/MyFolder and nowhere else.
@@ -730,7 +720,7 @@ TEST(import_queue_applies_archive_meta_tags)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -746,7 +736,7 @@ TEST(import_queue_applies_archive_meta_tags)
     ui::ImportQueue q;
     q.begin_session(v, lane);
     (void)q.enqueue_archive(zip, "", "Book", ui::ImportTaskKind::Zip);
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
     auto pending = q.take_tag_review();
     REQUIRE(pending.has_value());
     CHECK(v.list("").front()->tags.empty());
@@ -780,7 +770,7 @@ TEST(import_queue_imports_a_split_archive_set)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -812,7 +802,7 @@ TEST(import_queue_imports_a_split_archive_set)
     // Stem is "whole.zip" — the KIND comes from that, not from "whole.zip.00".
     (void)q.enqueue_volume_set(volumes, ui::VolumeStyle::NumericSuffix, "whole.zip", "", "Split",
                                ui::ImportTaskKind::Zip);
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
     q.end_session();
 
     // Reassembled and imported as one archive: both images in one gallery.
@@ -831,7 +821,7 @@ TEST(import_queue_idle_does_not_grow_vault)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -875,7 +865,7 @@ TEST(import_queue_idle_latch_rearms_on_new_work)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -903,7 +893,7 @@ TEST(import_queue_idle_latch_rearms_on_new_work)
 
     // First batch: enqueue, pump to idle
     (void)q.enqueue_files(batches[0], "batch1");
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
 
     const uint64_t wasted_after_batch1 = vault::vault_wasted_bytes(v);
 
@@ -919,7 +909,7 @@ TEST(import_queue_idle_latch_rearms_on_new_work)
 
     // Second batch: enqueue new work (re-arms latch), pump to idle
     (void)q.enqueue_files(batches[1], "batch2");
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
 
     const uint64_t wasted_after_batch2 = vault::vault_wasted_bytes(v);
 
@@ -956,7 +946,7 @@ TEST(import_queue_files_routes_mp4_to_video_node)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -973,7 +963,7 @@ TEST(import_queue_files_routes_mp4_to_video_node)
     ui::ImportQueue q;
     q.begin_session(v, lane);
     (void)q.enqueue_files({jpg_path, fs::path(OSV_VAULT_FIXTURE_DIR) / "tiny.mp4"}, "dest");
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
 
     const auto snap = q.snapshot();
     REQUIRE(snap.size() == 1);
@@ -1016,7 +1006,7 @@ TEST(import_queue_corrupt_zip_fails_task_with_reason)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -1032,7 +1022,7 @@ TEST(import_queue_corrupt_zip_fails_task_with_reason)
     ui::ImportQueue q;
     q.begin_session(v, lane);
     (void)q.enqueue_archive(bad, "", "Bad", ui::ImportTaskKind::Zip);
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
 
     const auto snap = q.snapshot();
     REQUIRE(snap.size() == static_cast<size_t>(1));
@@ -1052,7 +1042,7 @@ TEST(import_queue_worker_exception_fails_task_and_continues)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -1078,7 +1068,7 @@ TEST(import_queue_worker_exception_fails_task_and_continues)
     });
     (void)q.enqueue_files(first, "dest");
     (void)q.enqueue_files(second, "dest");
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
 
     const auto snap = q.snapshot();
     REQUIRE(snap.size() == static_cast<size_t>(2));
@@ -1100,7 +1090,7 @@ TEST(import_queue_truncated_zip_fails_task)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -1115,7 +1105,7 @@ TEST(import_queue_truncated_zip_fails_task)
     ui::ImportQueue q;
     q.begin_session(v, lane);
     (void)q.enqueue_archive(zip, "", "Trunc", ui::ImportTaskKind::Zip);
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
 
     const auto snap = q.snapshot();
     REQUIRE(snap.size() == static_cast<size_t>(1));
@@ -1130,7 +1120,7 @@ TEST(import_queue_tag_review_cancel_keeps_media_and_discards_metadata)
 {
     const auto dir = ziptest::fresh_dir("test_import_tag_review_cancel");
     vault::Vault v;
-    ziptest::make_vault(v, dir / "vault.osv");
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, dir / "vault.osv"));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
@@ -1141,7 +1131,7 @@ TEST(import_queue_tag_review_cancel_keeps_media_and_discards_metadata)
     ui::ImportQueue q;
     q.begin_session(v, lane);
     (void)q.enqueue_archive(zip, "", "Book", ui::ImportTaskKind::Zip);
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
     REQUIRE(q.take_tag_review().has_value());  // Cancelling drops this detached batch.
     CHECK(!q.take_tag_review().has_value());
     q.end_session();
@@ -1163,14 +1153,14 @@ TEST(import_queue_folder_metadata_waits_for_review)
         .write(reinterpret_cast<const char*>(jpeg.data()),
                static_cast<std::streamsize>(jpeg.size()));
     vault::Vault v;
-    ziptest::make_vault(v, dir / "vault.osv");
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, dir / "vault.osv"));
     vault::CommitLane lane;
     lane.start(v);
     v.set_commit_router(&lane);
     ui::ImportQueue q;
     q.begin_session(v, lane);
     (void)q.enqueue_folder(folder, "", "Folder");
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
     auto pending = q.take_tag_review();
     REQUIRE(pending.has_value());
     CHECK(v.list("").front()->tags.empty());
@@ -1200,14 +1190,14 @@ TEST(import_queue_nested_tag_review_maps_each_gallery_and_survives_reopen)
     const auto vault_path = dir / "vault.osv";
     {
         vault::Vault v;
-        ziptest::make_vault(v, vault_path);
+        REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
         vault::CommitLane lane;
         lane.start(v);
         v.set_commit_router(&lane);
         ui::ImportQueue q;
         q.begin_session(v, lane);
         (void)q.enqueue_archive(zip, "", "Book", ui::ImportTaskKind::Zip);
-        pump_until_idle(q);
+        REQUIRE(drain_until_idle(q));
         auto pending = q.take_tag_review();
         REQUIRE(pending.has_value());
         REQUIRE(pending->tags().size() == 3);

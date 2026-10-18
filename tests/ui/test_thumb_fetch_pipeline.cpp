@@ -6,9 +6,9 @@
 #include "ui/zip_test_helpers.h"
 #include "vault/vault.h"
 
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fresh_dir;
-using ziptest::make_vault;
 
 // ThumbKey carries both the cache identity and the span to read (via ChunkRef).
 TEST(thumb_key_carries_read_span_image)
@@ -42,7 +42,7 @@ TEST(worker_fetches_and_decodes_a_real_vault_thumbnail)
 {
     const auto dir = fresh_dir("thumb_fetch_worker");
     vault::Vault v;
-    make_vault(v, dir / "a.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "a.osv"));
     REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
 
     // Add an image with a real thumbnail.
@@ -88,7 +88,7 @@ TEST(locked_vault_fetch_lands_as_failure)
 {
     const auto dir = fresh_dir("thumb_fetch_locked");
     vault::Vault v;
-    make_vault(v, dir / "a.osv");
+    REQUIRE(make_legacy_writable_vault(v, dir / "a.osv"));
     REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
 
     // Add an image with a real thumbnail.

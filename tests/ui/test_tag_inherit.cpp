@@ -11,17 +11,17 @@
 // order, case-insensitively de-duplicated, minus the node's own tags.
 
 namespace fs = std::filesystem;
+using vaulttest::make_legacy_writable_vault;
 using ziptest::cleanup_dir;
 using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
-using ziptest::make_vault;
 
 TEST(inherited_tags_union_of_ancestors)
 {
     auto dir = fresh_dir("osv_tag_inherit");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(v.create_gallery("A") == vault::VaultResult::Ok);
         REQUIRE(v.create_gallery("A/B") == vault::VaultResult::Ok);
         REQUIRE(v.add_tag("A", "outer") == vault::VaultResult::Ok);
@@ -51,7 +51,7 @@ TEST(inherited_tags_dedupes_and_hides_own)
     auto dir = fresh_dir("osv_tag_inherit_dupe");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         REQUIRE(v.create_gallery("A") == vault::VaultResult::Ok);
         REQUIRE(v.create_gallery("A/B") == vault::VaultResult::Ok);
         REQUIRE(v.add_tag("A", "Shared") == vault::VaultResult::Ok);
@@ -75,7 +75,7 @@ TEST(inherited_tags_invalid_path_is_empty)
     auto dir = fresh_dir("osv_tag_inherit_bad");
     {
         vault::Vault v;
-        make_vault(v, dir / "v.osv");
+        REQUIRE(make_legacy_writable_vault(v, dir / "v.osv"));
         CHECK(ui::inherited_tags(v, "").empty());
         CHECK(ui::inherited_tags(v, "no/such/node.jpg").empty());
     }

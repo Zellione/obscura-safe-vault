@@ -54,6 +54,16 @@
 
 ## Testing
 - Unit tests in `tests/<module>/`, integration tests exercise full round-trips.
+- Shared vault fixtures live in `tests/vault/fixtures.h`: require successful
+  `vaulttest::make_directory_vault` for production v3 coverage, or explicitly
+  choose `make_legacy_writable_vault` for legacy writer fixtures. Use
+  `open_legacy_read_only_vault` to assert compatibility-read behavior; generic
+  `open_vault` retains production backend dispatch. Creation helpers are
+  `[[nodiscard]]` and callers use `REQUIRE` so setup failures stop the scenario.
+- Queue integration tests share `importtest::drain_until_idle` from
+  `tests/ui/import_queue_test_helpers.h`; require its result before inspecting
+  outcomes. The timeout uses elapsed wall time and returns failure. End queue
+  sessions and destroy workers/vault handles before cold reopen or cleanup.
 - Crypto tests must include known-answer vectors (Monocypher suite / RFC vectors).
 - Tests must pass before a phase is complete.
 - **`scripts/test.sh` alone is not "tests pass".** It is Debug + FFmpeg — the one

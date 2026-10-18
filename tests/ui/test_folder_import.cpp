@@ -1,42 +1,20 @@
 #include "test_framework.h"
 
 #include <algorithm>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <thread>
 
 #include "ui/import_queue.h"
-#include "vault/commit_lane.h"
+#include "ui/import_queue_test_helpers.h"
 #include "ui/zip_test_helpers.h"
+#include "vault/commit_lane.h"
 #include "vault/vault.h"
 
 namespace fs = std::filesystem;
 
 namespace {
 
-// Helper: pump drain() until the queue idles
-// Pump drain() until the queue idles, bounded by REAL elapsed time.
-//
-// The budget must be spent in wall-clock milliseconds, not in loop iterations:
-// drain() returns immediately when there is nothing staged, so an unsleeping
-// loop burns its whole budget in microseconds while the worker thread still
-// needs real time to read, decode, encrypt and append each file. The caller
-// then proceeds to abort_and_flush(), which CANCELS the in-flight task by
-// design (Phase 50) — silently discarding whatever had not been imported yet.
-// That produced a ~10% flake in which the deepest file, and occasionally the
-// entire import, went missing. Mirrors test_import_queue.cpp's helper.
-void pump_until_idle(ui::ImportQueue& q, int max_ms = 30000)
-{
-    for (int i = 0; i < max_ms; ++i) {
-        (void)q.drain(0.001);
-        if (!q.busy()) {
-            (void)q.drain(0.001);
-            return;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-}
+using importtest::drain_until_idle;
 
 // Helper: check if a node with given name is a gallery
 bool has_gallery_child(const std::vector<const vault::IndexNode*>& nodes, std::string_view name)
@@ -63,7 +41,7 @@ TEST(folder_import_mirrors_subfolders_into_sub_galleries)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
 
     // Create a folder structure: root/a.jpg, root/sub/b.jpg
     const auto root = temp_dir / "import_root";
@@ -82,15 +60,15 @@ TEST(folder_import_mirrors_subfolders_into_sub_galleries)
                                                   static_cast<std::streamsize>(jpeg_b.size()));
 
     // Import
-    ui::ImportQueue q;
     vault::CommitLane lane;
+    ui::ImportQueue q;
     lane.start(v);
     v.set_commit_router(&lane);
     q.begin_session(v, lane);
     (void)q.enqueue_folder(root, "", "Photos");
 
     // Pump until the queue drains (bounded so a hang fails rather than spins).
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
     q.abort_and_flush();
 
     // Fixture: root/a.jpg + root/sub/b.jpg
@@ -115,7 +93,7 @@ TEST(folder_import_survives_lock_and_reopen)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
 
     // Create a folder structure
     const auto root = temp_dir / "import_root";
@@ -134,13 +112,13 @@ TEST(folder_import_survives_lock_and_reopen)
                                                   static_cast<std::streamsize>(jpeg_b.size()));
 
     // Import
-    ui::ImportQueue q;
     vault::CommitLane lane;
+    ui::ImportQueue q;
     lane.start(v);
     v.set_commit_router(&lane);
     q.begin_session(v, lane);
     (void)q.enqueue_folder(root, "", "Photos");
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
     q.end_session();
 
     // Lock and re-unlock
@@ -172,7 +150,7 @@ TEST(folder_import_with_nested_galleries)
     const auto vault_path = temp_dir / "vault.osv";
 
     vault::Vault v;
-    ziptest::make_vault(v, vault_path);
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, vault_path));
 
     // Create nested structure: root/a.jpg, root/sub1/b.jpg, root/sub1/sub2/c.jpg
     const auto root = temp_dir / "import_root";
@@ -196,13 +174,13 @@ TEST(folder_import_with_nested_galleries)
                                                   static_cast<std::streamsize>(jpeg_c.size()));
 
     // Import
-    ui::ImportQueue q;
     vault::CommitLane lane;
+    ui::ImportQueue q;
     lane.start(v);
     v.set_commit_router(&lane);
     q.begin_session(v, lane);
     (void)q.enqueue_folder(root, "", "Photos");
-    pump_until_idle(q);
+    REQUIRE(drain_until_idle(q));
     q.end_session();
 
     // Check nested structure
