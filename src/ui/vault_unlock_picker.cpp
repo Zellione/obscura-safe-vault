@@ -54,7 +54,7 @@ VaultUnlockPicker::VaultUnlockPicker(platform::VaultRegistry& registry, platform
                                      gfx::Window& win, SecondVaultSession* second)
     : registry_(registry), dlg_(dlg), win_(win), second_(second) {}
 
-void VaultUnlockPicker::open(std::string src_path, bool include_self)
+void VaultUnlockPicker::open(std::string src_path, bool include_self, bool for_pane)
 {
     active_    = true;
     chosen_    = false;
@@ -62,6 +62,7 @@ void VaultUnlockPicker::open(std::string src_path, bool include_self)
     stage_     = Stage::PickVault;
     src_path_  = std::move(src_path);
     include_self_ = include_self;
+    for_pane_ = for_pane;
     vault_sel_ = 0;
     error_.clear();
     keep_mode_ = second_ ? second_->default_mode() : platform::SecondVaultMode::LockNow;
@@ -108,8 +109,17 @@ void VaultUnlockPicker::choose_vault()
     // Map vault_sel_ to candidates_ index
     const int ci = include_self_ ? (vault_sel_ - 1) : vault_sel_;
     if (ci < 0 || ci >= static_cast<int>(candidates_.size())) return;
+    select_path(platform::path_to_utf8(candidates_[static_cast<size_t>(ci)]));
+}
+
+void VaultUnlockPicker::select_path(std::string path)
+{
+    if (path == src_path_) {
+        error_ = "This vault is already open in the left pane.";
+        return;
+    }
     dest_.is_self = false;
-    dest_.path    = platform::path_to_utf8(candidates_[static_cast<size_t>(ci)]);
+    dest_.path = std::move(path);
     dest_.pw.clear();
     dest_.keyfile_path.clear();
 
@@ -148,6 +158,13 @@ void VaultUnlockPicker::try_unlock()
     chosen_ = true;
 }
 
+vault::Vault VaultUnlockPicker::take_vault()
+{
+    chosen_ = false;
+    active_ = false;
+    return from_warm_ ? second_->take() : std::move(dest_.vault);
+}
+
 void VaultUnlockPicker::release_to_slot()
 {
     if (is_self() || !chosen_) return;
@@ -182,6 +199,17 @@ bool VaultUnlockPicker::handle_unlock_key(SDL_Keycode k)
 bool VaultUnlockPicker::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
+    if (dlg_.busy()) return true;
+    if (for_pane_ && stage_ == Stage::PickVault && e.type == SDL_EVENT_KEY_DOWN) {
+        if (e.key.key == SDLK_O) {
+            dlg_.open_vault_directory(win_.sdl_window());
+            return true;
+        }
+        if (e.key.key == SDLK_L) {
+            dlg_.open_vault(win_.sdl_window());
+            return true;
+        }
+    }
 
     // Precedence rule (Phase 54): the password field consumes editing keys —
     // Ctrl+A included — before any of this dialog's own shortcuts.
@@ -196,8 +224,15 @@ bool VaultUnlockPicker::handle_event(const SDL_Event& e)
 
 void VaultUnlockPicker::update()
 {
+    if (for_pane_ && stage_ == Stage::PickVault) {
+        for (const auto purpose : {platform::FileDialog::Purpose::VaultDirectory,
+                                   platform::FileDialog::Purpose::Vault}) {
+            if (auto paths = dlg_.take_result(purpose); paths && !paths->empty())
+                select_path(paths->front());
+        }
+    }
     if (!dest_.awaiting_keyfile) return;
-    if (auto res = dlg_.take_result()) {
+    if (auto res = dlg_.take_result(platform::FileDialog::Purpose::Keyfile)) {
         dest_.awaiting_keyfile = false;
         if (!res->empty()) dest_.keyfile_path = (*res)[0];
     }
@@ -224,6 +259,11 @@ void VaultUnlockPicker::render(gfx::Renderer& r, gfx::FontAtlas& font, float ix,
         if (include_self_) labels.emplace_back("This vault");
         for (const auto& p : candidates_) labels.emplace_back(platform::path_to_utf8(p.filename()));
         row_list(labels, vault_sel_, iy + 72);
+        if (for_pane_)
+            r.draw_text(
+                font, ix, iy,
+                fit_text(font, "[O] Browse vault folder  [L] Legacy file  [Esc] Cancel", mw - 40),
+                TEXT_FAINT);
     } else {
         r.draw_text(font, ix, iy + 36,
                     fit_text(font, "Unlock " + platform::path_to_utf8(platform::utf8_to_path(dest_.path).filename()),
@@ -235,7 +275,7 @@ void VaultUnlockPicker::render(gfx::Renderer& r, gfx::FontAtlas& font, float ix,
                     dest_.keyfile_path.empty() ? "[Tab] add keyfile  [Enter] unlock"
                                                : "keyfile set  •  [Enter] unlock",
                     TEXT_FAINT);
-        if (second_) {
+        if (second_ && !for_pane_) {
             r.draw_text(font, ix, iy + 152,
                         fit_text(font, std::string("After transfer: ") + second_vault_mode_label(keep_mode_) +
                                            "  [Up/Down]", mw - 40),

@@ -586,3 +586,12 @@ Active legacy conversion hides the selection/credential form entirely and uses t
 shared centered progress modal on a clean background, like legacy upgrades. It
 shows copy item/byte progress, cold reopen, authenticated bytes, source comparison,
 and finalization phases. Escape requests cancellation without leaving the worker.
+
+F3 split view: Ctrl+O opens another vault in the right pane, with registered
+choices plus O (browse vault folder) / L (legacy file), password, and optional
+keyfile. Headers identify vault paths. Tab chooses source; Space/Ctrl+A select;
+M copies to the other pane's current gallery, with combine/rename conflicts.
+Distinct-vault transfers are copy-only; read-only destinations are refused.
+The secondary pane is a copy browser; full viewer/editing uses the manager.
+Ctrl+W or leaving split locks the additional vault. During transfers only
+progress and Esc cancellation are available, with partial copies retained.

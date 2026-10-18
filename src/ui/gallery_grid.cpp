@@ -295,6 +295,8 @@ void GalleryGrid::on_vault_changed()
 void GalleryGrid::refresh()
 {
     const platform::PerfScope perf("grid.refresh");
+    ++thumbs_.listing_revision;
+    detail_.key.clear();
     thumbs_.covers.clear();
     thumbs_.failed.clear();
 
@@ -504,6 +506,7 @@ void GalleryGrid::start_transfer()
     }
 
     if (transfer_.active()) return;
+    quiesce_grid(*this);
 
     // Images selected (Space) → move them. Otherwise, the focused tile: a gallery
     // moves the whole subtree; a lone image moves just that image.
@@ -538,6 +541,7 @@ void GalleryGrid::start_combine()
     // Phase 50: acquire exclusive before opening combine dialog
     queue_.set_exclusive(true);
     combine_had_exclusive_ = true;
+    quiesce_grid(*this);
     combine_.open(nav_.path());
 }
 
@@ -1619,6 +1623,32 @@ void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun)
     }
 }
 
+// Stop hover playback before handing the tree to a mutating worker. Thumbnail
+// fetches carry value snapshots and use the thread-safe read_thumb_span API.
+void quiesce_grid(GalleryGrid& g)
+{
+    g.hover_anim_.reset();
+    g.hover_anim_tile_ = -1;
+    g.hover_gate_.reset();
+}
+
+uint64_t grid_listing_revision(const GalleryGrid& g)
+{
+    return g.thumbs_.listing_revision;
+}
+
+bool grid_modal_open(const GalleryGrid& g)
+{
+    const bool operation =
+        vault_busy(g) || g.transfer_.active() || g.combine_.active() || g.failures_.active();
+    const bool editor =
+        g.rename_.active() || g.tag_editor_.active() || g.import_tags_.active() || g.naming_.active;
+    const bool picker = g.search_.active() || g.quick_switch_.active() || g.volume_dialog_.active();
+    const bool confirmation = g.consent_.active() || g.naming_.password.active ||
+                              g.naming_.confirm_delete || g.naming_.confirm_compact;
+    return operation || editor || picker || confirmation;
+}
+
 bool vault_busy(const GalleryGrid& g)
 {
     return g.naming_.file_op.active() || g.transfer_.job_active() || g.combine_.job_active();
@@ -1942,6 +1972,13 @@ void GalleryGrid::update(double dt)
     // on its worker thread, so the UI must not read the vault (thumbnails/listing) until
     // it finishes — poll only (Phase 50: imports are now drained via App::on_vault_changed).
     if (naming_.file_op.active())    { poll_file_job(*this);   return; }
+
+    // Completion joins and refreshes the listing. Never inspect children_ or
+    // start hover decoders while the worker may reallocate that tree.
+    if (transfer_.job_active() || combine_.job_active()) {
+        poll_transfer_and_combine(*this);
+        return;
+    }
 
     if (pump_thumbs()) mark_dirty();   // off-thread thumbnail decode(s) landed
 

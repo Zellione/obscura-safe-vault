@@ -4,8 +4,10 @@
 
 namespace ui {
 
-void DualTransferPrompt::open(std::string dst_label, std::vector<std::string> conflicts)
+void DualTransferPrompt::open(std::string dst_label, std::vector<std::string> conflicts,
+                              bool copy_only)
 {
+    copy_only_ = copy_only;
     stage_      = Stage::Mode;
     selected_   = 0;
     dst_label_  = std::move(dst_label);
@@ -31,7 +33,9 @@ void DualTransferPrompt::mode_key(Key k, Launch& result)
     using enum Key;
     switch (k) {
         case Up:    selected_ = std::max(0, selected_ - 1); break;
-        case Down:  selected_ = std::min(2, selected_ + 1); break;
+        case Down:
+            selected_ = std::min(copy_only_ ? 1 : 2, selected_ + 1);
+            break;
         case Esc:   stage_ = Stage::Closed; break;
         case Enter: mode_enter(result); break;
     }
@@ -40,11 +44,11 @@ void DualTransferPrompt::mode_key(Key k, Launch& result)
 void DualTransferPrompt::mode_enter(Launch& result)
 {
     using enum Stage;
-    if (selected_ == 2) {  // Cancel row
+    if (selected_ == (copy_only_ ? 1 : 2)) {  // Cancel row
         stage_ = Closed;
         return;
     }
-    mode_       = selected_ == 0 ? vault::TransferMode::Move : vault::TransferMode::Copy;
+    mode_ = !copy_only_ && selected_ == 0 ? vault::TransferMode::Move : vault::TransferMode::Copy;
     result.mode = mode_;
     if (conflicts_.empty()) {
         result.policy = vault::CollisionPolicy::Fail;

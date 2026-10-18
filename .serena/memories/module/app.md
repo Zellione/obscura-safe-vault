@@ -291,3 +291,7 @@ when no exclusive vault operation is active. The overlay owns input until
 confirmed/cancelled; confirmation calls `ImportQueue::apply_tag_review`, reports
 failures with a retryable modal, and refreshes the screen. Every import-session
 teardown clears the modal and its pending batch before vault lock/switch.
+
+Screen-owned blocking jobs receive input before global help/settings shortcuts;
+those overlays may otherwise read a worker-owned vault tree. Split view owns
+and locks its additional pane vault independently of the app's active/warm slots.

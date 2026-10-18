@@ -397,3 +397,7 @@ a derived object changes its key; full-image keys remain original identities.
   selection, validated rename, existing-vocabulary mapping, and case-insensitive
   deduplication. `apply_reviewed_tag_dict` filters/remaps dictionary entries before
   `apply_tag_dict`, preserving explicit replacement destinations' metadata.
+
+`DualTransferPrompt::open(..., copy_only)` supports a two-row Copy/Cancel mode
+for distinct vaults; collision resolution preserves Copy. Same-vault prompts
+retain Move/Copy/Cancel and same-gallery/cycle refusal.

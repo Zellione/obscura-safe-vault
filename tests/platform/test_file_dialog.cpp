@@ -7,6 +7,7 @@
 #include "ui/unlock_logic.h"
 #include "ui/unlock_screen.h"
 #include "ui/vault_manager.h"
+#include "ui/vault_unlock_picker.h"
 #include "vault/vault.h"
 
 #include <filesystem>
@@ -361,4 +362,42 @@ TEST(legacy_conversion_can_remove_optional_keyfile_and_click_confirmation)
     FileDialog dialog;
     ui::UnlockScreen screen(window, font, vault, dialog, "/tmp/source.osv");
     CHECK(ui::UnlockScreenTestPeer::check_conversion_controls(screen));
+}
+
+TEST(split_vault_picker_browses_unregistered_directory_and_transfers_ownership)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "osv_split_picker_browse";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    {
+        vault::Vault source;
+        const std::vector<uint8_t> pw{'p', 'w'};
+        REQUIRE(vault::Vault::create_directory((dir / "source.osv").string(), pw, {},
+                                               {.t_cost = 1, .m_cost_kib = 8, .parallelism = 1},
+                                               source) == vault::VaultResult::Ok);
+        source.lock();
+        platform::VaultRegistry registry(dir / "vaults.list");
+        FileDialog files;
+        gfx::Window window;
+        ui::VaultUnlockPicker picker(registry, files, window);
+        picker.open((dir / "active.osv").string(), false, true);
+        Peer::arm(files, Purpose::VaultDirectory);
+        Peer::complete(files, {(dir / "source.osv").string()});
+        picker.update();
+        SDL_Event input{};
+        input.type = SDL_EVENT_TEXT_INPUT;
+        input.text.text = "pw";
+        CHECK(picker.handle_event(input));
+        input.type = SDL_EVENT_KEY_DOWN;
+        input.key.key = SDLK_RETURN;
+        CHECK(picker.handle_event(input));
+        REQUIRE(picker.chosen());
+        source = picker.take_vault();
+        picker.close();
+        CHECK(source.is_unlocked());
+        CHECK(!picker.chosen());
+        CHECK(picker.dest_path() == (dir / "source.osv").string());
+    }
+    std::filesystem::remove_all(dir, ec);
 }

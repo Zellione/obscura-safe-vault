@@ -16,6 +16,7 @@ namespace vault { class Vault; }
 
 namespace ui {
 class ImportQueue;
+class VaultUnlockPicker;
 struct DualSessionState;
 
 // Copy an SDL event, shifting mouse coordinates into pane-local space
@@ -32,6 +33,8 @@ public:
     DualGalleryScreen(GalleryGrid::GridInitContext ctx, GalleryGrid::GridDialogs dialogs,
                       GalleryGrid::GridVaultCtx vault_ctx, GallerySessionState& session,
                       ImportQueue& queue, DualSessionState& dual);
+
+    ~DualGalleryScreen() override;
 
     void on_enter() override;
     void on_exit() override;                 // snapshots both panes into dual_
@@ -56,12 +59,31 @@ private:
     void apply_split_layout();                          // push the 50/50 split into both panes
     void handle_prompt_key(const SDL_KeyboardEvent& key);   // M-prompt key routing
     void fire_transfer(const DualTransferPrompt::Launch& launch);
-    bool route_busy_pane(const SDL_Event& e);           // keys to a busy inactive pane's modal
     bool handle_split_key(const SDL_KeyboardEvent& key);    // Tab/F3/M/disabled shortcuts
     void open_transfer_prompt();                        // M: refusal checks, then prompt_.open
     bool route_mouse(const SDL_Event& e);               // buttons/motion/wheel to pane under cursor
     void drain_nav(GalleryGrid& grid);                  // take_nav -> snapshot/request
 
+    vault::Vault& pane_vault(int pane);
+    void open_vault_picker();
+    void finish_vault_picker();
+    void close_other_vault();
+    bool route_modal(const SDL_Event& e);
+    void update_pane(GalleryGrid& grid, double dt);
+    void forward_pane_event(GalleryGrid& grid, const SDL_Event& e);
+
+    struct Setup {
+        GalleryGrid::GridInitContext ctx;
+        GalleryGrid::GridDialogs dialogs;
+        GalleryGrid::GridVaultCtx vault_ctx;
+        GallerySessionState& session;
+    };
+    struct OtherPane;
+    Setup setup_;
+    // Reverse destruction: job, grids, then their vault/cache/session resources.
+    std::unique_ptr<OtherPane> other_;
+    std::unique_ptr<VaultUnlockPicker> picker_;
+    bool exclusive_ = false;
     gfx::Window&              win_;
     gfx::FontAtlas&           font_;
     vault::Vault&             vault_;
