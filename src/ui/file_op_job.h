@@ -55,9 +55,11 @@ struct FileOpOutcome {
 // for the job's life. cancel() stops between items; each item is a committed,
 // crash-safe unit, so a cancel is a clean partial.
 class FileOpJob {
+    friend struct TransferOwnershipTestPeer;  // deterministic worker/UI ownership regression
 public:
     FileOpJob() = default;
     ~FileOpJob();
+    void abort_and_join();  // release borrowed vaults before screen/vault teardown
 
     FileOpJob(const FileOpJob&)            = delete;
     FileOpJob& operator=(const FileOpJob&) = delete;

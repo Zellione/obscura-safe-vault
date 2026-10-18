@@ -1020,6 +1020,10 @@ void App::dispatch_event(const SDL_Event& e)
         running_ = false;
         return;
     }
+    if (screen_ && screen_->blocks_idle_lock()) {
+        screen_->handle_event(e);
+        return;
+    }
     // Dispatch to overlays (guards QUIT, modals, etc.); returns true if handled
     if (dispatch_overlay_event(*this, e))
         return;

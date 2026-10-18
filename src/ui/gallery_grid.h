@@ -103,6 +103,7 @@ struct GridLocation {
 };
 
 class GalleryGrid : public Screen {
+    friend struct TransferOwnershipTestPeer;  // deterministic worker/UI ownership regression
 public:
     // Dialog pair for import/export file/folder selection.
     struct GridDialogs {
@@ -205,6 +206,9 @@ void toggle_select();          // toggle the current item in the export selectio
     friend void poll_file_job(GalleryGrid& g);          // drain a finished export/delete job
     friend bool handle_import_tag_review(GalleryGrid& g, const SDL_Event& e);
     friend void begin_tag_list_review(GalleryGrid& g, const std::vector<std::string>& paths);
+    friend uint64_t grid_listing_revision(const GalleryGrid& g);
+    friend bool grid_modal_open(const GalleryGrid& g);
+    friend void quiesce_grid(GalleryGrid& g);
     friend bool vault_busy(const GalleryGrid& g);       // any worker owns the vault(s)?
     friend bool handle_job_input(GalleryGrid& g, const SDL_Event& e);  // job-active Esc→cancel gate
     friend void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);  // Shift+C compact confirm
@@ -357,6 +361,7 @@ void toggle_select();          // toggle the current item in the export selectio
     // may have changed (refresh / on_vault_changed / refetch) or lookups
     // dereference stale keys.
     struct ThumbDecode {
+        uint64_t listing_revision = 0;
         image::DecodeWorker          worker{image::decode_wake_event()};
         std::unordered_set<uint64_t> failed;   // thumbs that gave up decoding
         ui::CoverCache               covers;   // gallery cover memoisation per listing
@@ -397,6 +402,9 @@ void toggle_select();          // toggle the current item in the export selectio
 // layout (Phase 48); Phase 50: imports drain asynchronously.
 void poll_file_job(GalleryGrid& g);
 [[nodiscard]] bool vault_busy(const GalleryGrid& g);
+[[nodiscard]] uint64_t grid_listing_revision(const GalleryGrid& g);
+[[nodiscard]] bool grid_modal_open(const GalleryGrid& g);
+void quiesce_grid(GalleryGrid& g);
 [[nodiscard]] bool handle_job_input(GalleryGrid& g, const SDL_Event& e);
 void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 void handle_import_dialog_key(GalleryGrid& g, const SDL_KeyboardEvent& key);

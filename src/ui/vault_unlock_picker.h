@@ -40,7 +40,7 @@ public:
     // Rebuilds candidates (every registered vault path except `src_path`) and
     // enters PickVault. "This vault" is row 0 if include_self is true (default),
     // omitted otherwise. Existing callers compile unchanged (default parameter).
-    void open(std::string src_path, bool include_self = true);
+    void open(std::string src_path, bool include_self = true, bool for_pane = false);
     void close();   // locks/wipes the transient dest vault; deactivates
 
     [[nodiscard]] bool active() const noexcept { return active_; }   // still in PickVault/Unlock
@@ -48,11 +48,16 @@ public:
     [[nodiscard]] bool is_self() const noexcept { return dest_.is_self; }
     [[nodiscard]] vault::Vault& unlocked_vault() noexcept;
     [[nodiscard]] std::string dest_label() const;
+    [[nodiscard]] const std::string& dest_path() const noexcept
+    {
+        return dest_.path;
+    }
     [[nodiscard]] const std::string& error() const noexcept { return error_; }
 
     [[nodiscard]] bool from_warm() const noexcept { return from_warm_; }
     [[nodiscard]] platform::SecondVaultMode keep_mode() const noexcept { return keep_mode_; }
     void release_to_slot();
+    [[nodiscard]] vault::Vault take_vault();  // transfer ownership to a persistent pane
 
     [[nodiscard]] bool handle_event(const SDL_Event& e);   // true if consumed
     void update();                                          // poll the keyfile dialog
@@ -63,6 +68,7 @@ private:
     enum class Stage { PickVault, Unlock };
 
     void choose_vault();
+    void select_path(std::string path);
     void try_unlock();
     bool handle_pick_vault_key(SDL_Keycode k);
     bool handle_unlock_key(SDL_Keycode k);
@@ -82,6 +88,7 @@ private:
     std::vector<std::filesystem::path> candidates_;
     int vault_sel_ = 0;
     bool include_self_ = true;
+    bool for_pane_ = false;
 
     struct Dest {
         vault::Vault    vault;

@@ -41,6 +41,7 @@ void open_pull_transfer(TransferDialog& dialog, std::string destination_gallery)
 // on every exit (close()/completion); ~Vault is the backstop. The active vault
 // (src_) is owned by App and is never locked here.
 class TransferDialog {
+    friend struct TransferOwnershipTestPeer;  // deterministic worker/UI ownership regression
 public:
     // `src_path` is the active vault's file path — used to exclude it from the
     // destination-vault candidate list (the registry stores paths, not handles).

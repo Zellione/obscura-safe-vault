@@ -39,6 +39,21 @@ feature that writes decrypted media to disk. See
 [`docs/V3_VAULT_FORMAT.md`](docs/V3_VAULT_FORMAT.md) and
 [`docs/V3_BACKUP_AND_RECOVERY.md`](docs/V3_BACKUP_AND_RECOVERY.md).
 
+## Copy between vaults
+
+Press **F3** in a gallery, then **Ctrl+O** to open a vault in the right pane.
+Choose a registered vault, or press **O** to browse for a vault folder (**L**
+for a legacy file), then unlock with its password and optional keyfile.
+Browse to the destination gallery, use **Tab** to choose the source pane,
+select items with **Space** or **Ctrl+A**, and press **M** to copy to the other
+pane. Gallery collisions offer combine or rename; originals remain intact.
+Legacy vaults can be sources only.
+
+The right pane supports browsing, selection, and copying. Open that vault from
+the vault manager for the full viewer or other editing tools. **Ctrl+W** closes
+and locks the second vault; leaving split view also locks it. **Esc** during a
+copy cancels remaining work and keeps completed copies.
+
 ---
 
 ## Building

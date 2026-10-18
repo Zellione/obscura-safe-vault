@@ -221,8 +221,14 @@ FileOpOutcome run_compact(vault::Vault& v, vault::OpProgress& progress)
 
 FileOpJob::~FileOpJob()
 {
+    abort_and_join();
+}
+
+void FileOpJob::abort_and_join()
+{
     progress_.cancel.store(true);   // stop the loop promptly on teardown
     if (thread_.joinable()) thread_.join();
+    active_.store(false);
 }
 
 bool FileOpJob::launch(FileOpKind kind, std::function<FileOpOutcome()> work)

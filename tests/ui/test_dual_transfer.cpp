@@ -269,3 +269,23 @@ TEST(file_op_job_same_vault_transfer_with_suffix_collision_policy)
     }
     cleanup_dir(dir);
 }
+
+TEST(dual_transfer_copy_only_never_offers_move)
+{
+    P prompt;
+    prompt.open("Other vault", {}, true);
+    const auto copy = prompt.key(P::Key::Enter);
+    CHECK(copy.fire);
+    CHECK(copy.mode == vault::TransferMode::Copy);
+    prompt.open("Other vault", {}, true);
+    (void)prompt.key(P::Key::Down);
+    CHECK(!prompt.key(P::Key::Enter).fire);
+    CHECK(prompt.stage() == P::Stage::Closed);
+    prompt.open("Other vault", {"Photos"}, true);
+    CHECK(!prompt.key(P::Key::Enter).fire);
+    (void)prompt.key(P::Key::Down);
+    const auto renamed = prompt.key(P::Key::Enter);
+    CHECK(renamed.fire);
+    CHECK(renamed.mode == vault::TransferMode::Copy);
+    CHECK(renamed.policy == vault::CollisionPolicy::Suffix);
+}

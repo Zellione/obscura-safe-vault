@@ -24,12 +24,16 @@ public:
 
     // Open at the Mode stage. `conflicts` = names from vault::colliding_galleries
     // (host pre-computes; empty => Enter on Mode fires immediately).
-    void open(std::string dst_label, std::vector<std::string> conflicts);
+    void open(std::string dst_label, std::vector<std::string> conflicts, bool copy_only = false);
 
     // Advances the state machine based on the key.
     [[nodiscard]] Launch key(Key k);
 
     [[nodiscard]] Stage stage() const { return stage_; }
+    [[nodiscard]] bool copy_only() const
+    {
+        return copy_only_;
+    }
     [[nodiscard]] int   selected() const { return selected_; }
     [[nodiscard]] const std::string& dst_label() const { return dst_label_; }
     [[nodiscard]] const std::vector<std::string>& conflicts() const { return conflicts_; }
@@ -40,6 +44,7 @@ private:
     void mode_enter(Launch& result);           // Enter on the Mode stage
     void conflict_enter(Launch& result);       // Enter on the Conflict stage
 
+    bool copy_only_ = false;
     Stage               stage_ = Stage::Closed;
     int                 selected_ = 0;
     std::string         dst_label_;

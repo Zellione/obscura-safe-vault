@@ -117,3 +117,8 @@ do not suppress authenticated frame reads.
 MigrationJob joins multi-frame originals directly in SecureBytes; no ordinary
 heap plaintext concatenation buffer remains. Conversion carries both job and
 progress cancellation flags through bounded copy/verification/digest loops.
+
+`FileOpJob::abort_and_join()` cancels and joins before releasing borrowed vaults.
+DualGalleryScreen calls it before pane/session teardown and releases its import
+queue exclusivity only after joining. FileOpJob remains active until its outcome
+is collected, so even a finished worker cannot expose stale UI node pointers.

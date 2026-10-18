@@ -230,3 +230,18 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   Summary modal geometry via `prompt_layout.*` module.
 
 Tag overview: `R` opens `RenameDialog::open_tag` for the selected row in writable vaults. Success clears the prefix filter, reloads, and selects the renamed tag. The modal owns input before list/filter shortcuts; F1 documents R.
+
+- `dual_gallery.*` — F3 coordinates two GalleryGrids. Ctrl+O opens a
+  VaultUnlockPicker for a session-owned right-hand vault; Ctrl+W closes it.
+  The secondary pane owns a distinct cache/session and supports browsing/selection;
+  app-wide viewer/edit navigation remains on the active-vault screen. Tab selects
+  the source; M copies between different vaults (legacy destination refused), or
+  retains same-vault move/copy. FileOpJob owns both trees until take_outcome joins:
+  no pane update/render/navigation meanwhile. Every outcome refreshes both panes,
+  including partial failure/cancel. Pane modal input has precedence over host
+  shortcuts. Shutdown joins the job before grids, caches, and secondary vault
+  teardown. Secondary paths never overwrite same-vault saved pane state.
+- `GalleryGrid::update` polls only while transfer/combine workers own the tree;
+  hover/detail work must wait until the completion refresh. `quiesce_grid` stops
+  hover playback before a transfer; thumbnail fetches use immutable span snapshots
+  and the thread-safe vault read API.

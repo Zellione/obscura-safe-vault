@@ -185,6 +185,7 @@ ends; preserve buffered audio and reset EOF on seek/reopen. See the
 | 116 | Optional legacy conversion and one video decode control | 🔜 | Restore a first-class read-only opening choice for legacy single-file vaults and replace competing hardware/software switches with one persisted video decoding selection. → [details](docs/roadmap/phase-116-legacy-readonly-and-decode-control.md) |
 | 117 | Review tags on import | 🔜 | Preview optional annotation cleanup, select tags, rename incoming tags, and map to existing tags for datasets and tag files. → [details](docs/roadmap/phase-117-import-tag-review.md) |
 | 118 | Rename tags in administration | 🔜 | Vault-wide tag renaming from the overview, preserving assignments, metadata, and saved-search tag conditions. → [details](docs/roadmap/phase-118-tag-renaming.md) |
+| 119 | Split-view cross-vault copy and transfer lifetime safety | 🚧 | Open another vault in F3, copy in either direction, and prevent UI access while transfer workers own the vaults. → [details](docs/roadmap/phase-119-split-vault-copy.md) |
 
 ---
 

@@ -169,3 +169,8 @@ Modal dialogs: transfer/combine operations, file pickers, rename/tag editing, se
   from font height. See `mem:module/ui/import` for collection and commit boundaries.
 
 `RenameDialog::open_tag` reuses the rename modal for `vault::rename_tag`, selects the initial name, ignores the opening text event, and reports collisions/invalid category fields. `new_name()` supports selection after the overview reload. Modal line spacing derives from font metrics.
+
+VaultUnlockPicker has a pane mode: O browses v3 folders, L legacy files;
+password/keyfile handling is shared with transfer dialogs. `take_vault()` moves
+ownership out of the transient picker or warm slot, avoiding a borrowed warm
+handle whose timeout could invalidate an open pane. Pane lifetime controls locking.
