@@ -25,7 +25,7 @@ public:
     void close();
     [[nodiscard]] bool active() const noexcept { return active_; }
 
-    // Process a key while active. Enter / Y confirm; Esc / N cancel. Any other
+    // Process a key while active. Y confirms; Enter / Esc / N cancel. Any other
     // key is ignored (Pending). Closes the dialog on a decisive key.
     Result handle_key(SDL_Keycode key);
 

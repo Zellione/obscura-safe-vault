@@ -68,6 +68,28 @@ struct NewOutputFile {
     std::filesystem::path display_path;
 };
 
+// A pinned export destination. Open the user-chosen root once; create every
+// descendant relative to these handles, never by reopening its display path.
+// Directory names are exclusively claimed with mkdirat (0700), then opened
+// with O_NOFOLLOW. Existing entries, including links, are suffix collisions.
+class OutputDirectory {
+public:
+    ~OutputDirectory();
+    OutputDirectory(OutputDirectory&& other) noexcept;
+    OutputDirectory& operator=(OutputDirectory&& other) noexcept;
+    OutputDirectory(const OutputDirectory&) = delete;
+    OutputDirectory& operator=(const OutputDirectory&) = delete;
+
+    [[nodiscard]] static std::optional<OutputDirectory> open(const std::filesystem::path& path);
+    [[nodiscard]] std::optional<OutputDirectory> create_directory(std::string_view name) const;
+    [[nodiscard]] std::optional<NewOutputFile> create_file(std::string_view name) const;
+
+private:
+    OutputDirectory(int fd, std::filesystem::path path) : fd_(fd), path_(std::move(path)) {}
+    int fd_ = -1;
+    std::filesystem::path path_;  // informational only, never reopened
+};
+
 // Atomically claim a brand-new file strictly inside `directory`. `safe_component`
 // must already be a safe single filename (vault::is_safe_node_name output); the
 // helper defensively rejects anything carrying a path separator, "." / "..", a

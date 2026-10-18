@@ -29,13 +29,16 @@ Pure SDL-free view/sort/model helpers, layout geometry, settings state, search i
   `revision()`, a monotonic counter incremented on `toggle()` and `clear()`, used as a cache
   key by the detail panel.
 - `export_ui.*` — shared consent + folder-pick plumbing used by gallery + viewer.
-- `export.*` — decrypt→write-verbatim→wipe export (SDL-free/tested). The ONE deliberate
-  deviation from invariant #1: writes decrypted originals to disk on explicit user consent
-  (selection-only, never thumbnails, buffer wiped right after write). Phase 98: the sink is
-  `platform::create_new_file_within(dest_dir, sanitize_node_name(name))` — an atomic
-  no-follow, containment-enforced exclusive create returning an already-open
-  `platform::NewOutputFile`; `export_one_media` writes only to that handle and never reopens
-  a path. `unique_export_path` deleted; `export_path_within` kept as a post-create assertion.
+- `export.*` — consent-gated export of originals and selected gallery subtrees.
+  Iterative traversal preserves nesting and empty galleries, deduplicates overlaps,
+  sanitizes every name, and counts files plus folders in progress/results.
+  Cancel retains completed output; a failed directory skips/counts its subtree.
+  `platform::OutputDirectory` pins the chosen root and active ancestors;
+  no descendant display path is reopened. Files are atomically claimed with
+  no-follow/exclusive creation, folders with mkdirat + no-follow openat.
+  Collisions suffix rather than merge/overwrite. `export_one_media` writes through
+  `NewOutputFile` and wipes `SecureBytes` scratch on every path. Thumbnails are
+  never exported. `export_path_within` is a test diagnostic, not a write gate.
 - `favorite_batch.*` — `batch_favorite_target(nodes)` (pure/tested): the batch
   favorite rule — any node unfavorited → favorite all (true), else unfavorite
   all. Persisted by `vault::set_favorites_batch` (one commit). Used by the

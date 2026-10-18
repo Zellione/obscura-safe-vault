@@ -122,3 +122,7 @@ progress cancellation flags through bounded copy/verification/digest loops.
 DualGalleryScreen calls it before pane/session teardown and releases its import
 queue exclusivity only after joining. FileOpJob remains active until its outcome
 is collected, so even a finished worker cannot expose stale UI node pointers.
+
+Export jobs include selected gallery subtrees (Phase 120), deduplicate overlaps,
+and report files plus directories as items. The consent dialog explicitly explains
+recursive scope; originals remain SecureBytes-backed and wipe immediately after write.

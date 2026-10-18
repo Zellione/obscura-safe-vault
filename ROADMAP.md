@@ -186,6 +186,7 @@ ends; preserve buffered audio and reset EOF on seek/reopen. See the
 | 117 | Review tags on import | 🔜 | Preview optional annotation cleanup, select tags, rename incoming tags, and map to existing tags for datasets and tag files. → [details](docs/roadmap/phase-117-import-tag-review.md) |
 | 118 | Rename tags in administration | 🔜 | Vault-wide tag renaming from the overview, preserving assignments, metadata, and saved-search tag conditions. → [details](docs/roadmap/phase-118-tag-renaming.md) |
 | 119 | Split-view cross-vault copy and transfer lifetime safety | 🚧 | Open another vault in F3, copy in either direction, and prevent UI access while transfer workers own the vaults. → [details](docs/roadmap/phase-119-split-vault-copy.md) |
+| 120 | Export gallery folders | 🔜 | Export selected galleries with all nested folders and original media to a chosen destination, with consent, collision suffixing, cancellation, and descriptor-relative safe writes. → [details](docs/roadmap/phase-120-gallery-folder-export.md) |
 
 ---
 

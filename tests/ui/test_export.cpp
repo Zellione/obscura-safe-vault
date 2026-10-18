@@ -460,10 +460,8 @@ TEST(export_handles_a_mixed_image_and_video_selection)
                    std::span<const uint8_t>(clip));
 }
 
-TEST(export_still_refuses_a_gallery_node)
+TEST(export_preserves_an_empty_gallery)
 {
-    // Widening to videos must not accidentally let a gallery through: it has no
-    // stored bytes of its own, and silently "exporting" one would be a lie.
     TempVault tv("gal");
     TempDir   out("gal");
 
@@ -475,6 +473,106 @@ TEST(export_still_refuses_a_gallery_node)
     REQUIRE(kids.size() == 1);
 
     auto sum = ui::export_images(v, kids, out.path, ui::ExportConsent::Confirm);
+    CHECK_EQ(sum.written, 1);
+    CHECK_EQ(sum.failed, 0);
+    CHECK_TRUE(fs::is_directory(out.path / "sub"));
+}
+
+TEST(export_gallery_preserves_nested_originals_and_deduplicates_selection)
+{
+    TempVault tv("tree");
+    TempDir out("tree");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kExpKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("album") == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("album/sub") == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("album/empty") == vault::VaultResult::Ok);
+    const auto img = pattern(2048, 17);
+    const auto clip = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!clip.empty());
+    REQUIRE(v.add_image("album", img, "photo.png") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("album/sub", clip, "clip.mp4") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", img, "loose.png") == vault::VaultResult::Ok);
+    auto roots = v.list("");
+    auto nested = v.list("album/sub");
+    // Descendant first, ancestor later, duplicate ancestor: one subtree only.
+    std::vector<const vault::IndexNode*> picked{nested[0], roots[0], roots[1], roots[0]};
+    vault::OpProgress progress;
+    const auto sum = ui::export_images(v, picked, out.path, ui::ExportConsent::Confirm, &progress);
+    CHECK_EQ(sum.written, 6);  // three folders, two images, one video
+    CHECK_EQ(sum.failed, 0);
+    CHECK_EQ(progress.total.load(), 6);
+    CHECK_EQ(progress.done.load(), 6);
+    CHECK_TRUE(fs::is_directory(out.path / "album/empty"));
+    CHECK_BYTES_EQ(std::span<const uint8_t>(read_file(out.path / "album/photo.png")),
+                   std::span<const uint8_t>(img));
+    CHECK_BYTES_EQ(std::span<const uint8_t>(read_file(out.path / "album/sub/clip.mp4")),
+                   std::span<const uint8_t>(clip));
+    CHECK_BYTES_EQ(std::span<const uint8_t>(read_file(out.path / "loose.png")),
+                   std::span<const uint8_t>(img));
+    CHECK_EQ(std::distance(fs::recursive_directory_iterator(out.path),
+                           fs::recursive_directory_iterator{}),
+             6);
+}
+
+TEST(export_gallery_consent_and_cancellation_create_nothing)
+{
+    TempVault tv("tree_cancel");
+    TempDir out("tree_cancel");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kExpKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("album") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("album", pattern(100, 1), "a.png") == vault::VaultResult::Ok);
+    const auto roots = v.list("");
+    CHECK_EQ(ui::export_images(v, roots, out.path, ui::ExportConsent::Cancel).written, 0);
+    CHECK_TRUE(fs::is_empty(out.path));
+    vault::OpProgress progress;
+    progress.cancel.store(true);
+    CHECK_EQ(ui::export_images(v, roots, out.path, ui::ExportConsent::Confirm, &progress).written,
+             0);
+    CHECK_TRUE(fs::is_empty(out.path));
+}
+
+TEST(export_gallery_suffixes_existing_directories_and_symlinks)
+{
+    TempVault tv("tree_collision");
+    TempDir out("tree_collision");
+    TempDir victim("tree_collision_victim");
+    fs::create_directory_symlink(victim.path, out.path / "album");
+    fs::create_directory(out.path / "album (1)");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kExpKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("album") == vault::VaultResult::Ok);
+    const auto img = pattern(300, 4);
+    REQUIRE(v.add_image("album", img, "a.png") == vault::VaultResult::Ok);
+    const auto sum = ui::export_images(v, v.list(""), out.path, ui::ExportConsent::Confirm);
+    CHECK_EQ(sum.written, 2);
+    CHECK_EQ(sum.failed, 0);
+    CHECK_TRUE(fs::is_empty(victim.path));
+    CHECK_TRUE(fs::is_empty(out.path / "album (1)"));
+    CHECK_BYTES_EQ(std::span<const uint8_t>(read_file(out.path / "album (2)/a.png")),
+                   std::span<const uint8_t>(img));
+}
+
+TEST(export_gallery_sanitizes_every_level_and_counts_failed_subtrees)
+{
+    TempVault tv("tree_hostile");
+    TempDir out("tree_hostile");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kExpKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("album") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("album", pattern(100, 1), "a.png") == vault::VaultResult::Ok);
+    auto evil = *v.list("")[0];
+    evil.name = "../album";
+    evil.children[0].name = "/escape.png";
+    const vault::IndexNode* picked[] = {&evil};
+    auto sum = ui::export_images(v, picked, out.path, ui::ExportConsent::Confirm);
+    CHECK_EQ(sum.written, 2);
+    CHECK_TRUE(fs::exists(out.path / ".._album/_escape.png"));
+    vault::OpProgress progress;
+    sum = ui::export_images(v, picked, out.path / "missing", ui::ExportConsent::Confirm, &progress);
     CHECK_EQ(sum.written, 0);
-    CHECK_EQ(sum.failed, 1);
+    CHECK_EQ(sum.failed, 2);
+    CHECK_EQ(progress.total.load(), 2);
+    CHECK_EQ(progress.done.load(), 2);
 }

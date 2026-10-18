@@ -39,6 +39,12 @@ feature that writes decrypted media to disk. See
 [`docs/V3_VAULT_FORMAT.md`](docs/V3_VAULT_FORMAT.md) and
 [`docs/V3_BACKUP_AND_RECOVERY.md`](docs/V3_BACKUP_AND_RECOVERY.md).
 
+To export gallery folders, select them with **Space** (or **Ctrl+A**), press **X**,
+confirm the plaintext warning with **Y**, and choose a destination. Selected
+folders include all nested folders and original images/videos, including empty
+folders. Existing names receive numbered suffixes; nothing is overwritten or
+merged. **Esc** cancels the running export and keeps completed output.
+
 ## Copy between vaults
 
 Press **F3** in a gallery, then **Ctrl+O** to open a vault in the right pane.

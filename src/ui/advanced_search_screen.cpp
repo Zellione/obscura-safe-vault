@@ -330,7 +330,9 @@ void start_export_results(AdvancedSearchScreen& s)
     s.ops_.request_export(count, [&s]() {
         std::vector<const vault::IndexNode*> picked;
         for (const vault::SearchHit* h : selected_hits(s.result_view_)) {
-            if (h->node != nullptr && !h->is_gallery) { picked.push_back(h->node); }
+            if (h->node != nullptr) {
+                picked.push_back(h->node);
+            }
         }
         return picked;
     }, s.status_);
