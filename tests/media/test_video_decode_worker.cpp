@@ -59,6 +59,30 @@ bool wait_for(Pred pred)
     return pred();
 }
 
+bool collect_timestamps(media::VideoDecodeWorker& worker, uint64_t generation,
+                        std::vector<double>& timestamps)
+{
+    bool eof = false;
+    bool valid = true;
+    const bool drained = wait_for([&] {
+        while (auto r = worker.take_result()) {
+            valid = valid && r->generation == generation && !eof;
+            if (r->eof) {
+                eof = true;
+                continue;
+            }
+            if (!r->frame.has_value()) {
+                valid = false;
+                continue;
+            }
+            valid = valid && !r->storage.empty();
+            timestamps.push_back(r->frame->pts_seconds);
+        }
+        return eof && worker.outstanding() == 0;
+    });
+    return drained && valid;
+}
+
 struct Fixture {
     TempVault       tv;
     vault::Vault    v;
@@ -66,9 +90,10 @@ struct Fixture {
     media::VideoDecoder dec;
     bool            valid = false;
 
-    explicit Fixture(const char* tag) : tv(tag)
+    explicit Fixture(const char* tag, const char* file = OSV_VAULT_FIXTURE_DIR "/tiny.mp4")
+        : tv(tag)
     {
-        auto v_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+        auto v_bytes = read_file(file);
         if (v_bytes.empty()) return;
         if (vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) != vault::VaultResult::Ok) return;
         if (v.create_gallery("c") != vault::VaultResult::Ok) return;
@@ -105,7 +130,122 @@ bool test_only_pending_flush(VideoDecodeWorker& w)
     std::lock_guard lock(w.mtx_);
     return w.pending_flush_;
 }
+void test_only_reject_decode_format(VideoDecodeWorker& w, bool software_available = true)
+{
+    // Called before submitting jobs, while the worker is idle. Use FFmpeg's
+    // real send-side failure instead of mocking an error return.
+    w.codec_ctx_->get_format = [](AVCodecContext*, const AVPixelFormat*) {
+        return AV_PIX_FMT_NONE;
+    };
+    w.hw_active_ = true;
+    if (!software_available) w.saved_params_->codec_id = AV_CODEC_ID_NONE;
+}
+int test_only_presend_packet(VideoDecodeWorker& w, const AVPacket* packet)
+{
+    return avcodec_send_packet(w.codec_ctx_, packet);
+}
 } // namespace media
+
+TEST(video_decode_worker_vp8_send_failure_retries_keyframe_in_software)
+{
+    Fixture f("vp8_send_fallback", OSV_MEDIA_FIXTURE_DIR "/tiny_vp8.webm");
+    REQUIRE(f.valid);
+    media::VideoDecodeWorker worker(*f.dec.video_codecpar(), f.dec.video_time_base(), 0);
+    REQUIRE(media::test_only_reopen_software(worker));
+    media::test_only_reject_decode_format(worker);
+
+    while (AVPacket* pkt = f.dec.demux_next_video_packet())
+        worker.submit(pkt, 7);
+    worker.submit(nullptr, 7);
+    std::vector<double> timestamps;
+    REQUIRE(collect_timestamps(worker, 7, timestamps));
+    REQUIRE(timestamps.size() == 10);
+    CHECK(timestamps.front() == 0.0);
+    for (size_t i = 1; i < timestamps.size(); ++i)
+        CHECK(timestamps[i] > timestamps[i - 1]);
+}
+
+TEST(video_decode_worker_failed_software_reopen_still_publishes_eof)
+{
+    Fixture f("vp8_reopen_failure", OSV_MEDIA_FIXTURE_DIR "/tiny_vp8.webm");
+    REQUIRE(f.valid);
+    media::VideoDecodeWorker worker(*f.dec.video_codecpar(), f.dec.video_time_base(), 0);
+    REQUIRE(media::test_only_reopen_software(worker));
+    media::test_only_reject_decode_format(worker, false);
+    while (AVPacket* pkt = f.dec.demux_next_video_packet())
+        worker.submit(pkt, 11);
+    worker.submit(nullptr, 11);
+    std::vector<double> timestamps;
+    REQUIRE(collect_timestamps(worker, 11, timestamps));
+    CHECK(timestamps.empty());
+}
+
+TEST(video_decode_worker_send_eagain_preserves_packet_and_drains_frames)
+{
+    Fixture f("vp8_send_eagain", OSV_MEDIA_FIXTURE_DIR "/tiny_vp8.webm");
+    REQUIRE(f.valid);
+    media::VideoDecodeWorker worker(*f.dec.video_codecpar(), f.dec.video_time_base(), 0);
+    REQUIRE(media::test_only_reopen_software(worker));
+    // Fill FFmpeg's output and input slots before the worker runs. Its next
+    // send must drain output and retry the SAME packet, without losing it.
+    for (int i = 0; i < 2; ++i) {
+        AVPacket* pkt = f.dec.demux_next_video_packet();
+        REQUIRE(pkt != nullptr);
+        const int ret = media::test_only_presend_packet(worker, pkt);
+        av_packet_free(&pkt);
+        REQUIRE(ret == 0);
+    }
+    AVPacket* retry = f.dec.demux_next_video_packet();
+    REQUIRE(retry != nullptr);
+    const int ret = media::test_only_presend_packet(worker, retry);
+    if (ret != AVERROR(EAGAIN)) av_packet_free(&retry);
+    REQUIRE(ret == AVERROR(EAGAIN));
+    worker.submit(retry, 8);
+    while (AVPacket* pkt = f.dec.demux_next_video_packet())
+        worker.submit(pkt, 8);
+    worker.submit(nullptr, 8);
+    std::vector<double> timestamps;
+    REQUIRE(collect_timestamps(worker, 8, timestamps));
+    REQUIRE(timestamps.size() == 10);
+    for (size_t i = 1; i < timestamps.size(); ++i)
+        CHECK(timestamps[i] > timestamps[i - 1]);
+}
+
+TEST(video_decode_worker_vp8_hardware_preference_preserves_all_frames)
+{
+    Fixture f("vp8_hw_preference", OSV_MEDIA_FIXTURE_DIR "/tiny_vp8.webm");
+    REQUIRE(f.valid);
+    media::VideoDecodeWorker worker(*f.dec.video_codecpar(), f.dec.video_time_base(), 0);
+    while (AVPacket* pkt = f.dec.demux_next_video_packet())
+        worker.submit(pkt, 9);
+    worker.submit(nullptr, 9);
+    std::vector<double> timestamps;
+    REQUIRE(collect_timestamps(worker, 9, timestamps));
+    REQUIRE(timestamps.size() == 10);
+    CHECK(timestamps.front() == 0.0);
+}
+
+TEST(video_decode_worker_flush_drains_buffered_frames_and_publishes_eof)
+{
+    Fixture f("vp8_flush_buffered", OSV_MEDIA_FIXTURE_DIR "/tiny_vp8.webm");
+    REQUIRE(f.valid);
+    media::VideoDecodeWorker worker(*f.dec.video_codecpar(), f.dec.video_time_base(), 0);
+    REQUIRE(media::test_only_reopen_software(worker));
+    for (int i = 0; i < 2; ++i) {
+        AVPacket* pkt = f.dec.demux_next_video_packet();
+        REQUIRE(pkt != nullptr);
+        const int ret = media::test_only_presend_packet(worker, pkt);
+        av_packet_free(&pkt);
+        REQUIRE(ret == 0);
+    }
+    // Both buffered frames must precede EOF in the result queue.
+    worker.submit(nullptr, 10);
+    std::vector<double> timestamps;
+    REQUIRE(collect_timestamps(worker, 10, timestamps));
+    REQUIRE(timestamps.size() == 2);
+    CHECK(timestamps.front() == 0.0);
+    CHECK(timestamps.back() > timestamps.front());
+}
 
 TEST(video_decode_worker_decodes_submitted_packets_in_order)
 {

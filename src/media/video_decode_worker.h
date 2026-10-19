@@ -121,7 +121,7 @@ private:
 
     void run();
     std::optional<Job> wait_for_job();
-    void send_packet(Job& job);
+    bool send_packet(Job& job);
     void decode_available_frames(const Job& job, bool is_flush);
     bool publish_decoded_frame(const Job& job);
     void publish_result(Result&& r);
@@ -149,6 +149,8 @@ private:
     friend bool test_only_reopen_software(VideoDecodeWorker& w);
     friend void test_only_force_hw_active(VideoDecodeWorker& w, bool active);
     friend bool test_only_pending_flush(VideoDecodeWorker& w);
+    friend void test_only_reject_decode_format(VideoDecodeWorker& w, bool software_available);
+    friend int test_only_presend_packet(VideoDecodeWorker& w, const AVPacket* packet);
 
     AVCodecContext*        codec_ctx_ = nullptr;
     AVFrame*               frame_     = nullptr;

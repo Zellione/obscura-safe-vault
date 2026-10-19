@@ -146,3 +146,34 @@ actually running on the hardware block, with no playback regression
   Phase 41's existing behavior to the user.
 
 **Status:** ✅ Done (Part 1 + Part 2).
+
+### Software fallback follow-up
+
+A working VAAPI device and FFmpeg's compiled codec support do not guarantee
+that the driver supports a particular codec/profile. A VP8 fixture on the
+Radeon 780M exposed two gaps: the format callback rejected the software format
+FFmpeg offered after VAAPI initialization failed, and the worker discarded
+`avcodec_send_packet()` errors before checking `avcodec_receive_frame()`. The
+latter returned EAGAIN, so receive-side recovery never ran and no frames arrived.
+
+The format callback now prefers VAAPI when offered, then accepts the first
+software format when VAAPI is absent. Other hardware formats are skipped. A
+hard submission error while hardware is attached reopens the software decoder
+and retries the same retained packet once, preserving the initial keyframe.
+EAGAIN drains available frames and retries the unaccepted packet or EOF marker;
+normal receive processing also drains all available frames. Terminal flush
+failure still publishes EOF, even if software reopening failed and left no
+codec context, so playback cannot wait indefinitely for a result.
+Packet ownership, secure buffers, and generation tagging remain intact.
+
+Regression coverage includes software-format negotiation, real FFmpeg
+send-side format rejection with all ten VP8 frames recovered, buffered-output
+backpressure, buffered frames at EOF, failed software reopening, and the normal
+hardware-preference path. The
+failure tests do not require GPU hardware. The same VP8 sample remains useful
+for manual runs on machines with VAAPI devices that lack VP8 support.
+
+A separately reported RTX 5090 green-screen symptom is not confirmed to have
+the same cause. A driver returning successful but corrupt frames cannot be
+detected by these error-based fallbacks; the persisted Software setting remains
+the troubleshooting option for that case.

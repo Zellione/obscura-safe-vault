@@ -284,10 +284,18 @@ Phase 52 consolidated them to prevent divergence.
   `hw_transfer_frame_` BEFORE the zero-copy/swscale FrameConverter pipeline runs (that pipeline
   is otherwise unmodified).
 - VideoDecodeWorker calls `try_attach_hwaccel()` when opening its codec context (`hw_active_`
-  tracks the outcome); on any hard decode error while hw_active_, `reopen_software_only()`
+  tracks attachment, not guaranteed hardware use). `pick_hw_format()` prefers VAAPI,
+  then the first software format if FFmpeg removes VAAPI after setup rejection;
+  other hardware formats are never selected. On a hard send/receive decode error
+  while hw_active_, `reopen_software_only()`
   drops the hw context and opens a fresh software-only one from a saved copy of the original
-  `AVCodecParameters` (`saved_params_`) for the rest of that clip — playback continues, never
-  aborts.
+  `AVCodecParameters` (`saved_params_`) for the rest of that clip. Send-side recovery
+  retains and retries the same packet once so the initial keyframe is not lost.
+  Send EAGAIN drains output and retries the packet/EOF marker; receive processing
+  drains all available frames, each copied into owned secure storage. Failed EOF
+  submission still publishes EOF, including when software reopening failed and
+  no codec context remains. Receive-side hard errors retain the existing
+  next-packet recovery behavior; successful but corrupt driver output is not detected.
 - VAAPI (Linux): `vendor/vaapi-shim` (`osv_vaapi_shim.a`) provides the ~36 `va*` symbols
   FFmpeg's `hwcontext_vaapi.c`/`vaapi_*.c` glue references via its own internal
   `dlopen("libva.so.2"/"libva-drm.so.2")` + `dlsym()` forwarding, so the app never gets a
