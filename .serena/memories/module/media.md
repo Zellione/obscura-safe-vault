@@ -293,7 +293,8 @@ Phase 52 consolidated them to prevent divergence.
   retains and retries the same packet once so the initial keyframe is not lost.
   Send EAGAIN drains output and retries the packet/EOF marker; receive processing
   drains all available frames, each copied into owned secure storage. Failed EOF
-  submission still publishes EOF. Receive-side hard errors retain the existing
+  submission still publishes EOF, including when software reopening failed and
+  no codec context remains. Receive-side hard errors retain the existing
   next-packet recovery behavior; successful but corrupt driver output is not detected.
 - VAAPI (Linux): `vendor/vaapi-shim` (`osv_vaapi_shim.a`) provides the ~36 `va*` symbols
   FFmpeg's `hwcontext_vaapi.c`/`vaapi_*.c` glue references via its own internal

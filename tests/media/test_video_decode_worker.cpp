@@ -130,7 +130,7 @@ bool test_only_pending_flush(VideoDecodeWorker& w)
     std::lock_guard lock(w.mtx_);
     return w.pending_flush_;
 }
-void test_only_reject_decode_format(VideoDecodeWorker& w)
+void test_only_reject_decode_format(VideoDecodeWorker& w, bool software_available = true)
 {
     // Called before submitting jobs, while the worker is idle. Use FFmpeg's
     // real send-side failure instead of mocking an error return.
@@ -138,6 +138,7 @@ void test_only_reject_decode_format(VideoDecodeWorker& w)
         return AV_PIX_FMT_NONE;
     };
     w.hw_active_ = true;
+    if (!software_available) w.saved_params_->codec_id = AV_CODEC_ID_NONE;
 }
 int test_only_presend_packet(VideoDecodeWorker& w, const AVPacket* packet)
 {
@@ -162,6 +163,21 @@ TEST(video_decode_worker_vp8_send_failure_retries_keyframe_in_software)
     CHECK(timestamps.front() == 0.0);
     for (size_t i = 1; i < timestamps.size(); ++i)
         CHECK(timestamps[i] > timestamps[i - 1]);
+}
+
+TEST(video_decode_worker_failed_software_reopen_still_publishes_eof)
+{
+    Fixture f("vp8_reopen_failure", OSV_MEDIA_FIXTURE_DIR "/tiny_vp8.webm");
+    REQUIRE(f.valid);
+    media::VideoDecodeWorker worker(*f.dec.video_codecpar(), f.dec.video_time_base(), 0);
+    REQUIRE(media::test_only_reopen_software(worker));
+    media::test_only_reject_decode_format(worker, false);
+    while (AVPacket* pkt = f.dec.demux_next_video_packet())
+        worker.submit(pkt, 11);
+    worker.submit(nullptr, 11);
+    std::vector<double> timestamps;
+    REQUIRE(collect_timestamps(worker, 11, timestamps));
+    CHECK(timestamps.empty());
 }
 
 TEST(video_decode_worker_send_eagain_preserves_packet_and_drains_frames)

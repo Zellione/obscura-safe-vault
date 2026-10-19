@@ -162,12 +162,14 @@ hard submission error while hardware is attached reopens the software decoder
 and retries the same retained packet once, preserving the initial keyframe.
 EAGAIN drains available frames and retries the unaccepted packet or EOF marker;
 normal receive processing also drains all available frames. Terminal flush
-failure still publishes EOF so playback cannot wait indefinitely for a result.
+failure still publishes EOF, even if software reopening failed and left no
+codec context, so playback cannot wait indefinitely for a result.
 Packet ownership, secure buffers, and generation tagging remain intact.
 
 Regression coverage includes software-format negotiation, real FFmpeg
 send-side format rejection with all ten VP8 frames recovered, buffered-output
-backpressure, buffered frames at EOF, and the normal hardware-preference path. The
+backpressure, buffered frames at EOF, failed software reopening, and the normal
+hardware-preference path. The
 failure tests do not require GPU hardware. The same VP8 sample remains useful
 for manual runs on machines with VAAPI devices that lack VP8 support.
 

@@ -308,8 +308,7 @@ void VideoDecodeWorker::decode_available_frames(const Job& job, bool is_flush)
 // for that call). Returns false if the codec can no longer be opened at all
 // (extremely unlikely — the same decoder just opened successfully moments
 // ago) — the caller treats codec_ctx_ == nullptr the same as construction
-// failure (run() drops jobs without decoding, per wait_for_job()'s existing
-// contract).
+// failure (run() drops packet jobs but still publishes the EOF marker).
 bool VideoDecodeWorker::reopen_software_only()
 {
     hw_active_ = false;
@@ -340,6 +339,8 @@ void VideoDecodeWorker::run()
 
         if (!codec_ctx_) {
             if (job->pkt) av_packet_free(&job->pkt);
+            else
+                publish_eof(job->generation);
             job_finished();
             continue;
         }

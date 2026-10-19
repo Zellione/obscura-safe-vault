@@ -149,7 +149,7 @@ private:
     friend bool test_only_reopen_software(VideoDecodeWorker& w);
     friend void test_only_force_hw_active(VideoDecodeWorker& w, bool active);
     friend bool test_only_pending_flush(VideoDecodeWorker& w);
-    friend void test_only_reject_decode_format(VideoDecodeWorker& w);
+    friend void test_only_reject_decode_format(VideoDecodeWorker& w, bool software_available);
     friend int test_only_presend_packet(VideoDecodeWorker& w, const AVPacket* packet);
 
     AVCodecContext*        codec_ctx_ = nullptr;
