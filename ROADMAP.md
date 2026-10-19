@@ -16,6 +16,11 @@ production facade benchmarks, and Linux-only cleanup. Validation is in progress.
 
 ## Phase index
 
+Hardware decode fallback follow-up: accept FFmpeg's software pixel format after
+hardware setup rejection, retry failed packet submission in software without
+losing the keyframe, and drain buffered output before retrying input or EOF.
+See the [Phase 43 follow-up](docs/roadmap/phase-43-hardware-video-decode.md#software-fallback-follow-up).
+
 Refactoring audit: prioritized proposals for session ownership, commit semantics,
 SQL transactions, import/gallery decomposition, media helpers, and backend-specific
 test fixtures. See the

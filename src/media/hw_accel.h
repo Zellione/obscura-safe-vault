@@ -3,6 +3,7 @@
 #ifdef OSV_VENDORED_AV
 
 #include <cstdint>
+#include <libavutil/pixfmt.h>
 #include <optional>
 
 struct AVCodecContext;
@@ -41,6 +42,11 @@ enum class HwAccelStatus : uint8_t {
 // Hardware-disabled override (Ctrl+Shift+H, persisted in
 // platform::HwAccelPref): when disabled, this returns false unconditionally.
 [[nodiscard]] bool try_attach_hwaccel(AVCodecContext* ctx, const AVCodec* decoder);
+
+#if defined(OSV_HWACCEL_VAAPI)
+// FFmpeg retries format negotiation without a rejected hardware format.
+[[nodiscard]] AVPixelFormat pick_hw_format(AVCodecContext* ctx, const AVPixelFormat* formats);
+#endif
 
 // Test-only: forces the next try_attach_hwaccel() call (and any
 // already-cached process-wide device context) to behave as if hardware

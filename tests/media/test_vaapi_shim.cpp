@@ -96,4 +96,17 @@ TEST(hwaccel_status_initial_value)
           static_cast<int>(media::hwaccel_status()) == static_cast<int>(media::HwAccelStatus::Ok));
 }
 
+TEST(hwaccel_format_negotiation_falls_back_after_hardware_rejection)
+{
+    const AVPixelFormat initial[] = {AV_PIX_FMT_YUV420P, AV_PIX_FMT_VAAPI, AV_PIX_FMT_NONE};
+    CHECK(media::pick_hw_format(nullptr, initial) == AV_PIX_FMT_VAAPI);
+    // FFmpeg removes VAAPI after a driver rejects this codec/profile.
+    const AVPixelFormat retry[] = {AV_PIX_FMT_CUDA, AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE};
+    CHECK(media::pick_hw_format(nullptr, retry) == AV_PIX_FMT_YUV420P);
+    const AVPixelFormat unsupported[] = {AV_PIX_FMT_CUDA, AV_PIX_FMT_NONE};
+    CHECK(media::pick_hw_format(nullptr, unsupported) == AV_PIX_FMT_NONE);
+    const AVPixelFormat empty[] = {AV_PIX_FMT_NONE};
+    CHECK(media::pick_hw_format(nullptr, empty) == AV_PIX_FMT_NONE);
+}
+
 #endif // OSV_VENDORED_AV && OSV_HWACCEL_VAAPI

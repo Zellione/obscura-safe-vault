@@ -186,16 +186,31 @@ void VideoDecodeWorker::publish_eof(uint64_t generation)
     publish_result(std::move(r));
 }
 
-void VideoDecodeWorker::send_packet(Job& job)
+bool VideoDecodeWorker::send_packet(Job& job)
 {
-    if (job.pkt) {
-        avcodec_send_packet(codec_ctx_, job.pkt);
-        av_packet_free(&job.pkt);
-        flushed_ = false;
-    } else if (!flushed_) {
-        avcodec_send_packet(codec_ctx_, nullptr);  // flush
-        flushed_ = true;
+    const bool is_flush = (job.pkt == nullptr);
+    if (is_flush && flushed_) return true;
+
+    int ret = avcodec_send_packet(codec_ctx_, job.pkt);
+    if (ret == AVERROR(EAGAIN)) {
+        // FFmpeg has buffered output and has NOT accepted this packet (or
+        // flush marker). Drain it before retrying, retaining packet ownership.
+        decode_available_frames(job, false);
+        ret = codec_ctx_ ? avcodec_send_packet(codec_ctx_, job.pkt) : AVERROR(EINVAL);
     }
+    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF && hw_active_) {
+        // send_packet can decode internally and report hardware setup errors
+        // that receive_frame never sees. Retry this same packet after reopening:
+        // dropping the first keyframe would also break subsequent interframes.
+        if (reopen_software_only()) ret = avcodec_send_packet(codec_ctx_, job.pkt);
+    }
+    if (job.pkt) av_packet_free(&job.pkt);
+    if (ret < 0) {
+        if (is_flush) publish_eof(job.generation);
+        return false;
+    }
+    flushed_ = is_flush;
+    return true;
 }
 
 // Converts and publishes the frame just received into frame_. Returns false
@@ -281,9 +296,9 @@ void VideoDecodeWorker::decode_available_frames(const Job& job, bool is_flush)
             if (is_flush) publish_eof(job.generation);
             return;
         }
-        if (!publish_decoded_frame(job)) continue;  // skipped; try the next buffered frame
-        if (is_flush) continue;                     // keep draining after flush; don't return yet
-        return;  // one frame per submitted job, matching decode_from_current_frame() cadence
+        // Drain all available output, including when send_packet returned
+        // EAGAIN: it cannot accept the retained packet until output is consumed.
+        (void)publish_decoded_frame(job);
     }
 }
 
@@ -297,6 +312,7 @@ void VideoDecodeWorker::decode_available_frames(const Job& job, bool is_flush)
 // contract).
 bool VideoDecodeWorker::reopen_software_only()
 {
+    hw_active_ = false;
     if (codec_ctx_) avcodec_free_context(&codec_ctx_);
     const AVCodec* decoder = saved_params_ ? avcodec_find_decoder(saved_params_->codec_id) : nullptr;
     if (!decoder) return false;
@@ -312,7 +328,6 @@ bool VideoDecodeWorker::reopen_software_only()
         avcodec_free_context(&codec_ctx_);
         return false;
     }
-    hw_active_ = false;
     flushed_   = false;
     return true;
 }
@@ -355,8 +370,7 @@ void VideoDecodeWorker::run()
         // codecs need more than one packet before yielding a frame) would
         // be indistinguishable from an actual end-of-stream flush.
         const bool is_flush = (job->pkt == nullptr);
-        send_packet(*job);
-        decode_available_frames(*job, is_flush);
+        if (send_packet(*job)) decode_available_frames(*job, is_flush);
         job_finished();
     }
 }

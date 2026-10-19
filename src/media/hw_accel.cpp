@@ -10,6 +10,7 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/hwcontext.h>
+#include <libavutil/pixdesc.h>
 #include <libavutil/pixfmt.h>
 }
 #if defined(__GNUC__)
@@ -134,14 +135,21 @@ bool decoder_supports_hw(const AVCodec* decoder)
     }
 }
 
+}  // namespace
+
 enum AVPixelFormat pick_hw_format(AVCodecContext*, const enum AVPixelFormat* fmts)
 {
     for (const enum AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; ++p)
         if (*p == kHwPixFmt) return *p;
+    // A working VAAPI device does not imply support for this codec/profile.
+    // FFmpeg retries this callback without VAAPI after setup fails; accept
+    // its first software format so the original keyframe can still decode.
+    for (const enum AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; ++p) {
+        const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(*p);
+        if (desc && !(desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) return *p;
+    }
     return AV_PIX_FMT_NONE;
 }
-} // namespace
-
 bool try_attach_hwaccel(AVCodecContext* ctx, const AVCodec* decoder)
 {
     // Phase 102: user-toggled overrides. Both skip the entire hwaccel path
