@@ -198,11 +198,12 @@ bool VideoDecodeWorker::send_packet(Job& job)
         decode_available_frames(job, false);
         ret = codec_ctx_ ? avcodec_send_packet(codec_ctx_, job.pkt) : AVERROR(EINVAL);
     }
-    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF && hw_active_) {
-        // send_packet can decode internally and report hardware setup errors
-        // that receive_frame never sees. Retry this same packet after reopening:
-        // dropping the first keyframe would also break subsequent interframes.
-        if (reopen_software_only()) ret = avcodec_send_packet(codec_ctx_, job.pkt);
+    // send_packet can decode internally and report hardware setup errors
+    // that receive_frame never sees. Retry this same packet after reopening:
+    // dropping the first keyframe would also break subsequent interframes.
+    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF && hw_active_ &&
+        reopen_software_only()) {
+        ret = avcodec_send_packet(codec_ctx_, job.pkt);
     }
     if (job.pkt) av_packet_free(&job.pkt);
     if (ret < 0) {
