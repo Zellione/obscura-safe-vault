@@ -144,7 +144,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
+          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_7zip.sh', 'vendor/7zip-shim/**') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ui/archive_read_error.h"
+
 // Phase 53: recursive extraction of archives nested inside archives.
 //
 // This header currently carries the naming rules; the depth-first orchestrator
@@ -119,6 +121,8 @@ struct RecursiveTally {
 
 // Backend hooks. `bytes` is the archive buffer being read.
 struct RecursiveHooks {
+    // Detailed decoder failure from the last list/extract call, when available.
+    std::function<ArchiveReadError()> read_error;
     // List an archive's entries. False = unreadable (corrupt / wrong password).
     std::function<bool(std::span<const uint8_t>, ArchiveKind, std::vector<ZipEntry>&)> list_entries;
     // Extract one entry's bytes. False = failed; the entry is tallied and skipped.

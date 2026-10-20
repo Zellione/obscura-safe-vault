@@ -12,7 +12,7 @@ written to a temporary file or disk. The gallery is browsable with a freely
 nestable folder tree, a zoomable full-screen image viewer, and a thumbnail
 strip navigable with arrow keys.
 
-**Stack:** C++23 · SDL3 · SDL_Renderer · Monocypher (XChaCha20-Poly1305 + Argon2id) · stb_image · libwebp / libheif (WebP / HEIC / AVIF) · FFmpeg decode-only (H.264 / H.265 / ProRes / DNxHD / MJPEG / VP8 / VP9 / AV1 / QTRLE / Cinepak video, AAC / Opus / MP3 / Vorbis / FLAC / AC-3 audio) · miniz (ZIP/CBZ) · libarchive (7z/RAR/TAR) · nlohmann/json · premake5 → Ninja
+**Stack:** C++23 · SDL3 · SDL_Renderer · Monocypher (XChaCha20-Poly1305 + Argon2id) · stb_image · libwebp / libheif (WebP / HEIC / AVIF) · FFmpeg decode-only (H.264 / H.265 / ProRes / DNxHD / MJPEG / VP8 / VP9 / AV1 / QTRLE / Cinepak video, AAC / Opus / MP3 / Vorbis / FLAC / AC-3 audio) · miniz (ZIP/CBZ) · 7-Zip (7z/RAR, including solid/encrypted/multipart) · libarchive (TAR/ZipCrypto) · nlohmann/json · premake5 → Ninja
 
 See [`AGENTS.md`](AGENTS.md) for all technology decisions and [`ROADMAP.md`](ROADMAP.md) for the full development plan.
 
@@ -282,7 +282,9 @@ vendor/
   vaapi-shim/  — VAAPI dlopen-forwarding shim (Phase 43 Part 2)
   miniz/       git submodule — ZIP/CBZ import
   json/        git submodule — nlohmann/json (archive meta.json)
-  libarchive/  git submodule — 7z/RAR/TAR import (read-only)
+  libarchive/  git submodule — TAR/ZipCrypto import (read-only)
+  7zip/        git submodule — solid/encrypted 7z/RAR decoding
+  7zip-shim/   private decoder build, secure allocator and key-cache adaptations
   zlib/ xz/    git submodules — libarchive's gzip/LZMA2 filter deps
 tests/         Unit and integration tests (Phase 1+)
 scripts/       setup.sh · gen.sh · build.sh · test.sh · build_codecs.sh ·
@@ -382,3 +384,5 @@ one removes it from the other, so a tag is never both included and excluded.
 - **KDF:** Argon2id — memory-hard, protects against GPU/ASIC password brute-force
 - **Auth:** password + optional keyfile (changing the password re-wraps the master key only)
 - **In-memory only:** decrypted image data is held in `mlock`'d buffers and wiped with `crypto_wipe` on vault lock or app exit — no plaintext ever touches disk
+
+Archive decoder behavior, memory limits, bundled sources and license notices: [ARCHIVE_DECODER.md](docs/ARCHIVE_DECODER.md).

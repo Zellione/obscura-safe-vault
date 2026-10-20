@@ -20,6 +20,16 @@ PKG="osv-${VERSION}-linux-${ARCH}"
 mkdir -p "$STAGE/$PKG"
 
 cp "$BIN" "$STAGE/$PKG/"
+cp "$(dirname "$BIN")/libosv7zip.so" "$STAGE/$PKG/"
+# Supply the exact corresponding decoder sources and build adaptations with
+# the replaceable LGPL/unRAR library, rather than relying on an external URL.
+mkdir -p "$STAGE/$PKG/decoder-source/vendor/7zip" "$STAGE/$PKG/decoder-source/vendor/monocypher" \
+         "$STAGE/$PKG/decoder-source/scripts"
+cp -r vendor/7zip/{C,CPP,DOC} "$STAGE/$PKG/decoder-source/vendor/7zip/"
+cp -r vendor/7zip-shim "$STAGE/$PKG/decoder-source/vendor/"
+cp -r vendor/monocypher/src vendor/monocypher/LICENCE.md "$STAGE/$PKG/decoder-source/vendor/monocypher/"
+cp scripts/build_7zip.sh "$STAGE/$PKG/decoder-source/scripts/"
+cp docs/ARCHIVE_DECODER.md "$STAGE/$PKG/decoder-source/README.md"
 cp -r assets "$STAGE/$PKG/"
 cp LICENSE README.md "$STAGE/$PKG/"
 
@@ -31,6 +41,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 PREFIX="${PREFIX:-$HOME/.local}"
 mkdir -p "$PREFIX/bin" "$PREFIX/share/osv"
 install -m 755 "$HERE/osv" "$PREFIX/bin/osv"
+install -m 755 "$HERE/libosv7zip.so" "$PREFIX/bin/libosv7zip.so"
+cp -r "$HERE/decoder-source" "$PREFIX/share/osv/"
 cp -r "$HERE/assets" "$PREFIX/share/osv/"
 # The binary resolves assets next to itself as a fallback; symlink them in.
 ln -sfn "$PREFIX/share/osv/assets" "$PREFIX/bin/assets"

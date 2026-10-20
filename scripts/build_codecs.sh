@@ -225,4 +225,10 @@ build_ffmpeg() {
 
 build_ffmpeg
 
+if [[ "$ASAN" == true ]]; then
+    "$REPO_ROOT/scripts/build_7zip.sh" --asan
+else
+    "$REPO_ROOT/scripts/build_7zip.sh"
+fi
+
 echo "==> Codecs installed into $CODEC_PREFIX"

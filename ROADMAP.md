@@ -203,7 +203,7 @@ ends; preserve buffered audio and reset EOF on seek/reopen. See the
 | 118 | Rename tags in administration | 🔜 | Vault-wide tag renaming from the overview, preserving assignments, metadata, and saved-search tag conditions. → [details](docs/roadmap/phase-118-tag-renaming.md) |
 | 119 | Split-view cross-vault copy and transfer lifetime safety | 🚧 | Open another vault in F3, copy in either direction, and prevent UI access while transfer workers own the vaults. → [details](docs/roadmap/phase-119-split-vault-copy.md) |
 | 120 | Export gallery folders | 🔜 | Export selected galleries with all nested folders and original media to a chosen destination, with consent, collision suffixing, cancellation, and descriptor-relative safe writes. → [details](docs/roadmap/phase-120-gallery-folder-export.md) |
-| 121 | Multipart archive selection and import counts | 🚧 | Group bulk-selected 7z/RAR volumes into one confirmed import per set; preserve missing-volume refusal and count only attached media. → [details](docs/roadmap/phase-121-multipart-archive-import.md) |
+| 121 | Multipart, solid and encrypted archive import | 🚧 | Group selected volumes; support solid/encrypted 7z and RAR4/5 with secure in-process decoding and password prompts; correct worker password handoff and import counts. → [details](docs/roadmap/phase-121-multipart-archive-import.md) |
 
 ---
 

@@ -44,7 +44,11 @@ public:
     // opens, not O(entries).
     [[nodiscard]] size_t opens() const noexcept { return opens_; }
 
+    [[nodiscard]] ArchiveReadError error() const noexcept { return error_; }
+    void note_error(ArchiveReadError error) noexcept { error_ = error; }
+
 private:
+    ArchiveReadError error_ = ArchiveReadError::None;
     struct Key {
         const uint8_t* data;
         size_t         size;

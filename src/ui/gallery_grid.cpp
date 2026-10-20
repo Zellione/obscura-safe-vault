@@ -45,6 +45,9 @@
 #include "ui/waste_threshold.h"
 #include "ui/widgets.h"
 #include "ui/zip_import.h"
+#ifdef OSV_VENDORED_ARCHIVE
+#include "ui/sevenzip_reader.h"
+#endif
 #include "vault/file_util.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -1440,6 +1443,27 @@ void GalleryGrid::process_next_queued_zip_import()
     return names;   // empty on error: a set simply is not detected
 }
 
+// Header probing reads the complete source set and never extracts a file.
+// Header-encrypted archives report PasswordRequired; visible headers expose
+// per-entry encryption even when Open succeeds without a password.
+[[nodiscard]] bool archive_needs_password(std::span<const std::filesystem::path> paths)
+{
+#ifdef OSV_VENDORED_ARCHIVE
+    SevenZipReader probe;
+    (void)probe.open_files(paths, {});
+    return probe.encrypted();
+#else
+    (void)paths;
+    return false;
+#endif
+}
+
+[[nodiscard]] bool archive_needs_password(const std::filesystem::path& path, std::string_view ext)
+{
+    return ext == ".zip" || ext == ".cbz" ? ui::zip_is_encrypted(path)
+                                           : archive_needs_password(std::span(&path, 1));
+}
+
 // The set was confirmed: carry on into the normal gallery-name prompt. The
 // stashed volume_set is what makes do_zip_import enqueue the whole set.
 void GalleryGrid::continue_volume_set_naming()
@@ -1460,9 +1484,7 @@ void GalleryGrid::continue_volume_set_naming()
         naming_.buf.set_text(platform::path_to_utf8(platform::utf8_to_path(naming_.zip.volume_set.stem).stem()));
         naming_.zip.cbz             = cbz;
         naming_.zip.archive_backend = archive_backend;
-        // A split set's encryption cannot be probed from one volume, so the
-        // password path is not offered here.
-        naming_.zip.needs_password  = false;
+        naming_.zip.needs_password = archive_needs_password(naming_.zip.volume_paths);
         naming_.zip.active          = true;
     }
     mark_dirty();
@@ -1495,7 +1517,7 @@ void GalleryGrid::handle_single_archive_for_naming(const std::filesystem::path& 
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     auto [cbz, archive_backend] = classify_archive_ext(ext);
 
-    const bool needs_password = (ext == ".zip" || ext == ".cbz") && ui::zip_is_encrypted(zp);
+    const bool needs_password = archive_needs_password(zp, ext);
     if (needs_password) archive_backend = true;
 
     const std::string gallery_name = archive_backend
@@ -1529,7 +1551,7 @@ void GalleryGrid::handle_multiple_archives_enqueue(const std::vector<std::string
                                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         auto [cbz, archive_backend] = classify_archive_ext(ext);
 
-        const bool needs_password = (ext == ".zip" || ext == ".cbz") && ui::zip_is_encrypted(zp);
+        const bool needs_password = archive_needs_password(zp, ext);
         if (needs_password) archive_backend = true;
 
         const std::string gallery_name = archive_backend
@@ -1615,7 +1637,8 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path)
     if (!naming_.zip.volume_paths.empty()) {
         // Phase 53: the whole set imports as one archive; the worker assembles.
         queue_.enqueue_volume_set(naming_.zip.volume_paths, naming_.zip.volume_set.style,
-                                  naming_.zip.volume_set.stem, base_gallery, gallery_name, kind);
+                                  naming_.zip.volume_set.stem, base_gallery, gallery_name, kind,
+                                  password_bytes(naming_.password.buf));
         naming_.zip.volume_set = {};
         naming_.zip.volume_paths.clear();
     } else {
@@ -1624,6 +1647,8 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path)
                                naming_.zip.needs_password,
                                password_bytes(naming_.password.buf));
     }
+
+    naming_.password.buf.clear();
 
     // Phase 51 Task 14: process next encrypted archive from bulk pick (if any)
     if (!naming_.zip.queued_archives.empty()) {

@@ -4,6 +4,7 @@
 
 #include "crypto/secure_mem.h"
 #include "ui/zip_plan.h"
+#include "ui/sevenzip_reader.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,22 +17,11 @@ struct archive;  // libarchive opaque handle (full type only in the .cpp)
 
 namespace ui {
 
-// Thin wrapper over libarchive's streaming read API (Phase 34): read-only
-// access to 7z/RAR/TAR (+ gzip/xz-compressed TAR) archives entirely from an
-// in-memory buffer — no temp file, matching the ZIP/CBZ path's invariant #1
-// discipline. libarchive's read API is STREAMING ONLY (sequential
-// archive_read_next_header/archive_read_data, no random access by index like
-// miniz's central-directory reader), so open() does one forward pass to
-// snapshot the entry list, and extract() holds a forward cursor: an open
-// stream positioned just past the last extracted entry. Ascending extracts —
-// the import loop's access pattern — continue that stream, so a full import
-// is ONE pass over the archive; a target behind the cursor transparently
-// reopens from the start. (Reopening per extract instead would re-decompress
-// the whole prefix each time — O(n^2) total, ~150x slower than the zip path
-// on a 150-entry solid 7z — while decompressing every entry up front could
-// blow past mlock limits for a many-page archive.) ArchiveReader keeps its
-// own copy of the source bytes so a re-scan is always possible after open()
-// returns.
+// Read-only in-memory archive access. 7z/RAR use the extraction-only 7-Zip
+// decoder; TAR and encrypted ZIP retain libarchive. Both hold a forward cursor
+// across ascending extracts, so solid archives take one decompression pass.
+// Backward requests restart that pass. Source copies use wiping SecureBytes;
+// neither backend extracts plaintext to disk.
 // True if `msg` (a libarchive archive_error_string()) indicates the extract
 // failed specifically because of a missing/wrong password, as opposed to any
 // other reason (corrupt entry, an encryption flavor this build's libarchive
@@ -62,8 +52,8 @@ public:
 
     // Open a multi-volume archive using file paths (Phase 53: RAR multi-volume
     // support). `volumes` is a span of ordered volume paths (part 1, part 2, ...
-    // in sequence). Uses libarchive's file-oriented API (archive_read_open_filenames)
-    // which supports RAR4/5 multivolume. Returns false if the volume list is empty,
+    // in sequence). 7z volumes form a seekable concatenation; RAR4/5 volumes
+    // are opened individually by the decoder's ordered-volume callback. Returns false if the volume list is empty,
     // a path doesn't exist, isn't readable, isn't RAR, or the volumes are out of order.
     // Paths must be properly normalized before calling (see platform::normalize_user_path).
     [[nodiscard]] bool open_files(std::span<const std::filesystem::path> volumes,
@@ -92,7 +82,17 @@ public:
     // since the last open()/open_files(). Observable for the forward-cursor
     // perf contract (ascending extracts share one stream); asserted by tests,
     // no UI use.
-    [[nodiscard]] size_t stream_opens() const noexcept { return stream_opens_; }
+    [[nodiscard]] size_t stream_opens() const noexcept
+    {
+        return sevenzip_ ? sevenzip_->stream_opens() : stream_opens_;
+    }
+    [[nodiscard]] ArchiveReadError error() const noexcept
+    {
+        if (sevenzip_) return sevenzip_->error();
+        if (!needs_password_) return ArchiveReadError::None;
+        return passphrase_.empty() ? ArchiveReadError::PasswordRequired : ArchiveReadError::WrongPassword;
+    }
+    [[nodiscard]] bool encrypted() const { return sevenzip_ && sevenzip_->encrypted(); }
 
     // Sanity cap on a single entry's decompressed size: large enough for any
     // real photo/video, small enough that a corrupt or hostile archive
@@ -118,7 +118,7 @@ private:
     // extract had its own stream), on re-open, and from the destructor.
     void reset_stream() const noexcept;
 
-    std::vector<uint8_t>  data_;
+    crypto::SecureBytes  data_;
     std::vector<ZipEntry> entries_;
     // Non-empty (with a trailing NUL byte, since SecureBytes zero-initialises
     // on resize) only when open() was given a passphrase. extract()'s
@@ -139,6 +139,7 @@ private:
     // File paths for file-oriented archives (Phase 53: multi-volume RAR support).
     // If non-empty, extract() uses these paths; otherwise uses data_.
     std::vector<std::filesystem::path> file_paths_;
+    std::unique_ptr<SevenZipReader> sevenzip_;
 
 };
 

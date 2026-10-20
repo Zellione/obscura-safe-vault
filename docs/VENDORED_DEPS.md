@@ -18,7 +18,8 @@ This document tracks the pinned versions of all vendored third-party libraries a
 | **nlohmann/json** | v3.12.0 | Header-only JSON parsing (archive `meta.json`, Phase 27) | **Yes** |
 | **zlib** | 1.3.2 | gzip filter for libarchive (`.tar.gz`) | **Yes** |
 | **xz / liblzma** | 5.8.3 | LZMA2 filter for libarchive (`.7z`, `.txz`) | **Yes** |
-| **libarchive** | 3.8.8 | 7z/RAR/TAR archive read (decode-only; Phase 34) | **Yes** |
+| **libarchive** | 3.8.8 | TAR/ZipCrypto archive read (decode-only) | **Yes** |
+| **7-Zip** | 26.04 (`9128b80e3a471108678e2b3ec3c985861c8d7b0f`) | Solid/encrypted 7z/RAR4/5 extraction-only shared library; [memory adaptations and LGPL/unRAR notices](ARCHIVE_DECODER.md) | **Yes** |
 | **libva** | 2.22.0 (217da1c) | VA-API public headers only (Linux hardware video decode, Phase 43 Part 2) — never built; `vendor/vaapi-shim` dlopens the real `libva.so.2`/`libva-drm.so.2` at runtime instead of linking them | No |
 | **SQLCipher** | 4.19.0 (c4b275a4) | Phase 105 encrypted SQLite validation; v3 metadata database in Phase 107 | **Yes** |
 | **OpenSSL** | 3.5.8 LTS (f4dc4d58) | Static provider; only `libcrypto` is linked by SQLCipher; apps/modules/legacy provider disabled | **Yes** |

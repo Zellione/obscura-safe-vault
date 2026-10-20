@@ -58,8 +58,14 @@ $TSAN && PREMAKE_OPTS+=("--tsan")
 # dependency build because the spike has no shared application connections.
 if [[ "$ASAN" == true ]]; then
     "$REPO_ROOT/scripts/build_sqlcipher.sh" --asan
+    "$REPO_ROOT/scripts/build_7zip.sh" --asan
 else
     "$REPO_ROOT/scripts/build_sqlcipher.sh"
+    if [[ "$TSAN" == true ]]; then
+        "$REPO_ROOT/scripts/build_7zip.sh" --tsan
+    else
+        "$REPO_ROOT/scripts/build_7zip.sh"
+    fi
 fi
 
 # Sanitizer binaries build into their own directories (build/bin/Debug-asan, …)

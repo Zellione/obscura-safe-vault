@@ -17,6 +17,141 @@ using archivetest::read_file;
 using archivetest::make_encrypted_zip;
 using archivetest::uudecode;
 
+TEST(archive_reader_encrypted_7z_with_and_without_encrypted_headers)
+{
+    const auto fixtures = std::filesystem::path(OSV_UI_FIXTURE_DIR) /
+                          "../../../vendor/libarchive/libarchive/test";
+    for (const auto* name : {"test_read_format_7zip_encryption.7z",
+                             "test_read_format_7zip_encryption_header.7z"}) {
+        const auto path = fresh_path(name);
+        uudecode(fixtures / (std::string(name) + ".uu"), path);
+        ui::ArchiveReader reader;
+        REQUIRE(reader.open(read_file(path), "12345678"));
+        REQUIRE(reader.entries().size() == 1);
+        crypto::SecureBytes bytes;
+        REQUIRE(reader.extract(0, bytes));
+        CHECK_EQ(bytes.size(), size_t{4});
+        CHECK(std::memcmp(bytes.data(), "foo\n", 4) == 0);
+        std::filesystem::remove(path);
+    }
+}
+
+TEST(archive_reader_solid_encrypted_rar4_and_rar5)
+{
+    const auto fixtures = std::filesystem::path(OSV_UI_FIXTURE_DIR) /
+                          "../../../vendor/libarchive/libarchive/test";
+    for (const auto* name : {"test_read_format_rar4_solid_encrypted.rar",
+                             "test_read_format_rar4_solid_encrypted_filenames.rar",
+                             "test_read_format_rar5_solid_encrypted.rar",
+                             "test_read_format_rar5_solid_encrypted_filenames.rar"}) {
+        const auto path = fresh_path(name);
+        uudecode(fixtures / (std::string(name) + ".uu"), path);
+        ui::ArchiveReader reader;
+        REQUIRE(reader.open(read_file(path), "password"));
+        REQUIRE(reader.entries().size() == 4);
+        for (size_t i = 0; i < 4; ++i) {
+            crypto::SecureBytes bytes;
+            REQUIRE(reader.extract(i, bytes));
+            const std::string expected = "This is from " + reader.entries()[i].path;
+            REQUIRE(bytes.size() == expected.size());
+            CHECK(std::memcmp(bytes.data(), expected.c_str(), bytes.size()) == 0);
+        }
+        CHECK_EQ(reader.stream_opens(), size_t{1});
+        std::filesystem::remove(path);
+    }
+}
+
+extern "C" size_t osv7zip_live_bytes();
+
+TEST(archive_reader_encrypted_failures_release_no_plaintext_or_cached_keys)
+{
+    const auto fixtures = std::filesystem::path(OSV_UI_FIXTURE_DIR) /
+                          "../../../vendor/libarchive/libarchive/test";
+    for (const auto* name : {"test_read_format_7zip_encryption.7z",
+                             "test_read_format_7zip_encryption_header.7z",
+                             "test_read_format_rar4_solid_encrypted.rar",
+                             "test_read_format_rar4_solid_encrypted_filenames.rar",
+                             "test_read_format_rar5_solid_encrypted.rar",
+                             "test_read_format_rar5_solid_encrypted_filenames.rar"}) {
+        const auto path = fresh_path(name);
+        uudecode(fixtures / (std::string(name) + ".uu"), path);
+        const auto source = read_file(path);
+        const size_t baseline = osv7zip_live_bytes();
+        for (const auto password : {std::string_view{}, std::string_view{"wrong"}}) {
+            ui::ArchiveReader reader;
+            crypto::SecureBytes out(8);
+            const bool opened = reader.open(source, password);
+            if (opened) {
+                REQUIRE(reader.encrypted());
+                CHECK_FALSE(reader.extract(0, out));
+                CHECK(out.empty());
+            }
+            CHECK(reader.error() == (password.empty() ? ui::ArchiveReadError::PasswordRequired
+                                                       : ui::ArchiveReadError::WrongPassword));
+        }
+        CHECK_EQ(osv7zip_live_bytes(), baseline);
+        {
+            ui::ArchiveReader reader;
+            REQUIRE(reader.open(source, std::string_view(name).contains("7zip") ? "12345678" : "password"));
+            crypto::SecureBytes out;
+            REQUIRE(reader.extract(0, out));
+            const auto expected = std::vector<uint8_t>(out.as_span().begin(), out.as_span().end());
+            REQUIRE(reader.extract(0, out)); // rewind/restart a solid stream
+            CHECK_BYTES_EQ(out.as_span(), expected);
+            // Destruction while the producer is waiting for the next entry
+            // must cancel/join it, wipe its dictionary, and retain no key cache.
+        }
+        CHECK_EQ(osv7zip_live_bytes(), baseline);
+        std::filesystem::remove(path);
+    }
+}
+
+TEST(archive_reader_damaged_encrypted_payload_is_not_released)
+{
+    const auto path = fresh_path("damaged-encrypted.7z");
+    uudecode(std::filesystem::path(OSV_UI_FIXTURE_DIR) / "encrypted-photo.7z.uu", path);
+    auto source = read_file(path);
+    REQUIRE(source.size() > 64);
+    source[40] ^= 0x80; // ciphertext after the fixed 32-byte start header
+    ui::ArchiveReader reader;
+    REQUIRE(reader.open(source, "password"));
+    crypto::SecureBytes out(8);
+    CHECK_FALSE(reader.extract(0, out));
+    CHECK(out.empty());
+    CHECK(reader.error() != ui::ArchiveReadError::None);
+    std::filesystem::remove(path);
+}
+
+TEST(archive_reader_split_solid_7z_with_unicode_password)
+{
+    const auto path = fresh_path("solid-encrypted.7z");
+    uudecode(std::filesystem::path(OSV_UI_FIXTURE_DIR) / "solid-encrypted-photos.7z.uu", path);
+    const auto source = read_file(path);
+    const auto first = fresh_path("solid-encrypted.7z.001");
+    const auto second = fresh_path("solid-encrypted.7z.002");
+    const size_t middle = source.size() / 2;
+    std::ofstream(first, std::ios::binary).write(reinterpret_cast<const char*>(source.data()),
+                                                static_cast<std::streamsize>(middle));
+    std::ofstream(second, std::ios::binary).write(reinterpret_cast<const char*>(source.data() + middle),
+                                                 static_cast<std::streamsize>(source.size() - middle));
+    const std::vector<std::filesystem::path> paths{first, second};
+    ui::ArchiveReader reader;
+    REQUIRE(reader.open_files(paths, "päss🔐"));
+    REQUIRE(reader.entries().size() == 3);
+    for (size_t i = 0; i < 3; ++i) {
+        crypto::SecureBytes out;
+        REQUIRE(reader.extract(i, out));
+        const auto expected = fake_bytes(static_cast<uint8_t>(i), 200);
+        CHECK_BYTES_EQ(out.as_span(), expected);
+    }
+    CHECK_EQ(reader.stream_opens(), size_t{1});
+    crypto::SecureBytes out;
+    REQUIRE(reader.extract(0, out));
+    CHECK_BYTES_EQ(out.as_span(), fake_bytes(0, 200));
+    CHECK_EQ(reader.stream_opens(), size_t{2});
+    for (const auto& file : {path, first, second}) std::filesystem::remove(file);
+}
+
 TEST(archive_reader_opens_tar_and_lists_entries)
 {
     auto bytes = read_file(make_archive({{"a.jpg", fake_bytes(1)}, {"sub/b.jpg", fake_bytes(2)}},

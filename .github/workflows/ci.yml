@@ -99,7 +99,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
+          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_7zip.sh', 'vendor/7zip-shim/**') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -126,7 +126,17 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: osv-linux-debug
-          path: build/bin/Debug/osv
+          path: |
+            build/bin/Debug/osv
+            build/bin/Debug/libosv7zip.so
+            vendor/7zip/C/
+            vendor/7zip/CPP/
+            vendor/7zip/DOC/
+            vendor/7zip-shim/
+            vendor/monocypher/src/
+            vendor/monocypher/LICENCE.md
+            scripts/build_7zip.sh
+            docs/ARCHIVE_DECODER.md
           retention-days: 7
 
       # -----------------------------------------------------------------------
@@ -202,7 +212,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
+          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_7zip.sh', 'vendor/7zip-shim/**') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -271,11 +281,14 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
+          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_7zip.sh', 'vendor/7zip-shim/**') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
         run: scripts/build_codecs.sh
+
+      - name: Build archive decoder (ASAN)
+        run: scripts/build_7zip.sh --asan
 
       - name: Generate Ninja build files (--asan)
         run: bin/premake5 --asan ninja --cc=gcc
@@ -346,11 +359,14 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
+          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_7zip.sh', 'vendor/7zip-shim/**') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
         run: scripts/build_codecs.sh
+
+      - name: Build archive decoder (TSan)
+        run: scripts/build_7zip.sh --tsan
 
       - name: Generate Ninja build files (--tsan)
         run: bin/premake5 --tsan ninja --cc=gcc
@@ -416,11 +432,14 @@ jobs:
         id: cache-codecs-asan
         with:
           path: vendor/codecs-prefix-asan
-          key: codecs-asan-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
+          key: codecs-asan-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_7zip.sh', 'vendor/7zip-shim/**') }}-${{ runner.arch }}
 
       - name: Build ASAN-instrumented vendored codecs
         if: steps.cache-codecs-asan.outputs.cache-hit != 'true'
         run: scripts/build_codecs.sh --asan
+
+      - name: Build archive decoder (ASAN)
+        run: scripts/build_7zip.sh --asan
 
       - name: Generate Ninja build files (--asan)
         run: bin/premake5 --asan ninja --cc=gcc
@@ -597,7 +616,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
+          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_7zip.sh', 'vendor/7zip-shim/**') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: env.SONAR_TOKEN != '' && steps.cache-codecs.outputs.cache-hit != 'true'

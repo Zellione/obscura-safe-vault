@@ -958,6 +958,7 @@ void ImportQueue::worker_loop()
         std::string                        task_volume_stem;
         std::string                        task_display_name;
         std::function<void()>              task_hook;
+        crypto::SecureBytes                task_password;
 
         {
             std::unique_lock lock(mu_);
@@ -980,12 +981,13 @@ void ImportQueue::worker_loop()
             // Phase 53: the volume list must ride along, or a multi-volume task
             // reaches the worker with nothing to assemble and silently imports
             // its first volume as if it were a whole archive.
-            for (const Task& t : tasks_) {
+            for (Task& t : tasks_) {
                 if (t.id == task_id) {
                     task_volumes      = t.volumes;
                     task_volume_style = t.volume_style;
                     task_volume_stem  = t.volume_stem;
                     task_display_name = t.display_name;
+                    task_password = std::move(t.password);
                     break;
                 }
             }
@@ -1004,7 +1006,7 @@ void ImportQueue::worker_loop()
             .volume_style = task_volume_style,
             .volume_stem = std::move(task_volume_stem),
             .gallery_name = std::move(task_gallery_name),
-            .password = {},
+            .password = std::move(task_password),
             .state = ImportTaskState::Running,
             .imported = 0,
             .skipped = 0,
@@ -1290,7 +1292,7 @@ void ImportQueue::process_archive_task(Task& task)
 
     if (outcome.needs_password) {
         task.state = Failed;
-        task.error = "Wrong or missing archive password";
+        task.error = outcome.error.empty() ? "Wrong or missing archive password" : outcome.error;
     } else if (!outcome.ok && !outcome.cancelled) {
         task.state = Failed;
         task.error = outcome.error;

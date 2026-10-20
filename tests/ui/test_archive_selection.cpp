@@ -23,6 +23,9 @@ struct ArchiveSelectionTestPeer {
     }
     static bool confirming(const GalleryGrid& grid) { return grid.volume_dialog_.active(); }
     static bool naming(const GalleryGrid& grid) { return grid.naming_.active; }
+    static std::string name(const GalleryGrid& grid) { return grid.naming_.buf.str(); }
+    static bool password_prompt(const GalleryGrid& grid) { return grid.naming_.password.active; }
+    static void password(GalleryGrid& grid) { grid.naming_.password.buf.set_text("password"); }
     static bool pending_import(const GalleryGrid& grid) { return grid.naming_.zip.active; }
 };
 } // namespace ui
@@ -101,6 +104,66 @@ TEST(archive_selection_confirms_each_set_once_and_refuses_gaps)
         crypto::SecureBytes restored;
         REQUIRE(vault.read_image(*photo, restored) == vault::VaultResult::Ok);
         CHECK_BYTES_EQ(restored.as_span(), original);
+        grid.on_exit();
+        queue.end_session();
+    }
+    ziptest::cleanup_dir(dir);
+}
+
+TEST(archive_selection_encrypted_single_and_split_prompt_then_import)
+{
+    const auto dir = ziptest::fresh_dir("archive_selection_encrypted");
+    const auto single = dir / "Single.7z";
+    archivetest::uudecode(std::filesystem::path(OSV_UI_FIXTURE_DIR) /
+                         "encrypted-headers-photo.7z.uu", single);
+    const auto bytes = archivetest::read_file(single);
+    const auto first = dir / "Split.7z.001";
+    const auto second = dir / "Split.7z.002";
+    const size_t middle = bytes.size() / 2;
+    std::ofstream(first, std::ios::binary).write(reinterpret_cast<const char*>(bytes.data()),
+                                                static_cast<std::streamsize>(middle));
+    std::ofstream(second, std::ios::binary).write(reinterpret_cast<const char*>(bytes.data() + middle),
+                                                 static_cast<std::streamsize>(bytes.size() - middle));
+    {
+        vault::Vault vault;
+        REQUIRE(vaulttest::make_directory_vault(vault, dir / "vault.osv"));
+        vault::CommitLane lane;
+        lane.start(vault);
+        vault.set_commit_router(&lane);
+        ui::ImportQueue queue;
+        queue.begin_session(vault, lane);
+        platform::VaultRegistry registry(dir / "vaults.list");
+        gfx::Window window;
+        gfx::FontAtlas font;
+        gfx::TextureCache cache(nullptr);
+        platform::FileDialog files;
+        platform::FolderDialog folders;
+        ui::GallerySessionState session;
+        ui::GalleryGrid grid({window, font, vault, cache}, {files, folders},
+                             {registry, (dir / "vault.osv").string(), nullptr}, session, queue);
+        grid.on_enter();
+        ui::ArchiveSelectionTestPeer::pick(grid, {single.string(), second.string(), first.string()});
+        REQUIRE(ui::ArchiveSelectionTestPeer::password_prompt(grid));
+        CHECK(queue.snapshot().empty());
+        ui::ArchiveSelectionTestPeer::password(grid);
+        press(grid, SDLK_RETURN);
+        REQUIRE(ui::ArchiveSelectionTestPeer::confirming(grid));
+        press(grid, SDLK_RETURN);
+        REQUIRE(ui::ArchiveSelectionTestPeer::naming(grid));
+        CHECK_EQ(ui::ArchiveSelectionTestPeer::name(grid), std::string("split"));
+        press(grid, SDLK_RETURN);
+        REQUIRE(ui::ArchiveSelectionTestPeer::password_prompt(grid));
+        ui::ArchiveSelectionTestPeer::password(grid);
+        press(grid, SDLK_RETURN);
+        REQUIRE(importtest::drain_until_idle(queue));
+        const auto rows = queue.snapshot();
+        REQUIRE(rows.size() == 2);
+        for (const auto& row : rows) {
+            CHECK(row.state == ui::ImportTaskState::Done);
+            CHECK_EQ(row.imported, 1);
+        }
+        CHECK(vault.resolve_node("Single/photo.jpg") != nullptr);
+        CHECK(vault.resolve_node("split/photo.jpg") != nullptr);
         grid.on_exit();
         queue.end_session();
     }

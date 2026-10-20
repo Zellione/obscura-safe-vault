@@ -14,6 +14,14 @@
 namespace ui {
 namespace {
 
+void set_read_error(const ArchiveReader& reader, ZipImportOutcome& out, std::string_view fallback)
+{
+    const auto error = reader.error();
+    out.error = error == ArchiveReadError::None ? std::string(fallback)
+                                               : std::string(archive_read_error_text(error));
+    out.needs_password = reader.extract_failed_needs_password();
+}
+
 // Read `path` into memory and open an ArchiveReader over it. On failure sets
 // out.error and returns false — mirrors zip_import.cpp's open_archive.
 bool open_archive(const std::filesystem::path& path, const char* tag,
@@ -22,7 +30,7 @@ bool open_archive(const std::filesystem::path& path, const char* tag,
 {
     if (std::vector<uint8_t> bytes;
         !read_whole_file(path, bytes) || !reader.open(bytes, password)) {
-        out.error = "Could not open archive";
+        set_read_error(reader, out, "Could not open archive");
         platform::safe_println(stderr, "[{}] open failed: {}", tag, platform::path_to_utf8(path));
         return false;
     }
@@ -71,6 +79,8 @@ void import_one(MediaSink& sink, const ArchiveReader& reader, const ZipPlacement
 {
     crypto::SecureBytes bytes;  // mlock'd; wiped on scope exit
     if (!reader.extract(pl.entry_index, bytes)) {
+        if (reader.error() != ArchiveReadError::None)
+            set_read_error(reader, out, "Could not extract archive entry");
         ++out.skipped;
         return;
     }
@@ -136,8 +146,9 @@ void run_placements(MediaSink& sink, const ArchiveReader& reader, const ZipPlan&
         }
         import_one(sink, reader, pl, root_gallery, out);
         if (progress) progress->done.fetch_add(1);
+        if (!out.error.empty()) break;
     }
-    out.ok = true;
+    out.ok = out.error.empty();
 }
 
 }  // namespace
@@ -180,7 +191,7 @@ ZipImportOutcome import_archive_volumes(MediaSink&                             s
 
     ArchiveReader reader;
     if (!reader.open_files(volumes, pw.password)) {
-        out.error = "Could not open the multi-volume archive";
+        set_read_error(reader, out, "Could not open the multi-volume archive");
         return out;
     }
 

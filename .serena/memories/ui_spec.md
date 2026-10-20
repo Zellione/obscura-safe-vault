@@ -423,6 +423,14 @@ single archives still enqueue immediately during a bulk pick.
 
 ### Lock confirm modal (Phase 50)
 Manual lock, vault switch, or quit with pending queue: default-cancel modal reads **"N imports pending — finish current file, discard the rest, and lock?"**
+7z/RAR encryption is probed over the complete ordered source set before import.
+Encrypted contents or hidden filenames trigger the existing masked password
+prompt after naming/volume confirmation. Correct passwords move into worker
+ownership; the field clears after enqueue. Missing/wrong passwords fail the queue
+task with a useful error. Some encrypted-data damage is indistinguishable from a
+wrong password and the diagnostic says both. Decoder opaque scratch marks F1's
+secure-memory status degraded; no extraction-to-disk fallback exists.
+
 On confirm (Y): current file completes, queue discarded, final commit-lane flush, passwords/keys wiped.
 SDL_EVENT_QUIT also flows through this gate.
 
