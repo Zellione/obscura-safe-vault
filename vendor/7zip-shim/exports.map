@@ -1,0 +1,11 @@
+{
+  global:
+    CreateObject;
+    SysAllocStringLen;
+    SysFreeString;
+    SysStringLen;
+    VariantClear;
+    osv7zip_memory_degraded;
+    osv7zip_live_bytes;
+  local: *;
+};

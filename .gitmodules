@@ -50,3 +50,6 @@
 [submodule "vendor/openssl"]
 	path = vendor/openssl
 	url = https://github.com/openssl/openssl.git
+[submodule "vendor/7zip"]
+	path = vendor/7zip
+	url = https://github.com/ip7z/7zip.git

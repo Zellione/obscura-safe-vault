@@ -5,7 +5,9 @@
 
 #include <cstdio>
 #include <format>
+#include <map>
 #include <optional>
+#include <set>
 #include <span>
 
 namespace ui {
@@ -43,6 +45,35 @@ namespace {
 }
 
 } // namespace
+
+std::vector<ArchiveSelection> plan_archive_selection(
+    std::span<const std::filesystem::path> paths)
+{
+    std::vector<ArchiveSelection> sources;
+    std::map<std::filesystem::path, std::vector<std::string>> listings;
+    std::set<std::filesystem::path> claimed;
+    for (const auto& path : paths) {
+        const auto picked = path.lexically_normal();
+        if (claimed.contains(picked)) continue;
+        const auto parent = picked.parent_path();
+        auto [it, inserted] = listings.try_emplace(parent);
+        if (inserted) {
+            std::error_code ec;
+            const std::filesystem::directory_iterator end;
+            for (std::filesystem::directory_iterator entry(parent.empty() ? "." : parent, ec);
+                 !ec && entry != end; entry.increment(ec)) {
+                it->second.push_back(platform::path_to_utf8(entry->path().filename()));
+            }
+        }
+        auto volumes = detect_volume_set(platform::path_to_utf8(picked.filename()), it->second);
+        claimed.insert(picked);
+        for (const auto& name : volumes.volumes) {
+            claimed.insert((parent / platform::utf8_to_path(name)).lexically_normal());
+        }
+        sources.emplace_back(picked, std::move(volumes));
+    }
+    return sources;
+}
 
 VolumeSetSummary summarize_volume_set(const VolumeSet& set)
 {

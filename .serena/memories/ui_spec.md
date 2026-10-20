@@ -402,6 +402,11 @@ Picking any volume of a split set (`.7z.001`, `.z01`, `.partN.rar`, `.r00`, …)
 auto-discovers its siblings from the containing directory and opens
 `VolumeSetDialog` BEFORE anything is enqueued — importing a 40-part set is not
 something to do silently off one click.
+Bulk archive picks group selected parts into one set, including unselected siblings,
+and show this same confirmation once per set, followed by its gallery-name prompt.
+Cancelling a volume confirmation advances to the next deferred archive; cancelling
+the naming/password prompt abandons the remaining deferred picks. Ordinary unencrypted
+single archives still enqueue immediately during a bulk pick.
 - **Body:** heading `"Import N volumes as one archive?"`, then the volume names
   in VOLUME order (not sorted — a spanned zip's `.zip` is last, old-style RAR's
   `.rar` is first). Long sets show the first 8 and elide the rest as
@@ -418,6 +423,14 @@ something to do silently off one click.
 
 ### Lock confirm modal (Phase 50)
 Manual lock, vault switch, or quit with pending queue: default-cancel modal reads **"N imports pending — finish current file, discard the rest, and lock?"**
+7z/RAR encryption is probed over the complete ordered source set before import.
+Encrypted contents or hidden filenames trigger the existing masked password
+prompt after naming/volume confirmation. Correct passwords move into worker
+ownership; the field clears after enqueue. Missing/wrong passwords fail the queue
+task with a useful error. Some encrypted-data damage is indistinguishable from a
+wrong password and the diagnostic says both. Decoder opaque scratch marks F1's
+secure-memory status degraded; no extraction-to-disk fallback exists.
+
 On confirm (Y): current file completes, queue discarded, final commit-lane flush, passwords/keys wiped.
 SDL_EVENT_QUIT also flows through this gate.
 

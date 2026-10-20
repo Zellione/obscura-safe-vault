@@ -118,3 +118,12 @@ OSV_CONVERSION_BENCH=100000 build/bin/Release/osv_tests legacy_converter_tiny_me
 ```
 Tiny originals; reports conversion wall time and metadata batch count, excluding
 source fixture construction. Temporary encrypted vaults are removed after each run.
+
+## Archive decoder (Phase 121)
+
+- `scripts/build_7zip.sh [--asan|--tsan]`: build the extraction-only private shared
+  decoder; refresh existing matching app/test copies as well as the prefix.
+- Normal build/test/setup scripts call it automatically. The library lives next
+  to `osv`/`osv_tests`; keep it when copying a runnable binary.
+- `scripts/package.sh` bundles `libosv7zip.so`, license notices and complete
+  decoder rebuild sources. `docs/ARCHIVE_DECODER.md` explains replacement.

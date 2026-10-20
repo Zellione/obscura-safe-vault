@@ -48,6 +48,29 @@ ZipImportOutcome import_archive_bytes_recursive(MediaSink& sink, std::span<const
 
     RecursiveHooks hooks = make_recursive_hooks(sink, sink_root, password);
 
+    // Nested password failures remain per-branch skips. A failure in the picked
+    // archive itself must be reported as a failed import, including failures
+    // after its (possibly unencrypted) header was successfully listed.
+    ArchiveReadError root_error = ArchiveReadError::None;
+    const auto capture_error = [&](std::span<const uint8_t> source, bool ok) {
+        if (!ok && source.data() == bytes.data() && source.size() == bytes.size() && hooks.read_error)
+            root_error = hooks.read_error();
+        return ok;
+    };
+    auto list = hooks.list_entries;
+    hooks.list_entries = [list, capture_error](auto source, auto type, auto& entries) {
+        return capture_error(source, list(source, type, entries));
+    };
+    auto extract = hooks.extract_entry;
+    hooks.extract_entry = [extract, capture_error](auto source, auto type, auto index, auto& output) {
+        return capture_error(source, extract(source, type, index, output));
+    };
+
+    auto cancelled = hooks.cancelled;
+    hooks.cancelled = [cancelled, &root_error] {
+        return root_error != ArchiveReadError::None || (cancelled && cancelled());
+    };
+
     // Progress: the total is NOT knowable up front, because nested archives are
     // only discovered as their parent is decompressed. `done` still advances per
     // placed file so the existing bar moves; the growing-total + "expanding"
@@ -75,12 +98,13 @@ ZipImportOutcome import_archive_bytes_recursive(MediaSink& sink, std::span<const
 
     // A corrupt root archive fails the task (Phase 68) — before, it was folded
     // into `skipped` and the task rendered as "Done, 0 imported, 1 skipped".
-    if (tally.root_unreadable) {
-        out.error = "Archive is corrupt or unreadable";
-        return out;
+    out.ok = !tally.root_unreadable && root_error == ArchiveReadError::None;
+    if (!out.ok) {
+        out.error = root_error == ArchiveReadError::None ? "Archive is corrupt or unreadable"
+                                                        : std::string(archive_read_error_text(root_error));
+        out.needs_password = root_error == ArchiveReadError::PasswordRequired ||
+                             root_error == ArchiveReadError::WrongPassword;
     }
-
-    out.ok        = true;
     out.imported  = tally.media_placed;
     out.cancelled = sink.cancelled();
     // Everything that did not become a file in the vault, for one honest count:

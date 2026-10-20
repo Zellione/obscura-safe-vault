@@ -256,6 +256,15 @@ local function link_archive()
         defines     { "OSV_VENDORED_ARCHIVE", "LIBARCHIVE_STATIC" }
         links { "archive", "lzma", "z" }
     end
+    local decoder_prefix = path.join(os.getcwd(), "vendor/codecs-prefix" .. san_suffix)
+    externalincludedirs { path.join(os.getcwd(), "vendor/7zip") }
+    libdirs { path.join(decoder_prefix, "lib") }
+    linkoptions { path.join(decoder_prefix, "lib/libosv7zip.so") }
+    linkoptions { "-Wl,-rpath,'$$ORIGIN'" }
+    postbuildcommands {
+        '{COPYFILE} "' .. path.join(decoder_prefix, "lib/libosv7zip.so") .. '" "%{cfg.targetdir}/libosv7zip.so.new"',
+        'mv -f "%{cfg.targetdir}/libosv7zip.so.new" "%{cfg.targetdir}/libosv7zip.so"'
+    }
 end
 
 workspace "ObscuraSafeVault"
@@ -528,6 +537,7 @@ project "osv_tests"
         "src/ui/playback_model.cpp",
         "src/ui/video_playback.cpp",
         "src/ui/archive_reader.cpp",
+        "src/ui/sevenzip_reader.cpp",
         "src/ui/archive_reader_cache.cpp",
         "src/ui/archive_import.cpp",
         "src/ui/archive_kind.cpp",

@@ -58,6 +58,10 @@ Import infrastructure: archive handling, plan building, vault population, import
   - `volume_import.*` — `summarize_volume_set` (pure; a gap is a REFUSAL, not a warning) +
     `assemble_volume_set` (reads volumes, applies `platform::normalize_user_path`, returns bytes
     for Concatenate/SpannedZipMerge or paths for FileOriented).
+    `plan_archive_selection` groups bulk picks against cached sibling listings, includes
+    unselected volumes, and emits each set once without conflating identical names in
+    different directories. GalleryGrid defers those sets through its existing volume
+    confirmation/name prompts alongside encrypted archives' password prompts.
   - `spanned_zip.*` — `merge_spanned_zip`: strips the 4-byte spanning marker, rewrites every CD
     entry's disk number + local-header offset to absolute, fixes the EOCD. Disk-0 offsets must
     subtract the stripped marker or the CD enumerates perfectly and every extraction fails. Zip64
@@ -98,34 +102,22 @@ Import infrastructure: archive handling, plan building, vault population, import
   by the importer: `peek_archive_meta` reads meta at file-pick time, GalleryGrid prefills the
   name popup with `meta_gallery_name(meta,stem)` (confirmed popup text is authoritative).
   1 MiB meta cap; malformed meta.json never blocks the import.
-- `archive_reader.*` — ArchiveReader: thin wrapper over libarchive's streaming read API
-  (`archive_read_open_memory` over an mlock'd buffer), whole-file gated `OSV_VENDORED_ARCHIVE`.
-  `open()` does one forward pass building `entries()` (reuses ZipEntry from zip_plan.h,
-  format-agnostic); `extract(index,out)` holds a FORWARD STREAM CURSOR (PR #124): the open
-  stream stays positioned past the last extracted entry, so ascending extracts (the import
-  loop's pattern) share one stream and a full import is a single pass — libarchive has no
-  random access, and the old reopen-per-extract was O(n²) decompression (~150x slower than
-  zip on a solid 7z). An index behind the cursor transparently reopens; ANY extract failure
-  resets the cursor (per-call independence preserved); `stream_opens()` observable pins the
-  contract in tests. Reader is now non-copyable/non-movable (destructor frees the handle).
-  `MAX_ENTRY_BYTES=4 GiB` bomb guard checked against the declared size before allocating.
-  `open_files(paths, passphrase)` (Phase 53) opens an ORDERED multi-volume set via
-  `archive_read_open_filenames` — libarchive's RAR multivolume support only works file-oriented,
-  because each volume carries its own header and concatenation truncates. Paths are NOT
-  normalised here; `normalize_user_path` stays at the boundary where paths enter (volume_import).
-  On Windows the wide `archive_read_open_filenames_w` is used (Phase 72) — the narrow variant
-  reaches fopen through the ANSI code page and cannot open CJK volume paths.
-  **Entry names (Phase 72):** `scan_entries` names each entry via the file-local
-  `entry_name_utf8`: the narrow `archive_entry_pathname` IF it is valid UTF-8 (authoritative
-  raw bytes for tar), else the wide `archive_entry_pathname_w` converted locale-independently
-  through `std::filesystem::path` (the Windows path — libarchive on Win32 always keeps the
-  wide form even when the ACP conversion fails), else the raw narrow bytes (legacy tar;
-  `sanitize_node_name` repairs downstream). Depends on `platform::init_locale()` having run
-  (app/test main): libarchive converts 7z/RAR UTF-16 names through the current locale at
-  parse time, and under `"C"` every accessor returns NULL (pre-fix such entries collapsed to
-  "unnamed"). Test fixture: `tests/ui/fixtures/cjk_names.7z.uu` — a committed real-7-Zip
-  archive (uuencoded), because libarchive's own 7z WRITER converts names through the locale
-  and cannot produce CJK names under `"C"` (archive_test_helpers' make_archive documents this).
+- `archive_reader.*` — dispatches 7z/RAR magic to `sevenzip_reader.*`; TAR and
+  ZipCrypto remain libarchive. Owns source copies in SecureBytes. Both readers keep
+  a forward extraction cursor; rewinds restart. `archive_read_error.h` supplies
+  password/corruption/unsupported/memory-limit diagnostics. Recursive hooks retain
+  root decoder errors; nested failures remain branch skips. Password-bearing ZIP
+  hooks use libarchive; ordinary ZIP keeps miniz.
+- `sevenzip_reader.*` — in-process 7-Zip COM callbacks, borrowed source span or
+  ordered file list. Numeric 7z volumes concatenate; RAR volume requests may only
+  open supplied paths. One producer thread pauses between requested entries,
+  verifies size/result before handing out SecureBytes, and joins before teardown
+  or rewind. Limit 100k entries/4GiB entry; private SDK allocator caps mappings at
+  1GiB. Secure BSTR password conversion avoids a std::wstring copy. Heap locking,
+  wipe, removed global key caches and opaque-stack F1 degradation are described
+  in `docs/ARCHIVE_DECODER.md`. Tests exercise encrypted headers, solid RAR4/5,
+  split solid 7z, Unicode passwords, corruption, rewinds and no retained cache.
+
 - `archive_import.*` — import_archive/import_archive_cbz: mirrors zip_import's structure but
   backed by ArchiveReader, covering .7z/.rar/.tar(+.gz/.xz)/.cbr/.cb7/.cbt. Declared
   unconditionally; the .cpp branches internally on OSV_VENDORED_ARCHIVE, returning a graceful
@@ -159,9 +151,10 @@ Import infrastructure: archive handling, plan building, vault population, import
   error: <what>") instead of std::terminate (the decode-pool job body is guarded the same way).
   The generic catches are deliberate (accepted S1181/S2738 deviation, commented at the site).
   `mark_task_complete(task_id, result, progress)` now writes the worker's local task copy BACK
-  to the queued row — terminal Failed/Cancelled state + error, counts merged via `max()`
-  against the live drain-incremented counters (before Phase 68 the copy was discarded and a
-  failed archive rendered "✓ Done, 0 imported"). Every Failed task logs ONE
+  to the queued row — terminal Failed/Cancelled state + error. Imported counts come
+  only from successful attachment in `drain`; pre-staging worker skips are added to
+  drain's destination-collision skips. Staging totals must never be merged into imports:
+  records drained after worker completion would be counted twice. Every Failed task logs ONE
   `platform::log_error("Import", import_failure_log_line(name, reason))` line to
   `<config_dir>/error.log` from the choke point after mark_task_complete (names + ASCII
   reasons only — invariant #5). A corrupt ROOT archive fails the task ("Archive is corrupt or
@@ -220,3 +213,8 @@ Import infrastructure: archive handling, plan building, vault population, import
   open it in TagOverviewScreen before `apply_reviewed_tag_dict`. Explicit dictionary
   replacements preserve existing descriptions/fields; collisions use first selected
   source order. No source file is modified and no new vault format is introduced.
+
+Picker encryption probes use complete ordered volume sets and open the existing
+masked password dialog for encrypted 7z/RAR (including hidden names). Passwords
+move under the queue mutex into worker-local SecureBytes and are wiped after use;
+the UI field clears after enqueue. Missing/wrong root passwords fail visibly.

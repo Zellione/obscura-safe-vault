@@ -7,12 +7,14 @@ namespace ui {
 ArchiveReader* ArchiveReaderCache::get(std::span<const uint8_t> bytes,
                                        std::string_view         passphrase)
 {
+    error_ = ArchiveReadError::None;
     const Key key{bytes.data(), bytes.size()};
     if (const auto it = readers_.find(key); it != readers_.end()) {
         return it->second.get();
     }
     auto reader = std::make_unique<ArchiveReader>();
     if (!reader->open(bytes, passphrase)) {
+        error_ = reader->error();
         return nullptr;
     }
     ++opens_;

@@ -6,6 +6,7 @@
 #include <archive_entry.h>
 
 #include <cstring>
+#include <array>
 #include "platform/safe_print.h"
 
 #include "platform/path_utf8.h"
@@ -185,23 +186,34 @@ void ArchiveReader::reset_stream() const noexcept
 
 bool ArchiveReader::open(std::span<const uint8_t> data, std::string_view passphrase)
 {
+    sevenzip_.reset();
     reset_stream();
-    data_.assign(data.begin(), data.end());
+    file_paths_.clear();
     entries_.clear();
+    if (!data_.assign(data)) return false;
     stream_opens_ = 0;
+    needs_password_ = false;
     passphrase_.wipe();
     (void)passphrase_.resize(0);
+    if (SevenZipReader::handles(data_.as_span())) {
+        sevenzip_ = std::make_unique<SevenZipReader>();
+        const bool ok = sevenzip_->open(data_.as_span(), passphrase);
+        needs_password_ = sevenzip_->error() == ArchiveReadError::PasswordRequired ||
+                          sevenzip_->error() == ArchiveReadError::WrongPassword;
+        if (ok) entries_ = sevenzip_->entries();
+        return ok;
+    }
     if (!passphrase.empty()) {
         if (!passphrase_.resize(passphrase.size() + 1)) {  // +1: trailing NUL for the C API
-            data_.clear();
+            (void)data_.resize(0);
             return false;
         }
         std::memcpy(passphrase_.data(), passphrase.data(), passphrase.size());
     }
 
-    struct archive* a = open_stream(data_, passphrase_cstr(passphrase_));
+    struct archive* a = open_stream(data_.as_span(), passphrase_cstr(passphrase_));
     if (!a) {
-        data_.clear();
+        (void)data_.resize(0);
         passphrase_.wipe();
         (void)passphrase_.resize(0);
         return false;
@@ -209,7 +221,7 @@ bool ArchiveReader::open(std::span<const uint8_t> data, std::string_view passphr
 
     if (!scan_entries(a)) {
         archive_read_free(a);
-        data_.clear();
+        (void)data_.resize(0);
         entries_.clear();
         return false;
     }
@@ -220,6 +232,12 @@ bool ArchiveReader::open(std::span<const uint8_t> data, std::string_view passphr
 bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
 {
     needs_password_ = false;
+    if (sevenzip_) {
+        const bool ok = sevenzip_->extract(index, out);
+        needs_password_ = sevenzip_->error() == ArchiveReadError::PasswordRequired ||
+                          sevenzip_->error() == ArchiveReadError::WrongPassword;
+        return ok;
+    }
     if (index >= entries_.size() || entries_[index].is_dir) return false;
 
     // Forward cursor: libarchive streams can't seek, so reaching entry N
@@ -234,7 +252,7 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
         // Use file-based extraction if file_paths_ is populated (multi-volume),
         // otherwise use memory-based extraction
         stream_ = file_paths_.empty()
-            ? open_stream(data_, passphrase_cstr(passphrase_))
+            ? open_stream(data_.as_span(), passphrase_cstr(passphrase_))
             : open_stream_files(file_paths_, passphrase_cstr(passphrase_));
         if (!stream_) return false;
         ++stream_opens_;
@@ -297,15 +315,31 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
 bool ArchiveReader::open_files(std::span<const std::filesystem::path> volumes,
                                 std::string_view passphrase)
 {
+    sevenzip_.reset();
     reset_stream();
+    (void)data_.resize(0);
     entries_.clear();
     file_paths_.clear();
     stream_opens_ = 0;
+    needs_password_ = false;
     passphrase_.wipe();
     (void)passphrase_.resize(0);
 
     // Empty volume list is invalid
     if (volumes.empty()) return false;
+    std::array<uint8_t, 8> magic{};
+    if (auto* file = platform::fopen_path(volumes.front(), "rb")) {
+        const size_t size = std::fread(magic.data(), 1, magic.size(), file);
+        std::fclose(file);
+        if (SevenZipReader::handles(std::span(magic).first(size))) {
+            sevenzip_ = std::make_unique<SevenZipReader>();
+            const bool ok = sevenzip_->open_files(volumes, passphrase);
+            needs_password_ = sevenzip_->error() == ArchiveReadError::PasswordRequired ||
+                              sevenzip_->error() == ArchiveReadError::WrongPassword;
+            if (ok) entries_ = sevenzip_->entries();
+            return ok;
+        }
+    }
 
     // Store passphrase if provided (same as open())
     if (!passphrase.empty()) {

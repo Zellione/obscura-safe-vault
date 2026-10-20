@@ -6,6 +6,10 @@
 #include "vault/fixtures.h"
 #include "vault/staging.h"
 #include "vault/transfer.h"
+#ifdef OSV_VENDORED_ARCHIVE
+#include "ui/archive_test_helpers.h"
+#include "ui/volume_import.h"
+#endif
 
 #include <fstream>
 
@@ -31,6 +35,129 @@ void check_original(vault::Vault& v, std::string_view path, std::span<const uint
     REQUIRE(v.read_image(*node, bytes) == vault::VaultResult::Ok);
     CHECK_BYTES_EQ(bytes.as_span(), expected);
 }
+
+#ifdef OSV_VENDORED_ARCHIVE
+TEST(import_queue_encrypted_7z_password_survives_worker_handoff)
+{
+    const auto dir = ziptest::fresh_dir("queue_encrypted_7z");
+    const auto path = dir / "photos.7z";
+    archivetest::uudecode(std::filesystem::path(OSV_UI_FIXTURE_DIR) /
+                         "encrypted-photo.7z.uu", path);
+    const auto bytes = archivetest::read_file(path);
+    const auto first = dir / "photos.7z.001";
+    const auto second = dir / "photos.7z.002";
+    REQUIRE(write_input(first, std::span(bytes).first(bytes.size() / 2)));
+    REQUIRE(write_input(second, std::span(bytes).subspan(bytes.size() / 2)));
+    {
+        vault::Vault v;
+        REQUIRE(vaulttest::make_directory_vault(v, dir / "vault.osv"));
+        vault::CommitLane lane;
+        lane.start(v);
+        v.set_commit_router(&lane);
+        ui::ImportQueue queue;
+        queue.begin_session(v, lane);
+        for (const bool split : {false, true}) {
+            crypto::SecureBytes password;
+            REQUIRE(password.assign(std::span(reinterpret_cast<const uint8_t*>("password"), 8)));
+            if (split)
+                queue.enqueue_volume_set({first, second}, ui::VolumeStyle::NumericSuffix,
+                                         "photos.7z", "", "Split", ui::ImportTaskKind::Archive,
+                                         std::move(password));
+            else
+                queue.enqueue_archive(path, "", "Single", ui::ImportTaskKind::Archive,
+                                      true, std::move(password));
+        }
+        const auto zip = archivetest::make_encrypted_zip({{"photo.jpg", ziptest::fake_jpeg(63)}},
+                                                         "password", dir / "photos.zip");
+        crypto::SecureBytes zip_password;
+        REQUIRE(zip_password.assign(std::span(reinterpret_cast<const uint8_t*>("password"), 8)));
+        queue.enqueue_archive(zip, "", "Zip", ui::ImportTaskKind::Archive, true,
+                              std::move(zip_password));
+        crypto::SecureBytes wrong;
+        REQUIRE(wrong.assign(std::span(reinterpret_cast<const uint8_t*>("wrong"), 5)));
+        queue.enqueue_archive(path, "", "Wrong", ui::ImportTaskKind::Archive, true, std::move(wrong));
+        queue.enqueue_archive(path, "", "Missing", ui::ImportTaskKind::Archive);
+        REQUIRE(drain_until_idle(queue));
+        const auto rows = queue.snapshot();
+        REQUIRE(rows.size() == 5);
+        for (const auto& row : std::span(rows).first(3)) {
+            CHECK(row.state == ui::ImportTaskState::Done);
+            CHECK_EQ(row.imported, 1);
+        }
+        for (const auto& row : std::span(rows).subspan(3)) {
+            CHECK(row.state == ui::ImportTaskState::Failed);
+            CHECK_EQ(row.imported, 0);
+            CHECK(row.error.find("password") != std::string::npos);
+        }
+        queue.end_session();
+        REQUIRE(lane.flush());
+    }
+    {
+        vault::Vault reopened;
+        REQUIRE(vaulttest::open_vault(dir / "vault.osv", reopened));
+        const auto original = ziptest::fake_jpeg(63);
+        check_original(reopened, "Single/photo.jpg", original, _failures);
+        check_original(reopened, "Split/photo.jpg", original, _failures);
+        check_original(reopened, "Zip/photo.jpg", original, _failures);
+        CHECK(reopened.resolve_node("Wrong/photo.jpg") == nullptr);
+        CHECK(reopened.resolve_node("Missing/photo.jpg") == nullptr);
+    }
+    ziptest::cleanup_dir(dir);
+}
+
+TEST(import_queue_directory_split_7z_selection_survives_reopen)
+{
+    const auto dir = ziptest::fresh_dir("queue_directory_split_7z");
+    const auto original = ziptest::fake_jpeg(63);
+    const auto whole = archivetest::make_archive(
+        {{"nested/photo.jpg", original}, {"notes.txt", {'n'}}}, "7zip", dir / "photos.7z");
+    const auto bytes = archivetest::read_file(whole);
+    REQUIRE(bytes.size() > 2);
+    const size_t split = bytes.size() / 2;
+    REQUIRE(write_input(dir / "photos.7z.001", std::span(bytes).first(split)));
+    REQUIRE(write_input(dir / "photos.7z.002", std::span(bytes).subspan(split)));
+    const std::vector<std::filesystem::path> picked{
+        dir / "photos.7z.002", whole, dir / "photos.7z.001"};
+    const auto sources = ui::plan_archive_selection(picked);
+    REQUIRE(sources.size() == 2);
+    {
+        vault::Vault v;
+        REQUIRE(vaulttest::make_directory_vault(v, dir / "vault.osv"));
+        vault::CommitLane lane;
+        lane.start(v);
+        v.set_commit_router(&lane);
+        ui::ImportQueue queue;
+        queue.begin_session(v, lane);
+        std::vector<std::filesystem::path> volumes;
+        for (const auto& name : sources[0].volumes.volumes) volumes.push_back(dir / name);
+        (void)queue.enqueue_volume_set(volumes, sources[0].volumes.style,
+                                      sources[0].volumes.stem, "", "Split",
+                                      ui::ImportTaskKind::Archive);
+        (void)queue.enqueue_archive(sources[1].path, "", "Single", ui::ImportTaskKind::Archive);
+        (void)queue.enqueue_archive(sources[1].path, "", "Single", ui::ImportTaskKind::Archive);
+        REQUIRE(drain_until_idle(queue));
+        const auto rows = queue.snapshot();
+        REQUIRE(rows.size() == 3);
+        for (const auto& row : std::span(rows).first(2)) {
+            CHECK(row.state == ui::ImportTaskState::Done);
+            CHECK_EQ(row.imported, 1);
+            CHECK_EQ(row.skipped, 1);
+        }
+        CHECK(rows[2].state == ui::ImportTaskState::Done);
+        CHECK_EQ(rows[2].imported, 0);
+        CHECK_EQ(rows[2].skipped, 2);
+        queue.end_session();
+        REQUIRE(lane.flush());
+    }
+    {
+        vault::Vault reopened;
+        REQUIRE(vaulttest::open_vault(dir / "vault.osv", reopened));
+        check_original(reopened, "Split/nested/photo.jpg", original, _failures);
+        check_original(reopened, "Single/nested/photo.jpg", original, _failures);
+    }
+    ziptest::cleanup_dir(dir);
+}
+#endif
 
 void collision_and_cancel_survive_reopen(MakeVault create, int& _failures)
 {

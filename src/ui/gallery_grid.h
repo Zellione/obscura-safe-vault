@@ -104,6 +104,7 @@ struct GridLocation {
 
 class GalleryGrid : public Screen {
     friend struct TransferOwnershipTestPeer;  // deterministic worker/UI ownership regression
+    friend struct ArchiveSelectionTestPeer;  // bulk archive dialog/queue regression
 public:
     // Dialog pair for import/export file/folder selection.
     struct GridDialogs {
@@ -204,6 +205,7 @@ void toggle_select();          // toggle the current item in the export selectio
     // update()'s cognitive complexity (S3776) down. vault_busy / handle_job_input (Phase 25)
     // are free friends for the same reasons (Phase 50: imports drain asynchronously).
     friend void poll_file_job(GalleryGrid& g);          // drain a finished export/delete job
+    friend bool handle_volume_confirmation(GalleryGrid& g, const SDL_Event& e);
     friend bool handle_import_tag_review(GalleryGrid& g, const SDL_Event& e);
     friend void begin_tag_list_review(GalleryGrid& g, const std::vector<std::string>& paths);
     friend uint64_t grid_listing_revision(const GalleryGrid& g);
@@ -310,9 +312,10 @@ void toggle_select();          // toggle the current item in the export selectio
         // (ui::zip_is_encrypted) — forces archive_backend above, and gates
         // whether do_zip_import threads naming_.password.buf through to the queue.
         bool                  needs_password = false;
-        // Phase 51 Task 14: bulk archive import — queue of remaining encrypted archives
+        // Bulk archives that still need a password or volume-set confirmation.
         struct QueuedArchive { std::filesystem::path path; std::string gallery_name;
-                               bool cbz; bool archive_backend; bool needs_password; };
+                               bool cbz; bool archive_backend; bool needs_password;
+                               bool multipart = false; };
         std::vector<QueuedArchive> queued_archives;
         // Phase 53: set when the picked file turned out to be one volume of a
         // multi-volume archive. Non-None style => do_zip_import enqueues the

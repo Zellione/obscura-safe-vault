@@ -1,0 +1,17 @@
+Synthetic encrypted 7z fixtures (Phase 121)
+
+Generated with 7-Zip 26.04; no private/user content. Each .jpg is synthetic:
+FF D8 FF E0 followed by 200 bytes (seed + index) modulo 256. These intentionally
+exercise import byte preservation without requiring image decoding to succeed.
+Files are uuencoded so the repository remains text-reviewable; tests decode only
+the archive input, never extracted plaintext, to their temporary source folders.
+
+- encrypted-photo.7z.uu: photo.jpg seed63, password "password", LZMA2,
+  solid enabled, unencrypted headers. One file means no cross-file solid block.
+- encrypted-headers-photo.7z.uu: same, encrypted headers enabled.
+- solid-encrypted-photos.7z.uu: 0.jpg/1.jpg/2.jpg seeds0/1/2, password "päss🔐",
+  LZMA2, one solid block, encrypted headers.
+
+Commands: 7z a -t7z -m0=lzma2 -ms=on -p<password> -mhe=on|off output.7z <files>
+Other encrypted RAR4/5 and 7z fixtures are consumed directly from the pinned
+libarchive submodule's upstream test suite (documented there).

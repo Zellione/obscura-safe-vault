@@ -15,6 +15,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 "$REPO_ROOT/scripts/check_submodules.sh"
+"$REPO_ROOT/scripts/build_7zip.sh"
 
 # Core count fallback for systems without nproc.
 NPROC="$(nproc 2>/dev/null || echo 4)"

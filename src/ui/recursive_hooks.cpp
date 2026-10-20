@@ -95,7 +95,9 @@ bool arc_extract(ArchiveReaderCache& cache, std::span<const uint8_t> bytes,
     if (reader == nullptr) {
         return false;
     }
-    return reader->extract(index, out);
+    const bool ok = reader->extract(index, out);
+    cache.note_error(reader->error());
+    return ok;
 }
 
 // walk_archive works in ABSOLUTE vault paths — a nested sub-gallery's path is
@@ -156,6 +158,9 @@ RecursiveHooks make_recursive_hooks(MediaSink& sink, std::string_view root_galle
 #endif
 
     RecursiveHooks h;
+#ifdef OSV_VENDORED_ARCHIVE
+    h.read_error = [rc] { return rc->error(); };
+#endif
 
     h.list_entries = [pw
 #ifdef OSV_VENDORED_ARCHIVE
@@ -163,7 +168,8 @@ RecursiveHooks make_recursive_hooks(MediaSink& sink, std::string_view root_galle
 #endif
                       ](std::span<const uint8_t> bytes, ArchiveKind kind,
                         std::vector<ZipEntry>& out) {
-        return kind_is_zip(kind) ? zip_list(bytes, out) : arc_list(*rc, bytes, pw_view(pw), out);
+        return kind_is_zip(kind) && pw_view(pw).empty() ? zip_list(bytes, out)
+                                                      : arc_list(*rc, bytes, pw_view(pw), out);
     };
 
     h.extract_entry = [pw
@@ -172,8 +178,8 @@ RecursiveHooks make_recursive_hooks(MediaSink& sink, std::string_view root_galle
 #endif
                        ](std::span<const uint8_t> bytes, ArchiveKind kind, std::size_t index,
                           crypto::SecureBytes& out) {
-        return kind_is_zip(kind) ? zip_extract(bytes, index, out)
-                                 : arc_extract(*rc, bytes, pw_view(pw), index, out);
+        return kind_is_zip(kind) && pw_view(pw).empty() ? zip_extract(bytes, index, out)
+                                                      : arc_extract(*rc, bytes, pw_view(pw), index, out);
     };
 
     h.create_gallery = [&sink, root](std::string_view gallery) {
