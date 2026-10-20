@@ -70,7 +70,7 @@ std::vector<ArchiveSelection> plan_archive_selection(
         for (const auto& name : volumes.volumes) {
             claimed.insert((parent / platform::utf8_to_path(name)).lexically_normal());
         }
-        sources.push_back({picked, std::move(volumes)});
+        sources.emplace_back(picked, std::move(volumes));
     }
     return sources;
 }

@@ -146,9 +146,9 @@ void run_placements(MediaSink& sink, const ArchiveReader& reader, const ZipPlan&
         }
         import_one(sink, reader, pl, root_gallery, out);
         if (progress) progress->done.fetch_add(1);
-        if (!out.error.empty()) break;
+        if (!out.error.empty()) return;
     }
-    out.ok = out.error.empty();
+    out.ok = true;
 }
 
 }  // namespace

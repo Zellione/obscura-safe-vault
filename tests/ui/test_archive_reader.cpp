@@ -106,6 +106,24 @@ TEST(archive_reader_encrypted_failures_release_no_plaintext_or_cached_keys)
     }
 }
 
+TEST(archive_reader_output_allocation_failure_is_clean_and_retryable)
+{
+    const auto path = fresh_path("encrypted-allocation-failure.7z");
+    uudecode(std::filesystem::path(OSV_UI_FIXTURE_DIR) / "encrypted-photo.7z.uu", path);
+    ui::ArchiveReader reader;
+    REQUIRE(reader.open(read_file(path), "password"));
+    crypto::SecureBytes out(8);
+    crypto::detail::inject_secure_allocation_failure(0);
+    const bool extracted = reader.extract(0, out);
+    crypto::detail::clear_secure_allocation_failure();
+    CHECK_FALSE(extracted);
+    CHECK(out.empty());
+    CHECK(reader.error() == ui::ArchiveReadError::MemoryLimit);
+    REQUIRE(reader.extract(0, out));
+    CHECK_BYTES_EQ(out.as_span(), fake_bytes(63, 200));
+    std::filesystem::remove(path);
+}
+
 TEST(archive_reader_damaged_encrypted_payload_is_not_released)
 {
     const auto path = fresh_path("damaged-encrypted.7z");

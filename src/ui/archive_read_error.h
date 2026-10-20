@@ -14,18 +14,19 @@ enum class ArchiveReadError {
 
 [[nodiscard]] inline std::string_view archive_read_error_text(ArchiveReadError error)
 {
+    using enum ArchiveReadError;
     switch (error) {
-    case ArchiveReadError::None:
+    case None:
         return {};
-    case ArchiveReadError::PasswordRequired:
+    case PasswordRequired:
         return "This archive requires a password";
-    case ArchiveReadError::WrongPassword:
+    case WrongPassword:
         return "Wrong archive password or damaged encrypted data";
-    case ArchiveReadError::Corrupt:
+    case Corrupt:
         return "Archive is corrupt or incomplete";
-    case ArchiveReadError::Unsupported:
+    case Unsupported:
         return "Unsupported archive compression method";
-    case ArchiveReadError::MemoryLimit:
+    case MemoryLimit:
         return "Archive exceeds the decoder memory limit";
     }
     return "Could not read archive";

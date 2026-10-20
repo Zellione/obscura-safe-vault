@@ -205,6 +205,7 @@ void toggle_select();          // toggle the current item in the export selectio
     // update()'s cognitive complexity (S3776) down. vault_busy / handle_job_input (Phase 25)
     // are free friends for the same reasons (Phase 50: imports drain asynchronously).
     friend void poll_file_job(GalleryGrid& g);          // drain a finished export/delete job
+    friend bool handle_volume_confirmation(GalleryGrid& g, const SDL_Event& e);
     friend bool handle_import_tag_review(GalleryGrid& g, const SDL_Event& e);
     friend void begin_tag_list_review(GalleryGrid& g, const std::vector<std::string>& paths);
     friend uint64_t grid_listing_revision(const GalleryGrid& g);

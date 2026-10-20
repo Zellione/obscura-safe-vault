@@ -1235,6 +1235,26 @@ bool handle_import_tag_review(GalleryGrid& g, const SDL_Event& e)
     return true;
 }
 
+bool handle_volume_confirmation(GalleryGrid& g, const SDL_Event& e)
+{
+    if (!g.volume_dialog_.active()) return false;
+    if (e.type != SDL_EVENT_KEY_DOWN) return true;
+    using enum VolumeSetDialog::Result;
+    switch (g.volume_dialog_.handle_key(e.key.key)) {
+        case Confirmed: g.continue_volume_set_naming(); break;
+        case Cancelled:
+            g.naming_.zip.active = false;
+            g.naming_.zip.volume_set = {};
+            g.naming_.zip.volume_paths.clear();
+            g.status_ = "Multi-volume import cancelled";
+            if (!g.naming_.zip.queued_archives.empty()) g.process_next_queued_zip_import();
+            g.mark_dirty();
+            break;
+        case Pending: break;
+    }
+    return true;
+}
+
 bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
 {
     if (handle_import_tag_review(*this, e)) return true;
@@ -1266,25 +1286,7 @@ bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
         return true;
     }
 
-    // The multi-volume confirm modal owns all input while it is up.
-    if (volume_dialog_.active()) {
-        if (e.type == SDL_EVENT_KEY_DOWN) {
-            using enum VolumeSetDialog::Result;
-            switch (volume_dialog_.handle_key(e.key.key)) {
-                case Confirmed: continue_volume_set_naming(); break;
-                case Cancelled:
-                    naming_.zip.active = false;
-                    naming_.zip.volume_set = {};
-                    naming_.zip.volume_paths.clear();
-                    status_ = "Multi-volume import cancelled";
-                    if (!naming_.zip.queued_archives.empty()) process_next_queued_zip_import();
-                    mark_dirty();
-                    break;
-                case Pending: break;
-            }
-        }
-        return true;
-    }
+    if (handle_volume_confirmation(*this, e)) return true;
 
     // The export consent modal owns all input while it is up.
     if (consent_.active()) {

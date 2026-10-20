@@ -24,6 +24,7 @@ extern "C" HRESULT CreateObject(const GUID*, const GUID*, void**);
 extern "C" int osv7zip_memory_degraded();
 
 namespace ui {
+using enum ArchiveReadError;
 namespace {
 constexpr uint64_t max_entry_bytes = uint64_t{4} << 30;
 constexpr UInt32 max_entries = 100000;
@@ -42,9 +43,10 @@ BSTR utf8_bstr(std::string_view text)
     // 7-Zip's COM contract uses UTF-16 code units even on Linux, where
     // wchar_t is 32 bits. Supplementary characters need surrogate pairs.
     UINT count = 0;
-    for (const unsigned char c : text) {
-        if ((c & 0xc0) != 0x80) ++count;
-        if (c >= 0xf0) ++count;
+    for (const char c : text) {
+        const auto byte = std::byte{static_cast<unsigned char>(c)};
+        if ((byte & std::byte{0xc0}) != std::byte{0x80}) ++count;
+        if (byte >= std::byte{0xf0}) ++count;
     }
     BSTR result = SysAllocStringLen(nullptr, count);
     if (!result) return nullptr;
@@ -65,7 +67,9 @@ BSTR utf8_bstr(std::string_view text)
             extra = 1;
         }
         for (unsigned i = 0; i < extra; ++i)
-            cp = (cp << 6) | (static_cast<unsigned char>(text[pos++]) & 63);
+            cp = (cp << 6) |
+                 (std::to_integer<uint32_t>(std::byte{static_cast<unsigned char>(text[pos++])} &
+                                            std::byte{0x3f}));
         if (cp >= 0x10000) {
             cp -= 0x10000;
             result[out++] = static_cast<wchar_t>(0xd800 + (cp >> 10));
@@ -77,29 +81,42 @@ BSTR utf8_bstr(std::string_view text)
     return result;
 }
 
+void append_utf8(std::string& result, uint32_t cp)
+{
+    if (cp < 0x80) {
+        result.push_back(static_cast<char>(cp));
+        return;
+    }
+    unsigned tails = 1;
+    uint32_t lead = 0xc0;
+    if (cp >= 0x10000) {
+        tails = 3;
+        lead = 0xf0;
+    } else if (cp >= 0x800) {
+        tails = 2;
+        lead = 0xe0;
+    }
+    result.push_back(static_cast<char>(lead | (cp >> (6 * tails))));
+    while (tails != 0) {
+        --tails;
+        result.push_back(static_cast<char>(0x80 | ((cp >> (6 * tails)) & 63)));
+    }
+}
+
 std::string bstr_utf8(BSTR text)
 {
     std::string result;
-    for (UINT i = 0; i < SysStringLen(text); ++i) {
-        uint32_t cp = static_cast<uint32_t>(text[i]);
-        if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < SysStringLen(text)) {
-            const uint32_t low = static_cast<uint32_t>(text[i + 1]);
-            if (low >= 0xdc00 && low <= 0xdfff) {
+    UINT pos = 0;
+    const UINT length = SysStringLen(text);
+    while (pos < length) {
+        auto cp = static_cast<uint32_t>(text[pos++]);
+        if (cp >= 0xd800 && cp <= 0xdbff && pos < length) {
+            if (const auto low = static_cast<uint32_t>(text[pos]); low >= 0xdc00 && low <= 0xdfff) {
                 cp = 0x10000 + ((cp - 0xd800) << 10) + low - 0xdc00;
-                ++i;
+                ++pos;
             }
         }
-        if (cp < 0x80)
-            result.push_back(static_cast<char>(cp));
-        else {
-            unsigned tails = cp < 0x800 ? 1 : cp < 0x10000 ? 2 : 3;
-            const uint32_t lead = tails == 1 ? 0xc0 : tails == 2 ? 0xe0 : 0xf0;
-            result.push_back(static_cast<char>(lead | (cp >> (6 * tails))));
-            while (tails != 0) {
-                --tails;
-                result.push_back(static_cast<char>(0x80 | ((cp >> (6 * tails)) & 63)));
-            }
-        }
+        append_utf8(result, cp);
     }
     return result;
 }
@@ -111,7 +128,6 @@ public:
 public:
     Z7_IFACE_COM7_IMP(IInStream)
     Z7_IFACE_COM7_IMP(ISequentialInStream)
-public:
     std::span<const uint8_t> memory;
     std::vector<std::FILE*> files;
     std::vector<uint64_t> ends;
@@ -150,12 +166,12 @@ Z7_COM7F_IMF(Input::Read(void* data, UInt32 amount, UInt32* processed))
 {
     if (processed) *processed = 0;
     if (amount == 0 || position >= size()) return S_OK;
-    size_t count = static_cast<size_t>(std::min<uint64_t>(amount, size() - position));
+    auto count = static_cast<size_t>(std::min<uint64_t>(amount, size() - position));
     if (files.empty()) {
         std::memcpy(data, memory.data() + position, count);
     } else {
-        const auto it = std::upper_bound(ends.begin(), ends.end(), position);
-        const size_t index = static_cast<size_t>(it - ends.begin());
+        const auto it = std::ranges::upper_bound(ends, position);
+        const auto index = static_cast<size_t>(it - ends.begin());
         const uint64_t start = index == 0 ? 0 : ends[index - 1];
         count = static_cast<size_t>(std::min<uint64_t>(count, ends[index] - position));
         if (fseeko(files[index], static_cast<off_t>(position - start), SEEK_SET) != 0)
@@ -171,7 +187,11 @@ Z7_COM7F_IMF(Input::Read(void* data, UInt32 amount, UInt32* processed))
 Z7_COM7F_IMF(Input::Seek(Int64 offset, UInt32 origin, UInt64* new_position))
 {
     if (origin > 2) return E_INVALIDARG;
-    const uint64_t base = origin == 0 ? 0 : origin == 1 ? position : size();
+    uint64_t base = 0;
+    if (origin == 1)
+        base = position;
+    else if (origin == 2)
+        base = size();
     const uint64_t magnitude =
         offset < 0 ? uint64_t{0} - static_cast<uint64_t>(offset) : static_cast<uint64_t>(offset);
     if ((offset < 0 && magnitude > base) ||
@@ -193,7 +213,6 @@ public:
     Z7_IFACE_COM7_IMP(IArchiveOpenCallback)
     Z7_IFACE_COM7_IMP(IArchiveOpenVolumeCallback)
     Z7_IFACE_COM7_IMP(ICryptoGetTextPassword)
-public:
     crypto::SecureBytes password;
     std::vector<std::filesystem::path> paths;
     size_t next_volume = 1;
@@ -220,7 +239,7 @@ Z7_COM7F_IMF(OpenCallback::CryptoGetTextPassword(BSTR* out))
     return get_password(out);
 }
 Z7_COM7F_IMF(OpenCallback::GetProperty(PROPID id, PROPVARIANT* value))
-{
+try {
     value->vt = VT_EMPTY;
     if (id == kpidName && !paths.empty()) {
         value->bstrVal = utf8_bstr(platform::path_to_utf8(paths.front().filename()));
@@ -228,9 +247,11 @@ Z7_COM7F_IMF(OpenCallback::GetProperty(PROPID id, PROPVARIANT* value))
         value->vt = VT_BSTR;
     }
     return S_OK;
+} catch (const std::bad_alloc&) {
+    return E_OUTOFMEMORY;
 }
 Z7_COM7F_IMF(OpenCallback::GetStream(const wchar_t*, IInStream** out))
-{
+try {
     *out = nullptr;
     if (next_volume >= paths.size()) return S_FALSE;
     CMyComPtr<Input> input = new Input;
@@ -239,8 +260,9 @@ Z7_COM7F_IMF(OpenCallback::GetStream(const wchar_t*, IInStream** out))
     if (!input->open_files(std::span(paths).subspan(next_volume++, 1))) return E_FAIL;
     *out = input.Detach();
     return S_OK;
+} catch (const std::bad_alloc&) {
+    return E_OUTOFMEMORY;
 }
-
 struct EntryInfo {
     uint64_t size = 0;
     bool encrypted = false;
@@ -253,8 +275,8 @@ struct SevenZipState {
     CMyComPtr<OpenCallback> opener;
     std::vector<ZipEntry> entries;
     std::vector<EntryInfo> info;
-    ArchiveReadError error = ArchiveReadError::None;
-    std::thread producer;
+    ArchiveReadError error = None;
+    std::jthread producer;
     std::mutex mutex;
     std::condition_variable changed;
     std::atomic_bool stop{false};
@@ -345,17 +367,21 @@ Z7_COM7F_IMF(ExtractCallback::GetStream(UInt32 index, ISequentialOutStream** out
     state_.active = index;
     if (index >= state_.info.size()) return E_FAIL;
     if (state_.entries[index].is_dir) return S_OK;
-    state_.changed.wait(lock, [&] { return state_.stop || state_.requested; });
+    state_.changed.wait(lock, [this] { return state_.stop || state_.requested; });
     if (state_.stop) return E_ABORT;
     if (index < state_.target) return S_OK;
     if (index > state_.target) return E_FAIL;
-    const uint64_t size = state_.info[index].size;
-    if (size > max_entry_bytes || !state_.output.resize(static_cast<size_t>(size))) {
-        state_.error = ArchiveReadError::MemoryLimit;
+    if (const uint64_t size = state_.info[index].size;
+        size > max_entry_bytes || !state_.output.resize(static_cast<size_t>(size))) {
+        state_.error = MemoryLimit;
         return E_OUTOFMEMORY;
     }
     state_.written = 0;
-    CMyComPtr<Output> output = new Output(state_);
+    CMyComPtr<Output> output = new (std::nothrow) Output(state_);
+    if (!output) {
+        state_.error = MemoryLimit;
+        return E_OUTOFMEMORY;
+    }
     *out = output.Detach();
     return S_OK;
 }
@@ -365,12 +391,11 @@ Z7_COM7F_IMF(ExtractCallback::SetOperationResult(Int32 result))
     if (!state_.requested || state_.active != state_.target) return S_OK;
     using namespace NArchive::NExtract::NOperationResult;
     if (result == kUnsupportedMethod)
-        state_.error = ArchiveReadError::Unsupported;
+        state_.error = Unsupported;
     else if (result != kOK || state_.written != state_.output.size()) {
-        state_.error = state_.info[state_.active].encrypted ? ArchiveReadError::WrongPassword
-                                                            : ArchiveReadError::Corrupt;
+        state_.error = state_.info[state_.active].encrypted ? WrongPassword : Corrupt;
         if (state_.opener->password.empty() && state_.opener->asked)
-            state_.error = ArchiveReadError::PasswordRequired;
+            state_.error = PasswordRequired;
     }
     state_.requested = false;
     state_.ready = true;
@@ -406,29 +431,32 @@ bool SevenZipState::list_entries()
 bool SevenZipState::open_archive(std::string_view password)
 {
     std::array<uint8_t, 8> magic{};
-    UInt32 read = 0;
-    if (input->Read(magic.data(), magic.size(), &read) != S_OK ||
-        !SevenZipReader::handles(std::span(magic).first(read)))
+    if (UInt32 read = 0; input->Read(magic.data(), magic.size(), &read) != S_OK ||
+                         !SevenZipReader::handles(std::span(magic).first(read)))
         return false;
     input->Seek(0, 0, nullptr);
-    const uint8_t format = magic[0] == '7' ? 7 : magic[6] == 1 ? 0xcc : 3;
-    const GUID clsid{0x23170f69, 0x40c1, 0x278a, {0x10, 0, 0, 1, 0x10, format, 0, 0}};
-    if (CreateObject(&clsid, &IID_IInArchive, reinterpret_cast<void**>(&archive)) != S_OK)
+    uint8_t format = 3;
+    if (magic[0] == '7')
+        format = 7;
+    else if (magic[6] == 1)
+        format = 0xcc;
+    void* object = nullptr;
+    if (const GUID clsid{0x23170f69, 0x40c1, 0x278a, {0x10, 0, 0, 1, 0x10, format, 0, 0}};
+        CreateObject(&clsid, &IID_IInArchive, &object) != S_OK)
         return false;
+    archive.Attach(static_cast<IInArchive*>(object));
     if (!opener->password.assign(
             {reinterpret_cast<const uint8_t*>(password.data()), password.size()})) {
-        error = ArchiveReadError::MemoryLimit;
+        error = MemoryLimit;
         return false;
     }
     const UInt64 scan_limit = 0;
     // SDK crypto uses opaque stack scratch outside the secured heap allocator.
     crypto::mark_opaque_plaintext_seen();
-    const HRESULT result = archive->Open(input, &scan_limit, opener);
-    if (result != S_OK) {
-        error = opener->asked ? (password.empty() ? ArchiveReadError::PasswordRequired
-                                                  : ArchiveReadError::WrongPassword)
-                              : ArchiveReadError::Corrupt;
-        if (result == E_OUTOFMEMORY) error = ArchiveReadError::MemoryLimit;
+    if (const HRESULT result = archive->Open(input, &scan_limit, opener); result != S_OK) {
+        error = Corrupt;
+        if (opener->asked) error = password.empty() ? PasswordRequired : WrongPassword;
+        if (result == E_OUTOFMEMORY) error = MemoryLimit;
         return false;
     }
     PROPVARIANT flags{};
@@ -438,7 +466,7 @@ bool SevenZipState::open_archive(std::string_view password)
     if (damaged || !list_entries()) {
         entries.clear();
         info.clear();
-        error = ArchiveReadError::Corrupt;
+        error = Corrupt;
         return false;
     }
     note_memory_status();
@@ -448,21 +476,15 @@ bool SevenZipState::open_archive(std::string_view password)
 void SevenZipState::start()
 {
     ++opens;
-    producer = std::thread([this] {
-        HRESULT result = E_FAIL;
-        try {
-            CMyComPtr<ExtractCallback> callback = new ExtractCallback(*this);
-            result = archive->Extract(nullptr, std::numeric_limits<UInt32>::max(), 0, callback);
-        } catch (const std::bad_alloc&) {
-            result = E_OUTOFMEMORY;
-        } catch (...) {
-            result = E_FAIL;
-        }
+    producer = std::jthread([this] {
+        CMyComPtr<ExtractCallback> callback = new (std::nothrow) ExtractCallback(*this);
+        const HRESULT result =
+            callback ? archive->Extract(nullptr, std::numeric_limits<UInt32>::max(), 0, callback)
+                     : E_OUTOFMEMORY;
         std::lock_guard lock(mutex);
-        if (requested && !ready && error == ArchiveReadError::None) {
-            error = opener->asked && opener->password.empty() ? ArchiveReadError::PasswordRequired
-                                                              : ArchiveReadError::Corrupt;
-            if (result == E_OUTOFMEMORY) error = ArchiveReadError::MemoryLimit;
+        if (requested && !ready && error == None) {
+            error = opener->asked && opener->password.empty() ? PasswordRequired : Corrupt;
+            if (result == E_OUTOFMEMORY) error = MemoryLimit;
         }
         finished = true;
         changed.notify_all();
@@ -516,8 +538,7 @@ bool SevenZipReader::extract(size_t index, crypto::SecureBytes& out)
 {
     if (index >= state_->entries.size() || state_->entries[index].is_dir) return false;
     // Reopening the archive itself isn't needed: Extract starts a fresh pass.
-    if (state_->producer.joinable() &&
-        (index < state_->next || state_->error != ArchiveReadError::None)) {
+    if (state_->producer.joinable() && (index < state_->next || state_->error != None)) {
         {
             std::lock_guard stop_lock(state_->mutex);
             state_->stop.store(true);
@@ -528,15 +549,16 @@ bool SevenZipReader::extract(size_t index, crypto::SecureBytes& out)
         state_->finished = false;
     }
     std::unique_lock lock(state_->mutex);
-    state_->error = ArchiveReadError::None;
+    state_->error = None;
     state_->target = index;
     state_->requested = true;
     state_->ready = false;
     if (!state_->producer.joinable()) state_->start();
     state_->changed.notify_all();
-    state_->changed.wait(lock, [&] { return state_->ready || state_->finished; });
+    state_->changed.wait(lock, [this] { return state_->ready || state_->finished; });
     state_->next = index + 1;
-    const bool ok = state_->ready && state_->error == ArchiveReadError::None;
+    const bool ok = state_->ready && state_->error == None;
+    if (!ok && state_->error == None) state_->error = Corrupt;
     if (ok)
         out = std::move(state_->output);
     else {

@@ -1,6 +1,6 @@
 # Phase 121 — Multipart, solid and encrypted archive import
 
-Status: implemented; validation and owner merge pending.
+Status: implemented; owner merge pending. Validation results are recorded in the PR.
 
 ## Findings
 

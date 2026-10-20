@@ -88,9 +88,10 @@ public:
     }
     [[nodiscard]] ArchiveReadError error() const noexcept
     {
+        using enum ArchiveReadError;
         if (sevenzip_) return sevenzip_->error();
-        if (!needs_password_) return ArchiveReadError::None;
-        return passphrase_.empty() ? ArchiveReadError::PasswordRequired : ArchiveReadError::WrongPassword;
+        if (!needs_password_) return None;
+        return passphrase_.empty() ? PasswordRequired : WrongPassword;
     }
     [[nodiscard]] bool encrypted() const { return sevenzip_ && sevenzip_->encrypted(); }
 
