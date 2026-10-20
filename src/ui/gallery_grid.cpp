@@ -1270,9 +1270,11 @@ bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
             switch (volume_dialog_.handle_key(e.key.key)) {
                 case Confirmed: continue_volume_set_naming(); break;
                 case Cancelled:
+                    naming_.zip.active = false;
                     naming_.zip.volume_set = {};
                     naming_.zip.volume_paths.clear();
                     status_ = "Multi-volume import cancelled";
+                    if (!naming_.zip.queued_archives.empty()) process_next_queued_zip_import();
                     mark_dirty();
                     break;
                 case Pending: break;
@@ -1394,8 +1396,7 @@ crypto::SecureBytes password_bytes(const SecureTextInput& f)
 
 void GalleryGrid::process_next_queued_zip_import()
 {
-    // Phase 51 Task 14: process the next encrypted archive from a bulk pick.
-    // Called after the previous archive's password prompt was confirmed or cancelled.
+    // Advance deferred bulk picks through their existing confirmation flow.
     if (naming_.zip.queued_archives.empty()) {
         status_ = "Import queued — Shift+I for status";
         mark_dirty();
@@ -1405,6 +1406,11 @@ void GalleryGrid::process_next_queued_zip_import()
     // Pop the first queued archive
     const auto queued = naming_.zip.queued_archives.front();
     naming_.zip.queued_archives.erase(naming_.zip.queued_archives.begin());
+    if (queued.multipart) {
+        handle_single_archive_for_naming(queued.path);
+        mark_dirty();
+        return;
+    }
 
     // Set up naming_.zip with the archive metadata (gallery_name already derived)
     naming_.zip.path = queued.path;
@@ -1509,8 +1515,15 @@ void GalleryGrid::handle_single_archive_for_naming(const std::filesystem::path& 
 
 void GalleryGrid::handle_multiple_archives_enqueue(const std::vector<std::string>& paths)
 {
-    for (const auto& path : paths) {
-        std::filesystem::path zp = platform::utf8_to_path(path);
+    std::vector<std::filesystem::path> picked;
+    picked.reserve(paths.size());
+    for (const auto& path : paths) picked.push_back(platform::utf8_to_path(path));
+    for (const auto& source : plan_archive_selection(picked)) {
+        const auto& zp = source.path;
+        if (source.volumes.style != VolumeStyle::None) {
+            naming_.zip.queued_archives.emplace_back(zp, std::string{}, false, true, false, true);
+            continue;
+        }
         std::string ext = platform::path_to_utf8(zp.extension());
         std::ranges::transform(ext, ext.begin(),
                                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -1536,7 +1549,7 @@ void GalleryGrid::handle_multiple_archives_enqueue(const std::vector<std::string
         }
     }
 
-    // Process the first encrypted archive (if any)
+    // Process the first password prompt or volume-set confirmation (if any).
     if (!naming_.zip.queued_archives.empty()) {
         process_next_queued_zip_import();
     } else {

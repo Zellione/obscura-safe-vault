@@ -402,6 +402,11 @@ Picking any volume of a split set (`.7z.001`, `.z01`, `.partN.rar`, `.r00`, …)
 auto-discovers its siblings from the containing directory and opens
 `VolumeSetDialog` BEFORE anything is enqueued — importing a 40-part set is not
 something to do silently off one click.
+Bulk archive picks group selected parts into one set, including unselected siblings,
+and show this same confirmation once per set, followed by its gallery-name prompt.
+Cancelling a volume confirmation advances to the next deferred archive; cancelling
+the naming/password prompt abandons the remaining deferred picks. Ordinary unencrypted
+single archives still enqueue immediately during a bulk pick.
 - **Body:** heading `"Import N volumes as one archive?"`, then the volume names
   in VOLUME order (not sorted — a spanned zip's `.zip` is last, old-style RAR's
   `.rar` is first). Long sets show the first 8 and elide the rest as

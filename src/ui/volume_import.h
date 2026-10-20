@@ -13,10 +13,21 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace ui {
+
+struct ArchiveSelection {
+    std::filesystem::path path;
+    VolumeSet             volumes;
+};
+
+// Resolve selected files against their siblings and emit each volume set once,
+// including unselected siblings. Ordinary archives retain selection order.
+[[nodiscard]] std::vector<ArchiveSelection> plan_archive_selection(
+    std::span<const std::filesystem::path> paths);
 
 // What the confirm dialog renders. `can_import` false means a gap was found:
 // importing an incomplete set yields a corrupt gallery, not a partial one, so

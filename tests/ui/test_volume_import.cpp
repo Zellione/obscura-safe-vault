@@ -27,6 +27,49 @@ ui::VolumeSet make_set(ui::VolumeStyle style, std::vector<std::string> volumes,
 
 } // namespace
 
+TEST(volume_selection_groups_split_7z_and_rar_once)
+{
+    const auto dir = ziptest::fresh_dir("volume_selection");
+    for (const auto* name : {"photos.7z.001", "photos.7z.002", "photos.7z.003",
+                             "book.part1.rar", "book.part2.rar", "single.rar"}) {
+        std::ofstream(dir / name).put('x');
+    }
+    const std::vector<std::filesystem::path> picked{
+        dir / "photos.7z.002", dir / "book.part2.rar", dir / "photos.7z.001",
+        dir / "book.part1.rar", dir / "single.rar"};
+    const auto sources = ui::plan_archive_selection(picked);
+    REQUIRE(sources.size() == 3);
+    CHECK(sources[0].volumes.style == ui::VolumeStyle::NumericSuffix);
+    CHECK_EQ(sources[0].volumes.volumes.size(), size_t{3});
+    CHECK_EQ(sources[0].volumes.volumes.front(), "photos.7z.001");
+    CHECK_EQ(sources[0].volumes.stem, "photos.7z");
+    CHECK(sources[1].volumes.style == ui::VolumeStyle::RarPart);
+    CHECK_EQ(sources[1].volumes.volumes.front(), "book.part1.rar");
+    CHECK(sources[2].volumes.style == ui::VolumeStyle::None);
+    CHECK(sources[2].path == dir / "single.rar");
+    ziptest::cleanup_dir(dir);
+}
+
+TEST(volume_selection_keeps_gaps_and_separates_directories)
+{
+    const auto dir = ziptest::fresh_dir("volume_selection_gaps");
+    std::filesystem::create_directory(dir / "other");
+    for (const auto& parent : {dir, dir / "other"}) {
+        std::ofstream(parent / "photos.7z.001").put('x');
+        std::ofstream(parent / "photos.7z.003").put('x');
+    }
+    const std::vector<std::filesystem::path> picked{
+        dir / "photos.7z.001", dir / "other/photos.7z.003", dir / "photos.7z.003"};
+    const auto sources = ui::plan_archive_selection(picked);
+    REQUIRE(sources.size() == 2);
+    for (const auto& source : sources) {
+        REQUIRE(source.volumes.missing.size() == 1);
+        CHECK_EQ(source.volumes.missing.front(), 2);
+        CHECK_FALSE(ui::summarize_volume_set(source.volumes).can_import);
+    }
+    ziptest::cleanup_dir(dir);
+}
+
 // --- summary ----------------------------------------------------------------
 
 TEST(volume_summary_lists_every_volume_in_order)

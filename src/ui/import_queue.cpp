@@ -909,12 +909,11 @@ void ImportQueue::mark_task_complete(uint64_t task_id, const Task& result,
         // Check if the task was cancelled
         it->state = (progress && progress->cancel.load()) ? Cancelled : Done;
     }
-    // Counts are live-incremented by drain() per attached record; archive
-    // outcomes carry totals (incl. never-staged skips) on the worker copy
-    // instead. max() keeps whichever model fed this task without zeroing
-    // the other.
-    it->imported = std::max(it->imported, result.imported);
-    it->skipped  = std::max(it->skipped, result.skipped);
+    // Only drain() knows whether staged media was actually attached. Adding
+    // the worker's staging count here double-counts records drained later and
+    // reports destination collisions as imports. Worker skips happened before
+    // staging, so they are disjoint from drain's collision skips.
+    it->skipped += result.skipped;
 }
 
 // Task-boundary catch (Phase 68): an exception escaping a task's processing —

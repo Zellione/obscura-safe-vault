@@ -58,6 +58,10 @@ Import infrastructure: archive handling, plan building, vault population, import
   - `volume_import.*` — `summarize_volume_set` (pure; a gap is a REFUSAL, not a warning) +
     `assemble_volume_set` (reads volumes, applies `platform::normalize_user_path`, returns bytes
     for Concatenate/SpannedZipMerge or paths for FileOriented).
+    `plan_archive_selection` groups bulk picks against cached sibling listings, includes
+    unselected volumes, and emits each set once without conflating identical names in
+    different directories. GalleryGrid defers those sets through its existing volume
+    confirmation/name prompts alongside encrypted archives' password prompts.
   - `spanned_zip.*` — `merge_spanned_zip`: strips the 4-byte spanning marker, rewrites every CD
     entry's disk number + local-header offset to absolute, fixes the EOCD. Disk-0 offsets must
     subtract the stripped marker or the CD enumerates perfectly and every extraction fails. Zip64
@@ -159,9 +163,10 @@ Import infrastructure: archive handling, plan building, vault population, import
   error: <what>") instead of std::terminate (the decode-pool job body is guarded the same way).
   The generic catches are deliberate (accepted S1181/S2738 deviation, commented at the site).
   `mark_task_complete(task_id, result, progress)` now writes the worker's local task copy BACK
-  to the queued row — terminal Failed/Cancelled state + error, counts merged via `max()`
-  against the live drain-incremented counters (before Phase 68 the copy was discarded and a
-  failed archive rendered "✓ Done, 0 imported"). Every Failed task logs ONE
+  to the queued row — terminal Failed/Cancelled state + error. Imported counts come
+  only from successful attachment in `drain`; pre-staging worker skips are added to
+  drain's destination-collision skips. Staging totals must never be merged into imports:
+  records drained after worker completion would be counted twice. Every Failed task logs ONE
   `platform::log_error("Import", import_failure_log_line(name, reason))` line to
   `<config_dir>/error.log` from the choke point after mark_task_complete (names + ASCII
   reasons only — invariant #5). A corrupt ROOT archive fails the task ("Archive is corrupt or
