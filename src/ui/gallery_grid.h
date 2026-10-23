@@ -172,6 +172,7 @@ void toggle_select();          // toggle the current item in the export selectio
     void start_export();           // open the consent modal for the current selection
     void start_transfer();         // open the move-to-another-vault dialog
     void start_bulk_rename();
+    void finish_bulk_rename();
     void start_rename();           // R: rename the focused tile
     void start_combine();          // Shift+M: combine nav_.path() into another gallery
     void jump_to_gallery(const std::string& path);   // absolute nav: ascend to root, then descend
