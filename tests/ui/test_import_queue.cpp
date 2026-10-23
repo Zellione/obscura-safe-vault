@@ -1222,3 +1222,124 @@ TEST(import_queue_nested_tag_review_maps_each_gallery_and_survives_reopen)
     }
     ziptest::cleanup_dir(dir);
 }
+
+TEST(import_queue_folder_drain_is_bounded_and_final_save_is_tracked)
+{
+    const auto dir = ziptest::fresh_dir("import_bounded_folder");
+    const auto folder = dir / "input";
+    fs::create_directories(folder);
+    for (int i = 0; i < 100; ++i) {
+        const auto subfolder = folder / std::to_string(i);
+        fs::create_directories(subfolder);
+        const auto bytes = ziptest::fake_jpeg(static_cast<uint8_t>(i));
+        std::ofstream(subfolder / "image.jpg", std::ios::binary).write(
+            reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+    vault::Vault v;
+    REQUIRE(vault::Vault::create_directory((dir / "vault.osv").string(),
+        std::vector<uint8_t>{'p', 'w'}, {}, ziptest::kTestKdf, v) == vault::VaultResult::Ok);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
+    ui::ImportQueue queue;
+    queue.begin_session(v, lane);
+    (void)queue.enqueue_folder(folder, "", "gallery");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (queue.snapshot().front().state == ui::ImportTaskState::Queued ||
+           queue.snapshot().front().state == ui::ImportTaskState::Running) {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const int first = queue.drain(0.001);
+    CHECK(first > 0);
+    CHECK(first <= 32);
+    CHECK(queue.busy());
+    bool saw_save = queue.saving();
+    while (queue.busy()) {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        CHECK(queue.drain(0.001) <= 32);
+        saw_save = saw_save || queue.saving();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(saw_save);
+    REQUIRE(v.resolve_node("gallery/99"));
+    queue.end_session();
+    lane.stop();
+    v.lock();
+    vault::Vault reopened;
+    REQUIRE(ziptest::open_vault(dir / "vault.osv", reopened));
+    REQUIRE(reopened.resolve_node("gallery/99"));
+    reopened.lock();
+    ziptest::cleanup_dir(dir);
+}
+
+TEST(import_queue_cancel_wakes_backpressured_folder_producer)
+{
+    const auto dir = ziptest::fresh_dir("import_backpressure_cancel");
+    const auto folder = dir / "input";
+    for (int i = 0; i < 300; ++i) {
+        const auto subfolder = folder / std::to_string(i);
+        fs::create_directories(subfolder);
+        std::ofstream(subfolder / "image.jpg").put('x');
+    }
+    vault::Vault v;
+    REQUIRE(vaulttest::make_legacy_writable_vault(v, dir / "vault.osv"));
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
+    ui::ImportQueue queue;
+    queue.begin_session(v, lane);
+    const auto id = queue.enqueue_folder(folder, "", "gallery");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (queue.snapshot().front().total == 0) {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    REQUIRE(queue.cancel(id));
+    queue.end_session(); // Must wake/join a producer parked on a full record queue.
+    CHECK(queue.snapshot().front().state == ui::ImportTaskState::Cancelled);
+    lane.stop();
+    v.lock();
+    ziptest::cleanup_dir(dir);
+}
+
+TEST(import_queue_small_batches_are_durable_without_shutdown_flush)
+{
+    const auto dir = ziptest::fresh_dir("import_small_batches");
+    const auto bytes = ziptest::fake_jpeg(27);
+    const auto input = dir / "image.jpg";
+    std::ofstream(input, std::ios::binary).write(reinterpret_cast<const char*>(bytes.data()),
+                                               static_cast<std::streamsize>(bytes.size()));
+    vault::Vault v;
+    REQUIRE(vault::Vault::create_directory((dir / "vault.osv").string(),
+        std::vector<uint8_t>{'p','w'}, {}, ziptest::kTestKdf, v) == vault::VaultResult::Ok);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
+    ui::ImportQueue queue;
+    queue.begin_session(v, lane);
+    CHECK_EQ(queue.drain(0.001), 0);
+    CHECK(!queue.saving()); // Opening a vault is not an edit.
+    for (const auto* dest : {"first", "second"}) {
+        (void)queue.enqueue_files({input}, dest);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (queue.snapshot().back().state != ui::ImportTaskState::Done) {
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        CHECK_EQ(queue.drain(0.001), 1);
+        CHECK(queue.saving());
+        REQUIRE(drain_until_idle(queue));
+    }
+    test_only_drop_without_flush(queue);
+    lane.stop();
+    v.lock();
+    queue.end_session(); // Stopped lane cannot persist anything more.
+    vault::Vault reopened;
+    REQUIRE(ziptest::open_vault(dir / "vault.osv", reopened));
+    REQUIRE(reopened.resolve_node("first/image.jpg"));
+    REQUIRE(reopened.resolve_node("second/image.jpg"));
+    reopened.lock();
+    ziptest::cleanup_dir(dir);
+}

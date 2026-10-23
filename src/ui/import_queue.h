@@ -15,6 +15,7 @@
 #include <deque>
 #include <filesystem>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -45,8 +46,8 @@ struct DatasetTagReview {
 // tasks FIFO; per image file, decode+thumbnail runs on a small pool while
 // staging (encrypt+append) and record posting stay strictly in file order.
 // The main thread pumps drain() every frame to apply staged records to the
-// index tree (tree stays main-thread-only) and commits in batches via the
-// embedded CommitLane.
+// index tree (main thread except the explicit exclusive save window) and commits via the
+// App-owned CommitLane.
 class ImportQueue {
 public:
     ImportQueue();
@@ -104,8 +105,15 @@ public:
     // ---- per-frame pump (main thread) ----
     // Apply staged records (ensure_gallery_path/attach_staged), advance the
     // batch policy, enqueue lane snapshots when due. Returns the number of
-    // records applied (callers refresh screens when > 0).
+    // records applied. Refresh only when saving() is false, or after poll_save()
+    // returns true; a drain can transfer tree ownership to the save worker.
     int drain(double dt);
+    // While true, the save worker owns the tree. The host must not read/update
+    // screens, dispatch vault actions, or lock/destroy the vault. poll_save()
+    // reacquires ownership; end_session() also joins before touching the tree.
+    [[nodiscard]] bool saving() const noexcept { return save_.valid(); }
+    bool poll_save();
+    void wait_for_save();
     // Completed tasks expose their metadata separately; media is already imported.
     [[nodiscard]] std::optional<DatasetTagReview> take_tag_review();
     [[nodiscard]] bool apply_tag_review(const DatasetTagReview& pending,
@@ -193,6 +201,8 @@ private:
 
     // Internal state helpers
     void maybe_end_batch();
+    void request_save();
+    bool post_record(StagedRecord record, const std::shared_ptr<vault::OpProgress>& progress);
     void mark_task_skipped(uint64_t task_id);
     void mark_task_imported(uint64_t task_id);
     bool has_available_work() const;  // Called under lock
@@ -240,11 +250,12 @@ private:
 
     // Batch commit policy
     BatchCommitPolicy policy_;
+    std::future<bool> save_;
+    bool save_failed_ = false;
 
-    // Latch to end batch only once per busy→idle transition (Phase 65 defect fix).
-    // Set to false when work arrives (early return in maybe_end_batch), and set to
-    // true after enqueuing the final snapshot+flush. Prevents idle frames from
-    // repeatedly committing. Reset at begin_session so each session re-arms.
+    // One final snapshot per busy-to-idle transition. Enqueue re-arms this
+    // even if a tiny task completes before the next drain; completed history
+    // rows do not count as pending work.
     bool batch_ended_ = false;
 
     // Decode pool for images

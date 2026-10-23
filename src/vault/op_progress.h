@@ -27,7 +27,10 @@ struct CancellationToken {
 // Lives in vault/ (not ui/) so vault-level bulk ops (transfer, export helpers)
 // can report progress without a ui dependency. FileOpJob (Phase 25) and the
 // queue import workers share this type.
+enum class OpPhase { Working, Discovering, Extracting, Processing };
+
 struct OpProgress {
+    std::atomic<OpPhase> phase{OpPhase::Working};
     std::atomic<int>  total{0};
     std::atomic<int>  done{0};
     std::atomic<bool> cancel{false};

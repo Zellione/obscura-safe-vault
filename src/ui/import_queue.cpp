@@ -1,5 +1,6 @@
 #include "ui/import_queue.h"
 #include "platform/paths.h"
+#include "platform/perf.h"
 #include "ui/meta_json.h"
 #include "ui/tag_inherit.h"
 #include "ui/tag_list_parse.h"
@@ -212,13 +213,12 @@ private:
 class ImportQueue::StagingSink final : public MediaSink {
 public:
     StagingSink(vault::Vault& v, std::string dest_gallery, uint64_t task_id,
-                std::deque<StagedRecord>& records, std::mutex& mu,
+                ImportQueue& queue,
                 const std::shared_ptr<vault::OpProgress>& progress)
         : v_(v)
         , dest_gallery_(std::move(dest_gallery))
         , task_id_(task_id)
-        , records_(records)
-        , mu_(mu)
+        , queue_(queue)
         , progress_(progress)
     {
     }
@@ -228,11 +228,8 @@ public:
         const std::string path = dest_gallery_.empty()
                                      ? std::string(rel_gallery)
                                      : dest_gallery_ + "/" + std::string(rel_gallery);
-        {
-            std::lock_guard lock(mu_);
-            records_.emplace_back(path, std::nullopt, task_id_, false, std::string{});
-        }
-        return vault::VaultResult::Ok;
+        return queue_.post_record({path, std::nullopt, task_id_, false, {}}, progress_)
+            ? vault::VaultResult::Ok : vault::VaultResult::IoError;
     }
 
     [[nodiscard]] vault::VaultResult tag_gallery(std::string_view rel_gallery,
@@ -243,11 +240,8 @@ public:
         const std::string path = dest_gallery_.empty()
                                      ? std::string(rel_gallery)
                                      : dest_gallery_ + "/" + std::string(rel_gallery);
-        {
-            std::lock_guard lock(mu_);
-            records_.emplace_back(path, std::nullopt, task_id_, false, std::string(tag));
-        }
-        return vault::VaultResult::Ok;
+        return queue_.post_record({path, std::nullopt, task_id_, false, std::string(tag)}, progress_)
+            ? vault::VaultResult::Ok : vault::VaultResult::IoError;
     }
 
     [[nodiscard]] vault::VaultResult place_image(std::string_view rel_gallery,
@@ -258,16 +252,17 @@ public:
                                              ? std::string(rel_gallery)
                                              : dest_gallery_ + "/" + std::string(rel_gallery);
 
+        if (progress_) progress_->phase = vault::OpPhase::Processing;
+        const platform::PerfScope perf("import.process_image");
         // Stage the image (inline, no pool for archive imports)
         auto staged = vault::stage_image(v_, data, name, nullptr);
         if (staged.status != vault::VaultResult::Ok)
             return staged.status;
 
-        {
-            std::lock_guard lock(mu_);
-            records_.emplace_back(gallery_path, std::move(staged.node), task_id_, false, std::string{});
-        }
-        return vault::VaultResult::Ok;
+        const bool posted = queue_.post_record(
+            {gallery_path, std::move(staged.node), task_id_, false, {}}, progress_);
+        if (progress_) progress_->phase = vault::OpPhase::Extracting;
+        return posted ? vault::VaultResult::Ok : vault::VaultResult::IoError;
     }
 
     [[nodiscard]] vault::VaultResult place_video(std::string_view rel_gallery,
@@ -278,16 +273,17 @@ public:
                                              ? std::string(rel_gallery)
                                              : dest_gallery_ + "/" + std::string(rel_gallery);
 
+        if (progress_) progress_->phase = vault::OpPhase::Processing;
+        const platform::PerfScope perf("import.process_video");
         // Stage the video
         auto staged = vault::stage_video(v_, data, name);
         if (staged.status != vault::VaultResult::Ok)
             return staged.status;
 
-        {
-            std::lock_guard lock(mu_);
-            records_.emplace_back(gallery_path, std::move(staged.node), task_id_, false, std::string{});
-        }
-        return vault::VaultResult::Ok;
+        const bool posted = queue_.post_record(
+            {gallery_path, std::move(staged.node), task_id_, false, {}}, progress_);
+        if (progress_) progress_->phase = vault::OpPhase::Extracting;
+        return posted ? vault::VaultResult::Ok : vault::VaultResult::IoError;
     }
 
     [[nodiscard]] bool cancelled() const override
@@ -299,8 +295,7 @@ private:
     vault::Vault& v_;
     std::string dest_gallery_;
     uint64_t task_id_;
-    std::deque<StagedRecord>& records_;
-    std::mutex& mu_;
+    ImportQueue& queue_;
     std::shared_ptr<vault::OpProgress> progress_;
 };
 
@@ -331,6 +326,7 @@ void ImportQueue::begin_session(vault::Vault& v, vault::CommitLane& lane)
     // Phase 50: reset exclusive gate — a stale true from a torn-down screen must never
     // survive into a new session (would wedge imports forever).
     exclusive_ = false;
+    save_failed_ = false;
 
     // Phase 50: abort idempotence is per-session; reset the flag so end_session can call
     // abort_and_flush and actually stop the worker. A stale aborted_=true would make
@@ -353,7 +349,7 @@ void ImportQueue::begin_session(vault::Vault& v, vault::CommitLane& lane)
     // Phase 73: App must start the lane and install the router before begin_session
     assert(lane.running() && "App must start the lane before begin_session");
     worker_stop_ = false;
-    batch_ended_ = false;  // Re-arm the latch for the new session
+    batch_ended_ = true;  // No empty save on unlock; enqueue re-arms the latch.
     worker_ = std::jthread([this]() { worker_loop(); });
 }
 
@@ -396,11 +392,14 @@ void ImportQueue::abort_and_flush()
 
     // Notify worker to wake from wait (either exclusive release or worker_stop)
     worker_cv_.notify_all();
+    main_cv_.notify_all();
 
     // Wait for worker to finish
     if (worker_.joinable()) {
         worker_.join();
     }
+
+    wait_for_save();
 
     // Drain remaining records without holding lock during vault operations
     {
@@ -463,6 +462,7 @@ uint64_t ImportQueue::enqueue_files(std::vector<std::filesystem::path> files,
     task.progress->total.store(static_cast<int>(task.files.size()));
 
     tasks_.push_back(std::move(task));
+    batch_ended_ = false;
     worker_cv_.notify_one();
 
     return id;
@@ -499,6 +499,7 @@ uint64_t ImportQueue::enqueue_archive(std::filesystem::path archive,
     (void)password_protected;  // Note: used by archive executors internally
 
     tasks_.push_back(std::move(task));
+    batch_ended_ = false;
     worker_cv_.notify_one();
 
     return id;
@@ -538,6 +539,7 @@ uint64_t ImportQueue::enqueue_volume_set(std::vector<std::filesystem::path> volu
     };
 
     tasks_.push_back(std::move(task));
+    batch_ended_ = false;
     worker_cv_.notify_one();
     return id;
 }
@@ -568,6 +570,7 @@ uint64_t ImportQueue::enqueue_folder(std::filesystem::path root, std::string des
         .progress = std::make_shared<vault::OpProgress>(),
     };
     tasks_.push_back(std::move(task));
+    batch_ended_ = false;
     worker_cv_.notify_one();
     return id;
 }
@@ -585,6 +588,7 @@ bool ImportQueue::cancel(uint64_t id)
         }
         if (task.state != Running) return false;   // finished rows can't be cancelled
         if (task.progress) task.progress->cancel.store(true);
+        main_cv_.notify_all();
         return true;
     }
     return false;
@@ -607,6 +611,7 @@ bool ImportQueue::reorder(uint64_t id, int delta)
             .imported = t.imported,
             .skipped = t.skipped,
             .error = t.error,
+            .phase = t.progress ? t.progress->phase.load() : vault::OpPhase::Working,
         });
     }
 
@@ -676,20 +681,22 @@ void ImportQueue::mark_task_imported(uint64_t task_id)
 
 int ImportQueue::drain(double dt)
 {
-    // Collect records to process without holding the lock for vault operations
-    std::deque<StagedRecord> to_process;
-    {
-        std::lock_guard lock(mu_);
-        to_process = std::move(records_);
-        records_.clear();
-    }
-
-    // Apply records without holding the lock (vault operations can be slow)
+    const platform::PerfScope perf("import.drain", 4.0);
+    (void)poll_save();
+    if (saving() || !v_ || !lane_ || lane_failed() || exclusive_) return 0;
+    // Bound attachment work by both count and elapsed time. Pop only one record
+    // at a time so unprocessed FIFO work remains visible to busy()/tag review.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(4);
     int applied = 0;
-    while (!to_process.empty()) {
-        auto record = std::move(to_process.front());
-        to_process.pop_front();
-
+    while (applied < 32 && std::chrono::steady_clock::now() < deadline) {
+        StagedRecord record;
+        {
+            std::lock_guard lock(mu_);
+            if (records_.empty()) break;
+            record = std::move(records_.front());
+            records_.pop_front();
+            main_cv_.notify_all();
+        }
         if (!record.tag.empty()) {
             collect_dataset_tag(pending_tags_, record.task_id, std::move(record.gallery_path),
                                 std::move(record.tag));
@@ -712,21 +719,12 @@ int ImportQueue::drain(double dt)
         applied++;
     }
 
-    // Update policy and check conditions
-    {
-        std::lock_guard lock(mu_);
-        // Advance batch policy
-        policy_.tick(dt);
-
-        // Check if we should commit
-        if (policy_.due()) {
-            (void)lane_->enqueue_snapshot();
-            policy_.reset();
-        }
-
-        // Check if queue is idle
-        maybe_end_batch();
+    policy_.tick(dt);
+    if (policy_.due()) {
+        request_save();
+        policy_.reset();
     }
+    maybe_end_batch();
 
     return applied;
 }
@@ -744,7 +742,7 @@ std::vector<std::string> DatasetTagReview::tags() const
 std::optional<DatasetTagReview> ImportQueue::take_tag_review()
 {
     std::lock_guard lock(mu_);
-    if (!v_ || exclusive_ || aborted_) return std::nullopt;
+    if (!v_ || saving() || exclusive_ || aborted_) return std::nullopt;
     for (auto it = pending_tags_.begin(); it != pending_tags_.end(); ++it) {
         const auto task = std::ranges::find(tasks_, it->task_id, &Task::id);
         if (task != tasks_.end() && !task->finished()) continue;
@@ -760,7 +758,7 @@ std::optional<DatasetTagReview> ImportQueue::take_tag_review()
 
 bool ImportQueue::apply_tag_review(const DatasetTagReview& pending, const ImportTagReview& review)
 {
-    if (!v_ || !v_->is_unlocked() || aborted_) return false;
+    if (!v_ || saving() || !v_->is_unlocked() || aborted_) return false;
     for (const auto& assignment : pending.assignments) {
         const auto it = std::ranges::find_if(review.rows(), [&](const auto& row) {
             return tag_ci_equal(row.source, assignment.tag);
@@ -778,6 +776,7 @@ bool ImportQueue::apply_tag_review(const DatasetTagReview& pending, const Import
 bool ImportQueue::busy() const
 {
     std::lock_guard lock(mu_);
+    if (saving() || (lane_ && !lane_->idle())) return true;
     // Busy only if there are unfinished tasks or pending records
     for (const auto& t : tasks_) {
         if (!t.finished()) {
@@ -791,7 +790,7 @@ bool ImportQueue::lane_failed() const
 {
     if (!lane_)
         return false;
-    return lane_->failed();
+    return save_failed_ || lane_->failed();
 }
 
 std::vector<ImportTaskInfo> ImportQueue::snapshot() const
@@ -811,6 +810,7 @@ std::vector<ImportTaskInfo> ImportQueue::snapshot() const
             .imported = t.imported,
             .skipped = t.skipped,
             .error = t.error,
+            .phase = t.progress ? t.progress->phase.load() : vault::OpPhase::Working,
         });
     }
     return infos;
@@ -832,6 +832,7 @@ std::string ImportQueue::footer_summary() const
             .imported = t.imported,
             .skipped = t.skipped,
             .error = t.error,
+            .phase = t.progress ? t.progress->phase.load() : vault::OpPhase::Working,
         });
     }
 
@@ -840,7 +841,7 @@ std::string ImportQueue::footer_summary() const
         error_msg = "vault write error";
     }
 
-    return footer_import_summary(infos, lane_ && lane_->failed(), error_msg);
+    return footer_import_summary(infos, lane_failed(), error_msg);
 }
 
 // CALLED UNDER lock (mu_): wait for queued/running work or stop signal
@@ -927,10 +928,13 @@ void ImportQueue::run_worker_task(Task& work_task, const std::function<void()>& 
     try {
         if (hook) hook();
         if (work_task.kind == ImportTaskKind::Files) {
+            work_task.progress->phase = vault::OpPhase::Processing;
             process_files_task(work_task);
         } else if (work_task.kind == ImportTaskKind::Folder) {
+            work_task.progress->phase = vault::OpPhase::Discovering;
             process_folder_task(work_task);
         } else {
+            work_task.progress->phase = vault::OpPhase::Extracting;
             process_archive_task(work_task);
         }
     } catch (const std::exception& e) {
@@ -1127,9 +1131,8 @@ void ImportQueue::process_files_task(Task& task)
             auto staged = is_img ? vault::stage_image(*v_, pf.data, filename, thumb)
                                  : vault::stage_video(*v_, pf.data, filename);
             if (staged.status == vault::VaultResult::Ok) {
-                std::lock_guard lock(mu_);
-                records_.push_back(StagedRecord{task.dest_gallery, std::move(staged.node),
-                                               task.id, false, std::string{}});
+                (void)post_record({task.dest_gallery, std::move(staged.node),
+                                   task.id, false, {}}, task.progress);
                 if (task.progress) {
                     task.progress->done.store(static_cast<int>(pf.index) + 1);
                 }
@@ -1250,7 +1253,7 @@ void ImportQueue::process_volume_set_task(Task& task, StagingSink& sink,
 void ImportQueue::process_archive_task(Task& task)
 {
     using enum ImportTaskState;
-    StagingSink sink(*v_, task.dest_gallery, task.id, records_, mu_, task.progress);
+    StagingSink sink(*v_, task.dest_gallery, task.id, *this, task.progress);
 
     // Prepare password
     ui::ArchivePassword pw{.password_protected = false, .password = {}};
@@ -1307,7 +1310,7 @@ void ImportQueue::process_archive_task(Task& task)
 void ImportQueue::process_folder_task(Task& task)
 {
     using enum ImportTaskState;
-    StagingSink sink(*v_, task.dest_gallery, task.id, records_, mu_, task.progress);
+    StagingSink sink(*v_, task.dest_gallery, task.id, *this, task.progress);
 
     // Scan the folder
     const auto entries = scan_folder(task.archive_path);
@@ -1317,6 +1320,8 @@ void ImportQueue::process_folder_task(Task& task)
     // "Parent" landed under "Parent/Parent/...". At the vault root the two
     // cancelled out, which is why it went unnoticed.
     const auto plan = build_zip_plan(entries, "", task.gallery_name);
+
+    task.progress->phase = vault::OpPhase::Extracting;
 
     // Set total for progress tracking
     if (task.progress) {
@@ -1385,25 +1390,70 @@ void ImportQueue::place_folder_file(StagingSink& sink, const ZipPlacement& place
     mark_done();
 }
 
+bool ImportQueue::post_record(StagedRecord record,
+                              const std::shared_ptr<vault::OpProgress>& progress)
+{
+    std::unique_lock lock(mu_);
+    main_cv_.wait(lock, [&] {
+        return records_.size() < 256 || worker_stop_ || (progress && progress->cancel.load());
+    });
+    if (worker_stop_ || (progress && progress->cancel.load())) return false;
+    records_.push_back(std::move(record));
+    return true;
+}
+
+void ImportQueue::request_save()
+{
+    if (!lane_ || saving() || lane_failed()) return;
+    if (!vault::vault_uses_directory_storage(*v_)) {
+        (void)lane_->enqueue_snapshot();
+        return;
+    }
+    // Unlike legacy serialization this transfers tree ownership until poll_save.
+    // v3's session mutex serializes object publication with metadata sync.
+    save_ = std::async(std::launch::async, [this] {
+        const platform::PerfScope perf("import.save", 0.0);
+        return lane_->enqueue_snapshot();
+    });
+}
+
+bool ImportQueue::poll_save()
+{
+    if (!saving() || save_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return false;
+    wait_for_save();
+    return true;
+}
+
+void ImportQueue::wait_for_save()
+{
+    if (!save_.valid()) return;
+    try {
+        save_failed_ = !save_.get();
+    } catch (...) {
+        save_failed_ = true;
+        platform::log_error("Import", "metadata save worker failed");
+    }
+}
+
 void ImportQueue::maybe_end_batch()
 {
-    // Check if fully idle: no tasks, no records, lane idle
-    if (!tasks_.empty() || !records_.empty() || (lane_ && !lane_->idle())) {
-        // Work present: re-arm the latch for the next busy→idle transition
+    bool work_pending;
+    {
+        std::lock_guard lock(mu_);
+        work_pending = !records_.empty() ||
+            std::ranges::any_of(tasks_, [](const auto& task) { return !task.finished(); });
+    }
+    if (work_pending) {
         batch_ended_ = false;
         return;
     }
-
-    // Already ended this batch; do nothing until new work arrives (re-arms latch above)
     if (batch_ended_) return;
-
-    // First transition to idle: enqueue final snapshot and flush
-    // (App owns the lane and manages router installation/removal)
     batch_ended_ = true;
-    if (lane_) {
-        (void)lane_->enqueue_snapshot();
-        (void)lane_->flush();
-    }
+    // No blocking flush in the frame pump, and no queue mutex across disk I/O.
+    // A policy save started above already covers this final attachment batch.
+    if (!saving()) request_save();
+    policy_.reset();
 }
 
 // Test seam: joins the worker WITHOUT the final lane flush, simulating a crash
@@ -1438,11 +1488,14 @@ void test_only_drop_without_flush(ImportQueue& q)
 
     // Notify worker to wake
     q.worker_cv_.notify_all();
+    q.main_cv_.notify_all();
 
     // Wait for worker to finish
     if (q.worker_.joinable()) {
         q.worker_.join();
     }
+
+    q.wait_for_save();
 
     // Apply remaining records to the vault (same as abort_and_flush)
     {

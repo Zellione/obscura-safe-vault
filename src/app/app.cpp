@@ -1040,6 +1040,12 @@ bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
 void App::dispatch_event(const SDL_Event& e)
 {
     if (is_user_input(e)) idle_.reset();
+    if (import_ui_.queue.saving()) {
+        // Preserve quit requests until durability completes and ownership returns.
+        if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
+            import_ui_.replay_nav = ui::Nav{ui::NavKind::Quit, {}, 0};
+        return;
+    }
     // Phase 56: right-click is a universal "back". Translate it here, once, so
     // every screen and modal reuses its own Esc handling instead of growing a
     // parallel cancel path. The release is dropped — a surface that never saw
@@ -1147,7 +1153,7 @@ void App::open_settings_overlay(bool refresh_health)
 
 bool App::apply_nav()
 {
-    if (maintenance_ui_.running) return false;
+    if (maintenance_ui_.running || import_ui_.queue.saving()) return false;
     if (!screen_) return false;
     using enum ui::NavKind;
     // Phase 50: check for a replayed nav (from lock_confirm confirm) first
@@ -1272,6 +1278,7 @@ bool App::apply_nav()
 
 bool App::maybe_auto_lock(double dt)
 {
+    if (import_ui_.queue.saving()) return false;
     // should_auto_lock also covers "a screen with a background import owns the
     // vault's file handle on a worker thread" (blocks_idle_lock), the session's
     // "keep unlocked" toggle (Phase 33), a busy import queue (Phase 50), and a
@@ -1315,6 +1322,11 @@ bool App::maybe_auto_lock(double dt)
 void App::update(double dt)  // NOSONAR cpp:S3776 -- ordered lifecycle coordinator
 {
     const platform::PerfScope perf("app.update", 10.0);
+    if (import_ui_.queue.poll_save() && screen_) {
+        screen_->on_vault_changed();
+        screen_->mark_dirty();
+    }
+    if (import_ui_.queue.saving()) return;
     // Phase 87: while a MigrationJob is active it owns the vault EXCLUSIVELY and
     // mutates the index tree (compact() frees the very tree the grid was listing).
     // The owning screen must not read the vault until take_outcome() returns
@@ -1422,11 +1434,13 @@ void App::update(double dt)  // NOSONAR cpp:S3776 -- ordered lifecycle coordinat
 
     // Phase 50: drain the import queue and refresh screens when records are applied
     if (vault_state_.active && !maintenance_ui_.running &&
-        !(screen_ && screen_->blocks_idle_lock()) && import_ui_.queue.drain(dt) > 0 && screen_) {
+        !(screen_ && screen_->blocks_idle_lock()) &&
+        import_ui_.queue.drain(dt) > 0 && screen_ && !import_ui_.queue.saving()) {
         screen_->on_vault_changed();
         screen_->mark_dirty();
     }
-    if (vault_state_.active && !import_tags_.active() && !maintenance_ui_.running &&
+    if (vault_state_.active && !import_ui_.queue.saving() &&
+        !import_tags_.active() && !maintenance_ui_.running &&
         !(migration_ui_.job && migration_ui_.job->active()) &&
         !(screen_ && screen_->blocks_idle_lock()) && !overlays_.settings.open &&
         !migration_ui_.offer_open && !migration_ui_.result_open && !import_ui_.lock_confirm.open) {
@@ -1445,7 +1459,17 @@ void App::render_frame()  // NOSONAR cpp:S3776 -- ordered overlay composition
     const platform::PerfScope perf("frame", 20.0);
     const uint64_t render_start = SDL_GetTicksNS();
     window_.begin_frame(gfx::theme::BG.r, gfx::theme::BG.g, gfx::theme::BG.b);
-    if (screen_) {
+    if (import_ui_.queue.saving()) {
+        gfx::Renderer r(window_.sdl_renderer());
+        const auto activity = std::string("Encrypting and syncing vault metadata") +
+                              std::string(static_cast<size_t>((SDL_GetTicks() / 400) % 4), '.');
+        ui::draw_op_progress(r, font_, static_cast<float>(window_.width()),
+                             static_cast<float>(window_.height()),
+                             {.title = "Saving imported files…",
+                              .count_line = activity,
+                              .hint = "Please wait for the durable save",
+                              .done = 0, .total = 0});
+    } else if (screen_) {
         gfx::Renderer r(window_.sdl_renderer());
         // Phase 87: while a MigrationJob owns the vault exclusively, the owning
         // screen must not read the index tree (migration_job.h contract) — the
@@ -1568,7 +1592,8 @@ void App::run()
     uint64_t prev  = SDL_GetTicksNS();
 
     while (running_) {
-        const bool animating = maintenance_ui_.running || (screen_ && screen_->animating());
+        const bool animating = maintenance_ui_.running || import_ui_.queue.busy() ||
+                               (screen_ && screen_->animating());
         const bool should_redraw = pump_events(animating);
 
         const uint64_t now = SDL_GetTicksNS();
@@ -1606,6 +1631,7 @@ void App::shutdown()
     if (migration_ui_.job) migration_ui_.job->abort_and_join();
     if (maintenance_ui_.future.valid()) maintenance_ui_.future.wait();
     maintenance_ui_.running = false;
+    import_ui_.queue.wait_for_save();
     if (screen_) { screen_->on_exit(); screen_.reset(); }
     import_tags_.close();
     pending_import_tags_.reset();
