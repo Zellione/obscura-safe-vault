@@ -33,8 +33,22 @@ source. Success is shown only after deep verification, logical and plaintext
 comparison, and a cold credentialed reopen. Back up and manually test the new
 vault before deciding whether to remove the legacy file.
 
-The v3 directory contains only encrypted/authenticated material (`vault.db`,
-`vault.header`, and `objects/`). Explicit, consent-gated Export remains the sole
+V3 stores each original, thumbnail, and poster in a separate immutable encrypted
+file under `objects/<two-hex-digit-shard>/<random-object-id>.osvo`. A video is
+one object with independently authenticated frames for seeking. Galleries are
+database nodes, not files containing their children's media. `vault.db` encrypts
+display names, gallery relationships, tags, and object mappings. `vault.header`
+contains public format/KDF parameters and the authenticated wrapped master key.
+
+Opaque object IDs keep gallery structure off the filesystem. Physically mirroring
+galleries under encrypted folder names would reveal grouping and depth and would
+require coordinating filesystem moves with database transactions. The current
+layout already isolates media objects: metadata upgrades and local rename/move
+operations need not rewrite original media. It still depends on a healthy metadata
+database for names and relationships; separate files do not replace verified
+encrypted backups. Object counts, sizes, and modification times remain visible.
+
+Explicit, consent-gated Export remains the sole
 feature that writes decrypted media to disk. See
 [`docs/V3_VAULT_FORMAT.md`](docs/V3_VAULT_FORMAT.md) and
 [`docs/V3_BACKUP_AND_RECOVERY.md`](docs/V3_BACKUP_AND_RECOVERY.md).
@@ -44,6 +58,14 @@ confirm the plaintext warning with **Y**, and choose a destination. Selected
 folders include all nested folders and original images/videos, including empty
 folders. Existing names receive numbered suffixes; nothing is overwritten or
 merged. **Esc** cancels the running export and keeps completed output.
+
+## Rename inside a vault
+
+Hover a gallery name/tile (or an image/video) and press **R**. You can also focus
+an item with the keyboard and press **R**. The rename field starts with the current
+name selected: **Enter** saves, **Esc** cancels. Renaming changes metadata without
+rewriting media; unsafe names and sibling collisions are rejected. Legacy vaults
+are read-only.
 
 ## Copy between vaults
 

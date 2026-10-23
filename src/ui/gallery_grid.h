@@ -105,6 +105,7 @@ struct GridLocation {
 class GalleryGrid : public Screen {
     friend struct TransferOwnershipTestPeer;  // deterministic worker/UI ownership regression
     friend struct ArchiveSelectionTestPeer;  // bulk archive dialog/queue regression
+    friend struct GalleryRenameTestPeer;
 public:
     // Dialog pair for import/export file/folder selection.
     struct GridDialogs {

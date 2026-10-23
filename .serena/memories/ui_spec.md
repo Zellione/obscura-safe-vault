@@ -577,6 +577,11 @@ the vault and are discarded on session teardown. Mapping preserves destination
 metadata; cleanup never changes explicit edits. Empty results are skipped.
 
 ## Tag rename (Phase 118)
+Gallery/list pointer motion focuses the item under the pointer using the
+scroll-aware hit test. R renames that gallery/image/video; keyboard navigation
+overrides focus until the next pointer motion. Enter saves and Esc cancels.
+Modal input prevents pointer movement from retargeting an open rename.
+
 In tag administration, R opens the selected tag name for editing; Enter saves globally and Esc cancels. Case-only changes work; existing target tags are rejected. Description, fields, and saved-search tag clauses follow the rename. A category change must preserve existing fields. On success, clear the prefix filter and focus the renamed row. Read-only legacy vaults cannot rename tags.
 
 ## Legacy conversion form
