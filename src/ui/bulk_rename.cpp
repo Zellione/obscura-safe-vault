@@ -1,7 +1,9 @@
 #include "ui/bulk_rename.h"
 #include <algorithm>
-#include <chrono>
+#include <cassert>
 #include <format>
+#include <stdexcept>
+#include <system_error>
 #include <utility>
 #include "gfx/renderer.h"
 #include "gfx/text.h"
@@ -42,7 +44,7 @@ void BulkRename::open(std::vector<vault::RenameId> ids)
 }
 void BulkRename::close()
 {
-    if (work_.valid()) {
+    if (busy()) {
         progress_.cancel = true;
         (void)finish_work();
     }
@@ -57,43 +59,47 @@ void BulkRename::close()
 }
 void BulkRename::launch(std::function<void()> task)
 {
+    assert(!busy());
+    work_.done = false;
+    work_.failure = WorkFailure::None;
+    progress_.cancel = false;
     try {
-        std::promise<void> completion;
-        auto ready = completion.get_future();
-        progress_.cancel = false;
-        worker_ =
-            std::jthread([task = std::move(task), completion = std::move(completion)]() mutable {
-                try {
-                    task();
-                    completion.set_value();
-                } catch (...) {
-                    completion.set_exception(std::current_exception());
-                }
-            });
-        // Publish the future only once a worker exists. A launch failure must
-        // not leave a valid future that keeps the modal permanently busy.
-        work_ = std::move(ready);
-    } catch (...) {
-        error_ = "Could not start rename operation.";
+        work_.thread = std::jthread([this, task = std::move(task)] {
+            // Allocation-free failure transport. Only the owning UI thread
+            // reads failure, after joining; no exception text crosses threads.
+            try {
+                task();
+            } catch (const std::bad_alloc&) {
+                work_.failure = WorkFailure::Memory;
+            } catch (const std::length_error&) {
+                work_.failure = WorkFailure::Size;
+            } catch (const std::system_error&) {
+                work_.failure = WorkFailure::System;
+            } catch (const std::runtime_error&) {
+                work_.failure = WorkFailure::Runtime;
+            } catch (const std::out_of_range&) {
+                work_.failure = WorkFailure::Bounds;
+            }
+            work_.done = true;
+        });
+    } catch (const std::bad_alloc&) {
+        error_ = "Not enough memory to start rename operation.";
+        platform::log_error("BulkRename", "Worker allocation failed.");
+    } catch (const std::system_error&) {
+        error_ = "Could not start rename worker.";
         platform::log_error("BulkRename", "Could not start worker.");
     }
 }
 bool BulkRename::finish_work()
 {
-    // Promise readiness precedes destruction of the worker's captures. Join
-    // before returning tree ownership or freeing any modal data they can use.
-    if (worker_.joinable()) worker_.join();
-    try {
-        work_.get();
-        return true;
-    } catch (...) {
-        error_ = "Operation failed.";
-        preview_ready_ = false;
-        // Never log what(): a library exception may contain private metadata.
-        platform::log_error("BulkRename",
-                            "Worker failed; result consumed before releasing ownership.");
-        return false;
-    }
+    // Even a published done flag precedes destruction of the task's captures.
+    // Join before returning tree ownership or freeing modal data they can use.
+    work_.thread.join();
+    if (work_.failure == WorkFailure::None) return true;
+    error_ = "Operation failed.";
+    preview_ready_ = false;
+    platform::log_error("BulkRename", "Worker failed; result consumed before releasing ownership.");
+    return false;
 }
 void BulkRename::preview()
 {
@@ -118,7 +124,7 @@ void BulkRename::apply()
 }
 void BulkRename::update()
 {
-    if (!busy() || work_.wait_for(std::chrono::seconds{0}) != std::future_status::ready) return;
+    if (!busy() || !work_.done.load()) return;
     if (!finish_work()) return;
     if (applying_) {
         if (result_ == vault::VaultResult::Ok) {

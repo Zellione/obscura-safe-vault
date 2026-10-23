@@ -143,13 +143,15 @@ Integration tasks for the parent:
 
 ## Owned-worker follow-up
 
-The bulk modal now owns a `std::jthread` and uses a promise/future only for
-completion and exception transport. The future is published after successful
-thread creation; construction failures leave the modal non-busy. Both polling
-and teardown join before consuming the result and releasing tree ownership.
-Worker exceptions produce a fixed diagnostic, never exception `what()` text,
-and teardown no longer has an empty catch. The modal and name rollback guard
-explicitly delete copy/move operations. No Sonar suppressions were added.
+The bulk modal owns a `std::jthread` plus a `WorkState` containing an atomic
+completion flag and an allocation-free failure enum, matching Phase B. There
+are no futures, promises or catch-all handlers. Known allocation, length,
+system, runtime and bounds errors are recorded by typed handlers; unexpected
+exception types are not silently swallowed. Thread construction catches memory
+and system failures and leaves the modal non-busy. Both polling and teardown
+join before reading failure and releasing tree ownership. Failures produce a
+fixed diagnostic, never exception `what()` text. The modal and name rollback
+guard explicitly delete copy/move operations. No Sonar suppressions were added.
 
 A regression test injects a throwing task through a private test peer, exercises
 polling and teardown error paths, then verifies cancellation is observed and

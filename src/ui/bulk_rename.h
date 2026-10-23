@@ -1,7 +1,7 @@
 #pragma once
 #include <SDL3/SDL.h>
+#include <atomic>
 #include <functional>
-#include <future>
 #include <thread>
 #include "ui/secure_text_input.h"
 #include "ui/widgets.h"
@@ -32,7 +32,7 @@ public:
     }
     [[nodiscard]] bool busy() const
     {
-        return work_.valid();
+        return work_.thread.joinable();
     }
     [[nodiscard]] bool consume_completed();
 
@@ -45,8 +45,13 @@ private:
     vault::Vault& vault_;
     gfx::Window& win_;
     ImportQueue& queue_;
-    std::future<void> work_;
-    std::jthread worker_;
+    enum class WorkFailure { None, Memory, Size, System, Runtime, Bounds };
+    struct WorkState {
+        std::atomic_bool done{false};
+        WorkFailure failure = WorkFailure::None;  // Read only after joining.
+        std::jthread thread;
+    };
+    WorkState work_;
     vault::OpProgress progress_;
     std::vector<vault::RenameId> ids_;
     vault::RenamePreview preview_;
