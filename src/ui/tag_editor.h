@@ -64,6 +64,20 @@ private:
     std::string_view finish_work();
     void launch(std::function<void()> work);
     void run_work(const std::function<void()>& work);
+    bool handle_bundle_event(const SDL_Event& event);
+    void render_bundles(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
+    void open_bundle_form(bool create);
+    void run_bundle_action(bool remove);
+    void preview_bundle_change();
+    std::string bundle_original_name_, bundle_preview_;
+    bool bundle_mode_ = false;
+    bool bundle_form_ = false;
+    bool bundle_confirm_ = false;
+    bool bundle_delete_ = false;
+    int bundle_selected_ = 0;
+    int bundle_field_ = 0;
+    TextInputModel bundle_name_, bundle_members_;
+    TextFieldChrome bundle_name_chrome_, bundle_members_chrome_;
     void finish_add();
     void refresh_tags();              // reload the node's current tags from the vault
     void refresh_vocabulary();        // reload the vault-wide tag vocabulary (Phase 29)
@@ -105,6 +119,7 @@ private:
     TagFieldsForm        fields_form_{vault_, win_};
     bool                       active_ = false;
     std::vector<std::string>   node_paths_;    // one or many (Phase 45 Part 2)
+    std::vector<std::string> tag_sources_;
     std::vector<TagTallyEntry> tally_;         // union of node_paths_' tags + counts
     std::vector<std::string>   inherited_;     // read-only ancestor-gallery tags
                                                 // (single-node mode only — see refresh_tags)

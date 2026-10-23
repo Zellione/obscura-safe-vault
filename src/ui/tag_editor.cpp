@@ -2,6 +2,8 @@
 #include <new>
 #include <stdexcept>
 #include <system_error>
+#include <map>
+#include <set>
 #include "platform/error_log.h"
 #include "ui/import_queue.h"
 #include "ui/progress_modal.h"
@@ -148,6 +150,7 @@ void TagEditor::open(std::string node_path)
 void TagEditor::open_multi(std::vector<std::string> node_paths)
 {
     close();
+    bundle_mode_ = bundle_form_ = bundle_confirm_ = false;
     active_ = true;
     if (queue_.busy()) {
         error_ = "Wait for imports to finish before editing tags.";
@@ -183,6 +186,12 @@ void TagEditor::close()
     active_ = false;
     SDL_StopTextInput(win_.sdl_window());
     node_paths_.clear();
+    tag_sources_.clear();
+    bundle_name_.clear();
+    bundle_members_.clear();
+    bundle_original_name_.clear();
+    bundle_preview_.clear();
+    bundle_mode_ = bundle_form_ = bundle_confirm_ = false;
     tally_.clear();
     inherited_.clear();
     from_contents_.clear();
@@ -284,10 +293,27 @@ void TagEditor::load_per_node_tags()
     std::vector<std::vector<std::string>> per_node_tags;
     per_node_tags.reserve(node_paths_.size());
     int resolved = 0;
+    const auto key = [](std::string_view tag) {
+        std::string result(tag);
+        for (char& ch : result)
+            if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch + ('a' - 'A'));
+        return result;
+    };
+    std::map<std::string, size_t> manual_counts;
+    std::map<std::string, std::set<std::string>> bundle_sources;
+    const auto& bundles = vault::vault_settings(vault_).tag_bundles;
 
     for (const auto* node : vault::resolve_node_selection(vault_, node_paths_)) {
         if (node) {
             per_node_tags.push_back(tag_strings(node->tags));
+            for (const auto& tag : node->tag_provenance ? node->explicit_tags : node->tags)
+                ++manual_counts[key(tag.view())];
+            for (const auto& id : node->tag_bundles) {
+                const auto bundle = std::ranges::find(bundles, id, &vault::TagBundle::id);
+                if (bundle != bundles.end())
+                    for (const auto& tag : bundle->tags)
+                        bundle_sources[key(tag.view())].emplace(bundle->name.view());
+            }
             ++resolved;
         }
     }
@@ -297,6 +323,14 @@ void TagEditor::load_per_node_tags()
         return;
     }
     tally_ = compute_tag_tally(per_node_tags);
+    tag_sources_.clear();
+    for (const auto& row : tally_) {
+        const auto tag = key(row.tag);
+        std::string sources = std::format("Manual: {} selection items", manual_counts[tag]);
+        for (const auto& bundle : bundle_sources[tag])
+            sources += "; bundle: " + bundle;
+        tag_sources_.push_back(std::move(sources));
+    }
 }
 
 void TagEditor::refresh_tags()
@@ -338,6 +372,13 @@ bool TagEditor::handle_event(const SDL_Event& e)
     }
     if (!owns_exclusive_) {
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) close();
+        return true;
+    }
+
+    if (bundle_mode_) return handle_bundle_event(e);
+    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F3) {
+        bundle_mode_ = true;
+        bundle_selected_ = 0;
         return true;
     }
 
@@ -438,6 +479,11 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
         return;
     }
 
+    if (bundle_mode_) {
+        render_bundles(r, font, W, H);
+        return;
+    }
+
     using namespace gfx::theme;
     const float LINE      = line_pitch(font.pixel_height());
     const float TAG_ROW_H = row_height(font.pixel_height(), 6.0f);
@@ -533,7 +579,10 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     // Error message: one LINE pitch above the hint
     const float error_y = my + MODAL_H - 2.0f * LINE - PAD;
     if (!error_.empty()) {
-        r.draw_text(font, mx + PAD, error_y, error_, DANGER);
+        r.draw_text(font, mx + PAD, error_y, fit_text(font, error_, MODAL_W - 2 * PAD), DANGER);
+    } else if (selected_ >= 0 && selected_ < static_cast<int>(tag_sources_.size())) {
+        r.draw_text(font, mx + PAD, error_y,
+                    fit_text(font, tag_sources_[selected_], MODAL_W - 2 * PAD), TEXT_DIM);
     }
 
     // Footer hint: one LINE pitch above the modal bottom
@@ -542,7 +591,7 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     // the app's font this hint is wider than the modal, so drawing it raw put
     // "[Esc] Close" outside the right border.
     r.draw_text(font, mx + PAD, hint_y,
-                fit_text(font, "[Enter] Add  [Up/Down] Scroll  [Del] Remove  [Esc] Close",
+                fit_text(font, "[Enter] Add [Del] Remove manual [F3] Bundles [Esc] Close",
                          MODAL_W - 2 * PAD),
                 TEXT_FAINT);
 
@@ -567,7 +616,7 @@ void TagEditor::draw_tag_rows(gfx::Renderer& r, gfx::FontAtlas& font, float mx, 
     const auto& cats = vault::vault_settings(vault_).categories;
 
     // Header shows the visible range / count so hidden tags are discoverable.
-    std::string header = "Current tags";
+    std::string header = "Effective tags (manual or bundle)";
     if (total > max_visible) {
         header += std::format(" ({}-{} of {})", first + 1, last, total);
     } else if (total > 0) {

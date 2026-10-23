@@ -178,3 +178,56 @@ TEST(tag_editor_worker_resource_failures_join_and_allow_retry)
     }
     std::filesystem::remove_all(path);
 }
+
+TEST(tag_editor_bundle_admin_preview_apply_remove_and_delete)
+{
+    const auto path = std::filesystem::temp_directory_path() / "osv-bundle-editor-job.osv";
+    std::filesystem::remove_all(path);
+    {
+        vault::Vault v;
+        REQUIRE(vaulttest::make_directory_vault(v, path));
+        REQUIRE(v.create_gallery("one") == vault::VaultResult::Ok);
+        REQUIRE(v.add_tag("one", "manual") == vault::VaultResult::Ok);
+        gfx::Window window;
+        ui::ImportQueue queue;
+        ui::TagEditor editor(v, window, queue);
+        editor.open("one");
+        REQUIRE(finish(editor));
+        const auto press = [&](SDL_Keycode code) {
+            SDL_Event key{};
+            key.type = SDL_EVENT_KEY_DOWN;
+            key.key.key = code;
+            return editor.handle_event(key);
+        };
+        const auto type = [&](const char* value) {
+            SDL_Event text{};
+            text.type = SDL_EVENT_TEXT_INPUT;
+            text.text.text = value;
+            return editor.handle_event(text);
+        };
+        CHECK(press(SDLK_F3));
+        CHECK(press(SDLK_F2));
+        CHECK(type("bundle"));
+        CHECK(press(SDLK_TAB));
+        CHECK(type("manual;bundled"));
+        CHECK(press(SDLK_F5));
+        REQUIRE(finish(editor));
+        CHECK(press(SDLK_RETURN));
+        REQUIRE(finish(editor));
+        REQUIRE(vault::vault_settings(v).tag_bundles.size() == 1);
+        CHECK(press(SDLK_RETURN));
+        REQUIRE(finish(editor));
+        CHECK_EQ(v.resolve_node("one")->tags.size(), size_t{2});
+        CHECK(press(SDLK_DELETE));
+        REQUIRE(finish(editor));
+        CHECK_EQ(v.resolve_node("one")->tags.size(), size_t{1});
+        CHECK(v.resolve_node("one")->tags[0] == "manual");
+        CHECK(press(SDLK_F6));
+        REQUIRE(finish(editor));
+        CHECK(press(SDLK_RETURN));
+        REQUIRE(finish(editor));
+        CHECK(vault::vault_settings(v).tag_bundles.empty());
+        editor.close();
+    }
+    std::filesystem::remove_all(path);
+}
