@@ -321,3 +321,49 @@ TEST(tag_bundles_gallery_move_commit_failure_does_not_prune_source)
     }
     std::filesystem::remove_all(dir);
 }
+
+TEST(tag_bundles_normalize_members_like_manual_tags_and_preserve_provenance)
+{
+    const auto path = std::filesystem::temp_directory_path() / "osv-bundle-normalize.osv";
+    std::filesystem::remove_all(path);
+    using enum vault::VaultResult;
+    const std::vector<std::string> members{" red ",      "RED",      "",      "\t\r\n",
+                                           " new york ", "New York", " blue "};
+    const std::vector<std::string> paths{"one"};
+    {
+        vault::Vault v;
+        REQUIRE(vaulttest::make_directory_vault(v, path));
+        REQUIRE(v.create_gallery("one") == Ok);
+        REQUIRE(v.create_gallery("ordinary") == Ok);
+        REQUIRE(v.set_tags("ordinary", members) == Ok);
+        REQUIRE(vault::save_tag_bundle(v, "bundle", members) == Ok);
+        CHECK(vault::vault_settings(v).tag_bundles[0].tags == v.resolve_node("ordinary")->tags);
+        REQUIRE(v.add_tag("one", "red") == Ok);
+        REQUIRE(vault::apply_tag_bundle(v, paths, "bundle", false) == Ok);
+        REQUIRE(v.add_tag("one", " BLUE ") == Ok);
+        REQUIRE(vault::remove_tag_batch(v, paths, " RED ") == Ok);
+        CHECK_EQ(v.resolve_node("one")->tags.size(), size_t{3});
+        REQUIRE(vault::apply_tag_bundle(v, paths, "bundle", true) == Ok);
+        REQUIRE(v.resolve_node("one")->tags.size() == 1);
+        CHECK(vault::tag_ci_equal(v.resolve_node("one")->tags[0].view(), "blue"));
+    }
+    {
+        vault::Vault v;
+        REQUIRE(vaulttest::open_vault(path, v));
+        REQUIRE(vault::vault_settings(v).tag_bundles[0].tags.size() == 3);
+        CHECK(vault::vault_settings(v).tag_bundles[0].tags[1] == "new york");
+        REQUIRE(vault::apply_tag_bundle(v, paths, "bundle", false) == Ok);
+        REQUIRE(v.remove_tag("one", " blue ") == Ok);
+        CHECK_EQ(v.resolve_node("one")->tags.size(), size_t{3});
+        REQUIRE(vault::save_tag_bundle(v, "bundle", {"", "  ", "\t\n"}) == Ok);
+        CHECK(v.resolve_node("one")->tags.empty());
+        CHECK(vault::vault_settings(v).tag_bundles[0].tags.empty());
+    }
+    {
+        vault::Vault v;
+        REQUIRE(vaulttest::open_vault(path, v));
+        CHECK(v.resolve_node("one")->tags.empty());
+        CHECK(vault::vault_settings(v).tag_bundles[0].tags.empty());
+    }
+    std::filesystem::remove_all(path);
+}

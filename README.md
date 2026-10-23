@@ -106,6 +106,8 @@ definition. **Tab** switches the name/member fields. Separate member tags with
 semicolons; use a backslash to escape a literal semicolon or backslash. **F5**
 previews affected applications and tag changes; **Enter** confirms, **Esc** cancels.
 Editing a definition updates all its applications. Bundles contain ordinary tags.
+Member tags have surrounding whitespace trimmed; empty members and case-insensitive
+duplicates are removed, preserving the first spelling, just like ordinary tags.
 Global **F2** continues to open Settings.
 
 Bundle definitions and ownership are stored in encrypted metadata schema 3.

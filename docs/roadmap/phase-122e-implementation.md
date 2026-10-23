@@ -140,4 +140,11 @@ The category integration regression failed before adding explicit/bundle-member
 references, then passed with namespace collision checks and manual ownership
 preserved after reopen/removal. The F8 administration regression also failed
 before replacing F2, which the App reserves for global Settings. Full integrated
-sanitizer and CI/Sonar gates are pending.
+Debug, Release and ASAN/UBSan/LSan suites passed all 2,544 tests at that integration
+point. CI/Sonar gates are tracked on the PR.
+
+Two subsequent normalization regressions failed before the fix: bundle persistence
+and editor preview now share ordinary tags' whitespace trimming and case-insensitive
+deduplication. Removal after reopen preserves matching manual assignments. The
+focused tag suite passed 305 tests with this fix; the full Debug suite then passed
+all **2,546 tests**. Final sanitizer and remote review results are tracked on the PR.

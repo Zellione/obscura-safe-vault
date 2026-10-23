@@ -656,6 +656,9 @@ stale IDs/parents/names, prepares rollback before mutation, and commits once.
 `Database::sync_metadata` uses transaction-local BLOB ID placeholders for names
 before upserts, permitting swaps/cycles without changing sibling uniqueness.
 
+`tag_normalization.h` shares whitespace trimming and case-insensitive deduplication
+between ordinary tag edits, bundle persistence and the bundle editor preview.
+
 `tag_bundles.*`: VaultSettings definitions keyed by stable 128-bit IDs; IndexNode
 explicit_tags + tag_bundles + tag_provenance yield local effective tags. Definition
 edit/delete and selection apply/remove commit atomically with rollback. Direct tag

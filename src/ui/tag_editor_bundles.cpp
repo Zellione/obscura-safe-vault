@@ -7,6 +7,7 @@
 #include "ui/text_input_event.h"
 #include "ui/text_metrics.h"
 #include "vault/tag_bundles.h"
+#include "vault/tag_normalization.h"
 #include "vault/vault.h"
 
 namespace ui {
@@ -30,7 +31,7 @@ std::vector<std::string> parse_members(std::string_view text)
     }
     if (escaped) member += '\\';
     if (!member.empty()) tags.push_back(std::move(member));
-    return tags;
+    return vault::normalise_tags(tags);
 }
 }  // namespace
 

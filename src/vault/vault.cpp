@@ -1,5 +1,6 @@
 #include "vault.h"
 #include "vault/tag_bundles.h"
+#include "vault/tag_normalization.h"
 
 #include <unordered_map>
 
@@ -138,20 +139,6 @@ using vault_ops::for_each_media;
 using vault_ops::resolve_gallery;
 using vault_ops::split_path;
 
-// Trim ASCII whitespace from start and end of a string_view.
-std::string_view trim_ws(std::string_view s)
-{
-    size_t start = 0;
-    while (start < s.size() &&
-           (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r'))
-        ++start;
-    size_t end = s.size();
-    while (end > start &&
-           (s[end - 1] == ' ' || s[end - 1] == '\t' || s[end - 1] == '\n' || s[end - 1] == '\r'))
-        --end;
-    return s.substr(start, end - start);
-}
-
 // Case-insensitive substring check.
 bool ci_contains(std::string_view haystack, std::string_view needle)
 {
@@ -169,36 +156,6 @@ bool ci_contains(std::string_view haystack, std::string_view needle)
         if (match) return true;
     }
     return false;
-}
-
-// Normalise a single tag: trim whitespace, return empty_view if empty after trim.
-std::string_view normalise_tag(std::string_view tag)
-{
-    return trim_ws(tag);
-}
-
-// Normalise and deduplicate a list of tags (case-insensitively, keeping first
-// occurrence's casing). Empties and whitespace-only tags are dropped.
-std::vector<std::string> normalise_tags(const std::vector<std::string>& input)
-{
-    std::vector<std::string> out;
-    for (const auto& tag : input) {
-        auto trimmed = normalise_tag(tag);
-        if (trimmed.empty()) continue;
-
-        // Check for case-insensitive duplicate.
-        bool found = false;
-        for (const auto& existing : out) {
-            if (tag_ci_equal(existing, trimmed)) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            out.emplace_back(trimmed);
-        }
-    }
-    return out;
 }
 
 // Build effective_tags: union of node's own tags and inherited tags, case-insensitively

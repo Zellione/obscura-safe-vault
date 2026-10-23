@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <memory>
 #include "crypto/random.h"
+#include "vault/tag_normalization.h"
 #include "vault/vault.h"
 
 namespace vault {
@@ -114,15 +115,14 @@ VaultResult save_tag_bundle(Vault& v, std::string_view name, const std::vector<s
 {
     using enum VaultResult;
     if (const auto r = BundleAccess::check(v); r != Ok) return r;
-    if (name.empty() || name.size() > 255 || name.contains('\0') || tags.size() > INDEX_MAX_TAGS)
+    const auto members = normalise_tags(tags);
+    if (name.empty() || name.size() > 255 || name.contains('\0') || members.size() > INDEX_MAX_TAGS)
         return InvalidArg;
     TagBundle replacement;
     replacement.name = name;
-    for (const auto& tag : tags) {
-        if (tag.empty() || tag.size() > 65535 || tag.contains('\0')) return InvalidArg;
-        if (std::ranges::none_of(replacement.tags,
-                                 [&](const auto& t) { return tag_ci_equal(t.view(), tag); }))
-            replacement.tags.emplace_back(tag);
+    for (const auto& tag : members) {
+        if (tag.size() > 65535 || tag.contains('\0')) return InvalidArg;
+        replacement.tags.emplace_back(tag);
     }
     BundleAccess change(v);
     auto& bundles = change.bundles();

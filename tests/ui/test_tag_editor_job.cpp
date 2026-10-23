@@ -1,16 +1,17 @@
 #include <chrono>
 #include <cstdlib>
-#include <print>
-#include <thread>
 #include <new>
+#include <print>
 #include <stdexcept>
 #include <system_error>
+#include <thread>
 #include "crypto/random.h"
 #include "gfx/window.h"
 #include "test_framework.h"
 #include "ui/import_queue.h"
 #include "ui/tag_editor.h"
 #include "vault/fixtures.h"
+#include "vault/tag_bundles.h"
 
 namespace {
 bool finish(ui::TagEditor& editor, std::chrono::seconds timeout = std::chrono::seconds{10})
@@ -136,6 +137,17 @@ struct TagEditorTestAccess {
         editor.launch(std::move(work));
     }
     static bool has_error(const TagEditor& editor) { return !editor.error_.empty(); }
+    static void preview_bundle(TagEditor& editor, std::string_view members)
+    {
+        editor.bundle_mode_ = true;
+        editor.open_bundle_form(false);
+        editor.bundle_members_.set_text(members);
+        editor.preview_bundle_change();
+    }
+    static std::string_view bundle_preview(const TagEditor& editor)
+    {
+        return editor.bundle_preview_;
+    }
 };
 }
 
@@ -227,6 +239,50 @@ TEST(tag_editor_bundle_admin_preview_apply_remove_and_delete)
         CHECK(press(SDLK_RETURN));
         REQUIRE(finish(editor));
         CHECK(vault::vault_settings(v).tag_bundles.empty());
+        editor.close();
+    }
+    std::filesystem::remove_all(path);
+}
+
+TEST(tag_editor_bundle_normalization_preview_matches_committed_effects)
+{
+    const auto path = std::filesystem::temp_directory_path() / "osv-bundle-preview-normalize.osv";
+    std::filesystem::remove_all(path);
+    using enum vault::VaultResult;
+    {
+        vault::Vault v;
+        REQUIRE(vaulttest::make_directory_vault(v, path));
+        REQUIRE(v.create_gallery("one") == Ok);
+        REQUIRE(vault::save_tag_bundle(v, "bundle", {"shared", "gone"}) == Ok);
+        REQUIRE(vault::apply_tag_bundle(v, std::vector<std::string>{"one"}, "bundle", false) == Ok);
+        gfx::Window window;
+        ui::ImportQueue queue;
+        ui::TagEditor editor(v, window, queue);
+        editor.open("one");
+        REQUIRE(finish(editor));
+        ui::TagEditorTestAccess::preview_bundle(editor,
+                                                " shared ; SHARED; ; new\\;tag; new\\;TAG; ");
+        REQUIRE(finish(editor));
+        CHECK(ui::TagEditorTestAccess::bundle_preview(editor) ==
+              "Save: 1 applications, 1 tags added, 1 removed.");
+        CHECK(v.resolve_node("one")->tags[1] == "gone");
+        SDL_Event enter{};
+        enter.type = SDL_EVENT_KEY_DOWN;
+        enter.key.key = SDLK_RETURN;
+        CHECK(editor.handle_event(enter));
+        REQUIRE(finish(editor));
+        REQUIRE(vault::vault_settings(v).tag_bundles[0].tags.size() == 2);
+        CHECK(vault::vault_settings(v).tag_bundles[0].tags[0] == "shared");
+        CHECK(vault::vault_settings(v).tag_bundles[0].tags[1] == "new;tag");
+        CHECK(v.resolve_node("one")->tags == vault::vault_settings(v).tag_bundles[0].tags);
+        ui::TagEditorTestAccess::preview_bundle(editor, " ;  ; ");
+        REQUIRE(finish(editor));
+        CHECK(ui::TagEditorTestAccess::bundle_preview(editor) ==
+              "Save: 1 applications, 0 tags added, 2 removed.");
+        CHECK(editor.handle_event(enter));
+        REQUIRE(finish(editor));
+        CHECK(v.resolve_node("one")->tags.empty());
+        CHECK(vault::vault_settings(v).tag_bundles[0].tags.empty());
         editor.close();
     }
     std::filesystem::remove_all(path);
