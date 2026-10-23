@@ -230,10 +230,11 @@ and chrome are grouped per field; and declarations/container operations follow
 the reported conventions.
 
 PCRE2's required UTF-8 width macro belongs to its configuration wrapper. Its
-allocation storage now uses zero-initialized `std::byte[]` (whose allocation
-supports fundamental alignment), an explicitly constructed aligned header, and
-matching `delete[]`. Payload locking, wiping before release, and the shared
-8 MiB budget are unchanged. The C free callback adapts to a typed helper.
+allocation storage uses the existing `crypto::SecureAllocator`, a scalar
+`unique_ptr` with a secure deallocator, and an explicitly constructed aligned
+size header. Scratch bytes are zero-initialized. Payload locking, wiping before
+release, and the shared 8 MiB budget are preserved; the C free callback adapts to
+a typed helper. The final ownership cleanup passed 35 focused rename tests.
 
 Validation: 20 focused tests passed normally and with ASAN/UBSan/LSan, including
 all four transported worker error types, preview/apply/teardown, regex limits,
