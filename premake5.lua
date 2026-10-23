@@ -337,6 +337,49 @@ project "monocypher"
     filter {}
 
 -- ---------------------------------------------------------------------------
+-- Bounded, non-JIT PCRE2 interpreter; pristine pinned sources and generic headers.
+project "pcre2"
+    kind "StaticLib"
+    language "C"
+    cdialect "C17"
+    includedirs { "vendor/pcre2-shim", "vendor/pcre2/src" }
+    defines { "HAVE_CONFIG_H", "PCRE2_CODE_UNIT_WIDTH=8", "PCRE2_STATIC" }
+    files { "vendor/pcre2-shim/chartables.c",
+        "vendor/pcre2/src/pcre2_auto_possess.c",
+        "vendor/pcre2/src/pcre2_chkdint.c",
+        "vendor/pcre2/src/pcre2_compile.c",
+        "vendor/pcre2/src/pcre2_compile_cgroup.c",
+        "vendor/pcre2/src/pcre2_compile_class.c",
+        "vendor/pcre2/src/pcre2_config.c",
+        "vendor/pcre2/src/pcre2_context.c",
+        "vendor/pcre2/src/pcre2_convert.c",
+        "vendor/pcre2/src/pcre2_dfa_match.c",
+        "vendor/pcre2/src/pcre2_error.c",
+        "vendor/pcre2/src/pcre2_extuni.c",
+        "vendor/pcre2/src/pcre2_find_bracket.c",
+        "vendor/pcre2/src/pcre2_jit_compile.c",
+        "vendor/pcre2/src/pcre2_maketables.c",
+        "vendor/pcre2/src/pcre2_match.c",
+        "vendor/pcre2/src/pcre2_match_data.c",
+        "vendor/pcre2/src/pcre2_match_next.c",
+        "vendor/pcre2/src/pcre2_newline.c",
+        "vendor/pcre2/src/pcre2_ord2utf.c",
+        "vendor/pcre2/src/pcre2_pattern_info.c",
+        "vendor/pcre2/src/pcre2_script_run.c",
+        "vendor/pcre2/src/pcre2_serialize.c",
+        "vendor/pcre2/src/pcre2_string_utils.c",
+        "vendor/pcre2/src/pcre2_study.c",
+        "vendor/pcre2/src/pcre2_substitute.c",
+        "vendor/pcre2/src/pcre2_substring.c",
+        "vendor/pcre2/src/pcre2_tables.c",
+        "vendor/pcre2/src/pcre2_ucd.c",
+        "vendor/pcre2/src/pcre2_valid_utf.c",
+        "vendor/pcre2/src/pcre2_xclass.c",
+    }
+    filter "toolset:gcc or clang"
+        buildoptions { "-w" }
+    filter {}
+
 -- miniz — ZIP reader (Phase 17). Plain C static lib built from the vendored
 -- split sources (no CMake). vendor/miniz-shim supplies miniz_export.h — the one
 -- header CMake would generate — so the pristine vendor/miniz submodule is never
@@ -385,7 +428,8 @@ project "osv"
     -- without them); we only use the mz_* ZIP API.
     defines { "MINIZ_NO_ZLIB_COMPATIBLE_NAMES" }
 
-    links { "monocypher", "miniz" }
+    links { "monocypher", "miniz", "pcre2" }
+    includedirs { "vendor/pcre2-shim", "vendor/pcre2/src" }
 
     -- SDL3: vendored cmake build if present, else system SDL3.
     link_sdl3()
@@ -577,6 +621,7 @@ project "osv_tests"
         "src/ui/collection_ops.cpp",
         "src/ui/quick_switch.cpp",
         "src/ui/rename_dialog.cpp",
+        "src/ui/bulk_rename.cpp",
         "src/ui/consent_dialog.cpp",
     }
 
@@ -592,7 +637,8 @@ project "osv_tests"
 
     defines { "MINIZ_NO_ZLIB_COMPATIBLE_NAMES" }
 
-    links { "monocypher", "miniz" }
+    links { "monocypher", "miniz", "pcre2" }
+    includedirs { "vendor/pcre2-shim", "vendor/pcre2/src" }
 
     -- gfx units pull in SDL3 (software renderer is created headlessly in tests).
     link_sdl3()

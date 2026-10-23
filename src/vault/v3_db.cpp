@@ -787,6 +787,19 @@ DbStatus Database::sync_metadata(const IndexNode& root,          // NOSONAR cpp:
     if (status == Ok)
         status = exec(handle_, "UPDATE nodes SET sibling_order=sibling_order+2000000");
 
+    // Free the sibling-name namespace in the same transaction, too. BLOB
+    // node IDs compare distinctly from every TEXT display name, including
+    // hostile text containing NUL. They are unique, meet the byte-length
+    // constraint, and are replaced by the complete tree before COMMIT. Never
+    // commit these placeholders, or accept pre-existing non-text names.
+    if (status == Ok) {
+        Statement non_text{handle_,
+                           "SELECT 1 FROM nodes WHERE typeof(display_name)!='text' LIMIT 1"};
+        if (!non_text.get() || sqlite3_step(non_text.get()) != SQLITE_DONE)
+            status = InvalidArgument;
+    }
+    if (status == Ok) status = exec(handle_, "UPDATE nodes SET display_name=node_id");
+
     Statement live{handle_, "INSERT INTO osv_live_nodes(node_id) VALUES(?)"};
     Statement upsert{handle_, NODE_UPSERT_SQL};
     if (status == Ok && (!live.get() || !upsert.get())) status = IoError;
