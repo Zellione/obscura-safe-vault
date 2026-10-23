@@ -137,3 +137,7 @@ gallery nodes isolate metadata overhead rather than measuring media imports.
   to `osv`/`osv_tests`; keep it when copying a runnable binary.
 - `scripts/package.sh` bundles `libosv7zip.so`, license notices and complete
   decoder rebuild sources. `docs/ARCHIVE_DECODER.md` explains replacement.
+
+Bulk rename timing: `OSV_RENAME_SELECTION_BENCH=1 build/bin/Debug/osv_tests bulk_rename_selection_benchmark`
+measures 1k/10k/50k synthetic gallery preview/apply calls and background completion;
+it does not measure GUI rendering or grid refresh.

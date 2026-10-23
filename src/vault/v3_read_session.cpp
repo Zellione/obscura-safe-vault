@@ -249,6 +249,7 @@ bool ReadSession::materialize() noexcept
     objects_ = std::move(refs.value);
     rebuild_object_index();
     if (!load_settings(*database_, settings_)) return false;
+    if (database_->read_bundles(root_, settings_) != DbStatus::Ok) return false;
     auto searches = database_->saved_searches();
     if (searches.status != DbStatus::Ok) return false;
     for (auto& source : searches.value)

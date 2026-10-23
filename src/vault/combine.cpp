@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "vault/tag_bundles.h"
 #include "vault/transfer.h"
 
 namespace vault {
@@ -120,16 +121,16 @@ VaultResult move_media_children(MergeCtx& ctx, std::string_view src_gallery,
         if (c->is_media()) names.emplace_back(c->name.view());
     if (names.empty()) return Ok;
 
-    const TransferTally t = transfer_images(ctx.src, src_gallery, names, ctx.dst, dst_gallery,
-                                            ctx.mode,
-                                            {.progress = ctx.progress, .set_total = false});
+    const TransferTally t = transfer_images(
+        ctx.src, src_gallery, names, ctx.dst, dst_gallery, ctx.mode,
+        {.progress = ctx.progress, .set_total = false, .materialize_inheritance = false});
     ctx.tally.media_moved   += t.done;
     ctx.tally.media_skipped += t.failed + t.skipped;
     return Ok;
 }
 
-VaultResult combine_impl(MergeCtx& ctx, std::string_view src_gallery,
-                         std::string_view dst_gallery);
+VaultResult combine_impl(MergeCtx& ctx, std::string_view src_gallery, std::string_view dst_gallery,
+                         bool materialize_ancestors = false);
 
 // One sub-gallery child of src_gallery: recurse into it if dst already has a
 // same-named child, else move/copy the whole subtree wholesale (never forwarding
@@ -146,7 +147,7 @@ VaultResult merge_subgallery_child(MergeCtx& ctx, std::string_view src_gallery,
         const int subtree_media = count_media(ctx.src, child_src);
         TransferTally t;
         if (transfer_gallery(ctx.src, child_src, ctx.dst, dst_gallery, ctx.mode,
-                             {.tally = &t}) == Ok) {
+                             {.tally = &t, .materialize_inheritance = false}) == Ok) {
             ++ctx.tally.galleries_moved;
         }
         // Account for every file of the subtree, mirroring the leaf path's
@@ -193,16 +194,20 @@ VaultResult move_subgalleries_children(MergeCtx& ctx, std::string_view src_galle
 
 // The recursive worker: does the actual merge. Never touches progress->total
 // (the public entry point below sets that once, up front).
-VaultResult combine_impl(MergeCtx& ctx, std::string_view src_gallery,
-                         std::string_view dst_gallery)
+VaultResult combine_impl(MergeCtx& ctx, std::string_view src_gallery, std::string_view dst_gallery,
+                         bool materialize_ancestors)
 {
     using enum VaultResult;
     const IndexNode* src_node = nullptr;
     if (const VaultResult r = validate_combine(ctx.src, src_gallery, ctx.dst, dst_gallery, src_node); r != Ok)
         return r;
 
-    for (const auto& t : src_node->tags)
-        (void)ctx.dst.add_tag(dst_gallery, t.view());
+    const auto inherited = materialize_ancestors ? effective_tags(ctx.src, parent_path(src_gallery))
+                                                 : std::vector<std::string>{};
+    if (const auto result = merge_tag_provenance(*src_node, vault_settings(ctx.src), ctx.dst,
+                                                 dst_gallery, inherited);
+        result != Ok)
+        return result;
 
     if (holds_media(ctx.src, src_gallery)) {
         if (const VaultResult r = move_media_children(ctx, src_gallery, dst_gallery); r != Ok) {
@@ -236,7 +241,7 @@ VaultResult combine_galleries(Vault& src, std::string_view src_gallery,
 
     if (progress) progress->total.store(count_media(src, src_gallery));
     MergeCtx ctx{.src = src, .dst = dst, .tally = tally, .progress = progress, .mode = mode};
-    return combine_impl(ctx, src_gallery, dst_gallery);
+    return combine_impl(ctx, src_gallery, dst_gallery, true);
 }
 
 std::vector<std::string> combine_target_galleries(const Vault& dst, const Vault& src,

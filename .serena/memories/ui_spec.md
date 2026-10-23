@@ -638,3 +638,16 @@ as items; Esc keeps completed output and stops between entries.
 Import status rows expose discovery, extraction/reading, and processing phases.
 V3 metadata saves show an animated indeterminate modal; navigation waits for the
 durable save and no cancellation hint is offered during this non-cancellable step.
+
+Bulk rename: select tiles then Shift+R. Tab switches regex/replacement; Enter
+previews then applies. F3 preserves media extension (on), F4 recursion (off), F5
+case sensitivity (on), F6 all matches (off), F7 full-name detail. PgUp/PgDn scroll
+preview rows. Esc cancels preparation; durable commit cannot be cancelled.
+Invalid/colliding rows block the whole batch; option/text edits invalidate preview.
+
+Meta tags: G opens selection tags, F3 switches bundle view. Up/Down selects;
+Enter applies; Delete removes the application. F8 creates, F4 edits, F6 previews
+definition deletion. Tab switches name/members, semicolons separate members
+(backslash escaping), F5 previews affected applications and effective changes,
+Enter confirms, Esc backs out. Definition edits affect all applications. Existing
+manual tags and other bundle/ancestor contributions survive bundle removal.

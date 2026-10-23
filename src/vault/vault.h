@@ -219,6 +219,7 @@ public:
     {
         return unlocked_;
     }
+    friend struct BundleAccess;
     friend bool vault_is_read_only(const Vault& v) noexcept;
     friend bool vault_uses_directory_storage(const Vault& v) noexcept;
     friend v3::VerificationReport verify_directory_vault(const Vault&, v3::VerifyDepth) noexcept;

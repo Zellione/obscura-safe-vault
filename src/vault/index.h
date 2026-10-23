@@ -185,6 +185,10 @@ struct IndexNode {
     Type type = Type::Gallery;
     crypto::SecureString name;               // Phase 91: mlock'd + wiped
     std::vector<crypto::SecureString> tags;  // per-node tags (Phase 12; secure since 91)
+    // Empty provenance on legacy/imported nodes means all tags are explicit.
+    bool tag_provenance = false;
+    std::vector<crypto::SecureString> explicit_tags;
+    std::vector<std::array<uint8_t, crypto::NODE_ID_SIZE>> tag_bundles;
     bool favorite = false;                   // bookmark flag (Phase 13)
     SortKey sort_key =
         SortKey::Default;  // children order (Phase 37); meaningful only when is_gallery()
@@ -284,7 +288,15 @@ struct TagFieldValue {
 // Vault-global user settings (Phase 49), serialised after the saved-searches
 // block. Defaults here are also the values a pre-v8 blob reads back with, except
 // `categories`, which pre-v8 blobs get from seeded() — see deserialize_index.
+struct TagBundle {
+    std::array<uint8_t, crypto::NODE_ID_SIZE> id{};
+    crypto::SecureString name;
+    std::vector<crypto::SecureString> tags;
+    friend bool operator==(const TagBundle&, const TagBundle&) = default;
+};
+
 struct VaultSettings {
+    std::vector<TagBundle> tag_bundles;
     SortKey                    default_sort    = SortKey::Insertion;
     bool                       tiles_show_tags = true;
     std::vector<TagCategory>   categories;
