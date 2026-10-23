@@ -395,6 +395,8 @@ public:
                                      std::string_view tag);
     friend VaultResult remove_tag_batch(Vault& v, std::span<const std::string> node_paths,
                                         std::string_view tag);
+    friend VaultResult mutate_tags_batch(Vault&, std::span<const std::string>, std::string_view,
+                                         bool, OpProgress*);
 
     // Phase 65 migration: apply probed metadata WITHOUT committing, so a whole
     // migration pass costs one index write instead of one per node.
@@ -613,6 +615,18 @@ using vault::ChunkRef;
 // node actually changed. Locked if locked; IoError if the commit fails.
 [[nodiscard]] VaultResult set_favorites_batch(Vault& v, std::span<const std::string> node_paths,
                                               bool value);
+
+// Resolve each parent once and index its children without sorting. Returned
+// pointers borrow the tree; the caller must exclusively own it until finished.
+[[nodiscard]] std::vector<IndexNode*> resolve_node_selection(Vault& v,
+                                                             std::span<const std::string> paths);
+
+// Atomic selection edit: cancellation before commit restores all assignments.
+// A completed commit cannot be cancelled. Progress covers preparation, with
+// done == total indicating final save/refresh. Failure restores the live tree.
+[[nodiscard]] VaultResult mutate_tags_batch(Vault& v, std::span<const std::string> paths,
+                                            std::string_view tag, bool remove,
+                                            OpProgress* progress = nullptr);
 
 // Batch tag add/remove (Phase 73): add/remove `tag` to/from every resolving path.
 // Non-resolving paths are skipped, not errors. ONE commit_index() for the whole

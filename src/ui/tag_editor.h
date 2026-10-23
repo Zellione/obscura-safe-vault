@@ -2,20 +2,24 @@
 
 #include <SDL3/SDL.h>
 
+#include <functional>
+#include <future>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "ui/tag_chip.h"     // ui::ChipWrap
-#include "ui/tag_tally.h"    // ui::TagTallyEntry, compute_tag_tally
+#include "ui/tag_chip.h"  // ui::ChipWrap
 #include "ui/tag_fields_form.h"
+#include "ui/tag_tally.h"  // ui::TagTallyEntry, compute_tag_tally
 #include "ui/text_input_model.h"
 #include "ui/widgets.h"
+#include "vault/op_progress.h"
 
 namespace gfx { class Renderer; class FontAtlas; class Window; }
 namespace vault { class Vault; }
 
 namespace ui {
+class ImportQueue;
 
 // A modal tag editor panel for editing tags on a gallery or image (Phase 12).
 // Shows the node's current tags, lets the user add a new tag (type + Enter),
@@ -29,7 +33,10 @@ namespace ui {
 //   4. close() or let it auto-close on Esc
 class TagEditor {
 public:
-    TagEditor(vault::Vault& vault, gfx::Window& win) : vault_(vault), win_(win) {}
+    TagEditor(vault::Vault& vault, gfx::Window& win, ImportQueue& queue)
+        : vault_(vault), win_(win), queue_(queue)
+    {}
+    ~TagEditor();
 
     void open(std::string node_path);  // activate for a single node
     // Activate for 2+ nodes at once (Phase 45 Part 2): shows the union of
@@ -39,6 +46,12 @@ public:
     void open_multi(std::vector<std::string> node_paths);
     void close();                       // deactivate and clear
     [[nodiscard]] bool active() const noexcept { return active_; }
+    [[nodiscard]] bool busy() const noexcept
+    {
+        return work_.valid();
+    }
+    // Poll only on the UI thread. A busy editor exclusively owns the vault tree.
+    void update();
 
     // Handle text input and keyboard events. Returns true if consumed.
     [[nodiscard]] bool handle_event(const SDL_Event& e);
@@ -46,6 +59,8 @@ public:
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
 
 private:
+    void launch(std::function<void()> work);
+    void finish_add();
     void refresh_tags();              // reload the node's current tags from the vault
     void refresh_vocabulary();        // reload the vault-wide tag vocabulary (Phase 29)
     void refresh_suggestions();       // recompute the autosuggest dropdown for the buffer
@@ -69,6 +84,13 @@ private:
 
     vault::Vault&        vault_;
     gfx::Window&         win_;
+    ImportQueue& queue_;
+    std::future<void> work_;
+    vault::OpProgress progress_;
+    bool owns_exclusive_ = false;
+    bool loading_ = false;
+    std::string pending_tag_;
+    std::string pending_category_;
     TagFieldsForm        fields_form_{vault_, win_};
     bool                       active_ = false;
     std::vector<std::string>   node_paths_;    // one or many (Phase 45 Part 2)

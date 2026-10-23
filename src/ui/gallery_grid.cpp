@@ -229,7 +229,7 @@ GalleryGrid::GalleryGrid(GridInitContext ctx, GridDialogs dialogs, GridVaultCtx 
                          GallerySessionState& session, ImportQueue& queue, GridLocation at)
     : win_(ctx.win), font_(ctx.font), vault_(ctx.vault), cache_(ctx.cache), dialogs_(dialogs),
       session_(session), queue_(queue), search_(ctx.vault, ctx.win),
-      tag_editor_(ctx.vault, ctx.win),
+      tag_editor_(ctx.vault, ctx.win, queue),
       quick_switch_(vault_ctx.registry, vault_ctx.active_vault_path),
       transfer_(ctx.vault, vault_ctx.active_vault_path, vault_ctx.registry, dialogs.file, ctx.win,
                 vault_ctx.second_vault),
@@ -261,6 +261,7 @@ void GalleryGrid::on_enter()
 
 void GalleryGrid::on_exit()
 {
+    tag_editor_.close();
     import_tags_.close();
     // The current path's selection is about to go stale (Phase 40 Part 2) —
     // covers leaving to the viewer or to a different screen entirely.
@@ -655,6 +656,7 @@ void GalleryGrid::start_tag_editor(bool import_list)
     // 2+ Space-selected tiles (images and/or galleries): bulk add/remove
     // (Phase 45 Part 2). Anything less falls through to the existing
     // single-focused-tile editor below, unchanged.
+    if (!import_list) quiesce_grid(*this);
     if (!import_list && sel_.count() >= 2) {
         std::vector<std::string> paths;
         for (int idx : sel_.indices()) {
@@ -1710,7 +1712,8 @@ bool grid_modal_open(const GalleryGrid& g)
 
 bool vault_busy(const GalleryGrid& g)
 {
-    return g.naming_.file_op.active() || g.transfer_.job_active() || g.combine_.job_active();
+    return g.tag_editor_.busy() || g.naming_.file_op.active() || g.transfer_.job_active() ||
+           g.combine_.job_active();
 }
 
 void GalleryGrid::on_gallery_view_changed(GalleryView view)
@@ -2027,6 +2030,11 @@ void update_scroll_to_selection(GalleryGrid& g)
 
 void GalleryGrid::update(double dt)
 {
+    if (tag_editor_.busy()) {
+        tag_editor_.update();
+        mark_dirty();
+        return;
+    }
     // A background file op (export/delete/transfer/compact) owns the vault's file handle
     // on its worker thread, so the UI must not read the vault (thumbnails/listing) until
     // it finishes — poll only (Phase 50: imports are now drained via App::on_vault_changed).
@@ -2142,6 +2150,10 @@ void GalleryGrid::render(gfx::Renderer& r)
 {
     const auto W = layout_w(*this);
     const auto H = layout_h(*this);
+    if (tag_editor_.busy()) {
+        tag_editor_.render(r, font_, W, H);
+        return;
+    }
 
     // While a background file op runs, the worker thread owns the vault — drawing tiles
     // would decrypt thumbnails on this thread and race it. Show only the progress

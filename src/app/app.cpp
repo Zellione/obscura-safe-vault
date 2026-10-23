@@ -1370,7 +1370,8 @@ void App::update(double dt)  // NOSONAR cpp:S3776 -- ordered lifecycle coordinat
     }
 
     // Phase 50: drain the import queue and refresh screens when records are applied
-    if (vault_state_.active && import_ui_.queue.drain(dt) > 0 && screen_) {
+    if (vault_state_.active && !(screen_ && screen_->blocks_idle_lock()) &&
+        import_ui_.queue.drain(dt) > 0 && screen_) {
         screen_->on_vault_changed();
         screen_->mark_dirty();
     }

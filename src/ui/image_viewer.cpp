@@ -58,11 +58,9 @@ float hud_footer_h(float line_h) noexcept { return line_h + 20.0f; }
 ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, Context ctx, Album album, int start_index)
     : win_(win), font_(font), vault_(vault), cache_(cache), queue_(ctx.queue),
-      export_(ctx.folder, win),
-      tag_editor_(vault, win), search_(vault, win),
-      quick_switch_(ctx.registry, std::move(ctx.active_path)),
-      album_(std::move(album)), index_(start_index),
-      strip_side_(ctx.initial_strip_side),
+      export_(ctx.folder, win), tag_editor_(vault, win, ctx.queue), search_(vault, win),
+      quick_switch_(ctx.registry, std::move(ctx.active_path)), album_(std::move(album)),
+      index_(start_index), strip_side_(ctx.initial_strip_side),
       full_cache_(vault, win.sdl_renderer(), &decode_worker_)
 {
 }
@@ -97,6 +95,7 @@ void ImageViewer::on_enter()
 
 void ImageViewer::on_exit()
 {
+    tag_editor_.close();
     video_.reset();                 // stop decode + wipe the VideoSource cache first
     anim_.reset();                   // stop animation playback
     strip_hover_anim_.reset();       // stop strip hover animation (Phase 47 Task 10)
@@ -628,6 +627,11 @@ void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
 
 void ImageViewer::update(double dt)
 {
+    if (tag_editor_.busy()) {
+        tag_editor_.update();
+        mark_dirty();
+        return;
+    }
     if (pump_thumbs()) mark_dirty();        // thumbnail decode(s) landed — repaint
     if (full_cache_.pump()) mark_dirty();   // an off-thread decode landed — repaint
 
@@ -1001,6 +1005,11 @@ void ImageViewer::render_hud(gfx::Renderer& r)
 
 void ImageViewer::render(gfx::Renderer& r)
 {
+    if (tag_editor_.busy()) {
+        tag_editor_.render(r, font_, static_cast<float>(win_.width()),
+                           static_cast<float>(win_.height()));
+        return;
+    }
     // Slideshow is full-screen (no thumbnail strip): it owns the whole window.
     if (mode_ == ViewMode::Slideshow) {
         slideshow_.render(r, font_, full_cache_, album_.images,

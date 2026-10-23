@@ -1,5 +1,7 @@
 #include "vault.h"
 
+#include <unordered_map>
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -1958,51 +1960,99 @@ VaultResult set_favorites_batch(Vault& v, std::span<const std::string> node_path
     return changed ? v.commit_index() : Ok;
 }
 
-VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths, std::string_view tag)
+std::vector<IndexNode*> resolve_node_selection(Vault& v, std::span<const std::string> paths)
 {
-    using enum VaultResult;
-    if (!v.unlocked_) return Locked;
-    if (v.legacy_read_only_) return InvalidArg;
-    const auto trimmed = normalise_tag(tag);
-    if (trimmed.empty()) return InvalidArg;
-
-    bool changed = false;
-    for (const std::string& path : node_paths) {
-        if (IndexNode* node = v.resolve_node(path); node) {
-            const bool dup =
-                std::ranges::any_of(node->tags, [&trimmed](const crypto::SecureString& e) {
-                    return tag_ci_equal(e.view(), trimmed);
-                });
-            if (!dup) {
-                node->tags.emplace_back(trimmed);
-                changed = true;
+    using Children = std::unordered_map<std::string_view, IndexNode*>;
+    std::unordered_map<std::string_view, Children> parents;
+    std::vector<IndexNode*> result;
+    result.reserve(paths.size());
+    for (const auto& path : paths) {
+        if (path.empty()) {
+            result.push_back(v.resolve_node(""));
+            continue;
+        }
+        const std::string_view view{path};
+        const auto slash = view.find_last_of('/');
+        const auto parent = slash == view.npos ? std::string_view{} : view.substr(0, slash);
+        const auto leaf = slash == view.npos ? view : view.substr(slash + 1);
+        auto [it, inserted] = parents.try_emplace(parent);
+        if (inserted) {
+            if (auto* node = v.resolve_node(parent); node && node->is_gallery()) {
+                it->second.reserve(node->children.size());
+                for (auto& child : node->children)
+                    it->second.emplace(child.name.view(), &child);
             }
         }
-        // missing: skipped, not an error
+        const auto child = it->second.find(leaf);
+        result.push_back(child == it->second.end() ? nullptr : child->second);
     }
-    // One crash-safe index swap for the whole batch; none for a no-op batch.
-    return changed ? v.commit_index() : Ok;
+    return result;
 }
 
-VaultResult remove_tag_batch(Vault& v, std::span<const std::string> node_paths,
-                             std::string_view tag)
+namespace {
+struct TagBatchChanges {
+    std::vector<std::pair<IndexNode*, std::vector<crypto::SecureString>>> originals;
+    bool committed = false;
+    ~TagBatchChanges()
+    {
+        if (!committed)
+            for (auto& [node, tags] : originals)
+                node->tags.swap(tags);
+    }
+    VaultResult apply(IndexNode* node, std::string_view tag, bool remove)
+    {
+        using enum VaultResult;
+        if (!node) return Ok;
+        const auto matches = [tag](const crypto::SecureString& item) {
+            return tag_ci_equal(item.view(), tag);
+        };
+        if (std::ranges::any_of(node->tags, matches) != remove) return Ok;
+        if (!remove && node->tags.size() >= INDEX_MAX_TAGS) return InvalidArg;
+        originals.emplace_back(node, node->tags);
+        if (remove)
+            std::erase_if(node->tags, matches);
+        else
+            node->tags.emplace_back(tag);
+        return Ok;
+    }
+};
+
+}  // namespace
+
+VaultResult mutate_tags_batch(Vault& v, std::span<const std::string> paths, std::string_view tag,
+                              bool remove, OpProgress* progress)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
     if (v.legacy_read_only_) return InvalidArg;
     const auto trimmed = normalise_tag(tag);
-    if (trimmed.empty()) return Ok;  // idempotent, like remove_tag
-
-    bool changed = false;
-    for (const std::string& path : node_paths) {
-        IndexNode* node = v.resolve_node(path);
-        if (!node) continue;
-        const auto removed = std::erase_if(node->tags, [&trimmed](const crypto::SecureString& e) {
-            return tag_ci_equal(e.view(), trimmed);
-        });
-        changed = changed || removed > 0;
+    if (trimmed.empty()) return remove ? Ok : InvalidArg;
+    if (trimmed.size() > 65535 || trimmed.contains('\0')) return InvalidArg;
+    if (progress) {
+        progress->total.store(static_cast<int>(paths.size()));
+        progress->done.store(0);
+        if (progress->cancel.load()) return Ok;
     }
-    return changed ? v.commit_index() : Ok;
+    TagBatchChanges changes;
+    for (auto* node : resolve_node_selection(v, paths)) {
+        if (progress && progress->cancel.load()) return Ok;
+        if (const auto result = changes.apply(node, trimmed, remove); result != Ok) return result;
+        if (progress) progress->done.fetch_add(1);
+    }
+    if (progress && progress->cancel.load()) return Ok;
+    const auto status = changes.originals.empty() ? Ok : v.commit_index();
+    changes.committed = status == Ok;
+    return status;
+}
+
+VaultResult add_tag_batch(Vault& v, std::span<const std::string> paths, std::string_view tag)
+{
+    return mutate_tags_batch(v, paths, tag, false);
+}
+
+VaultResult remove_tag_batch(Vault& v, std::span<const std::string> paths, std::string_view tag)
+{
+    return mutate_tags_batch(v, paths, tag, true);
 }
 
 std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const

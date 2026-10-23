@@ -83,7 +83,7 @@ public:
     struct Context {
         platform::FolderDialog&  folder;
         platform::VaultRegistry& registry;
-        const ImportQueue&       queue;              // Phase 50: for footer summary only
+        ImportQueue& queue;  // Phase 50: for footer summary only
         std::string              active_path;
         StripSide                initial_strip_side = StripSide::Bottom;
     };
@@ -105,8 +105,13 @@ public:
 
     // Only the slideshow cross-fade/auto-advance animates; Fit and FillScroll are
     // static between inputs, so the app loop can idle in those modes.
+    [[nodiscard]] bool blocks_idle_lock() const override
+    {
+        return tag_editor_.busy();
+    }
     [[nodiscard]] bool animating() const override
     {
+        if (tag_editor_.busy()) return true;
         if (mode_ == ViewMode::Slideshow && slideshow_.animating()) return true;
         if (video_ && video_->animating()) return true;   // a playing video keeps the loop ticking
         return anim_ && anim_->animating();                 // a playing animation keeps the loop ticking
@@ -183,7 +188,7 @@ private:
     gfx::FontAtlas&         font_;
     vault::Vault&           vault_;
     gfx::TextureCache&      cache_;
-    const ImportQueue&      queue_;          // Phase 50: for footer summary only
+    ImportQueue& queue_;  // Phase 50: for footer summary only
     ExportUi                export_;
     TagEditor               tag_editor_;
     SearchOverlay           search_;

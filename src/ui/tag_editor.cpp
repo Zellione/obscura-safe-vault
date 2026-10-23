@@ -1,4 +1,7 @@
 #include "ui/tag_editor.h"
+#include <chrono>
+#include "ui/import_queue.h"
+#include "ui/progress_modal.h"
 
 #include <algorithm>
 #include <format>
@@ -55,6 +58,47 @@ std::string trim_surrounding(std::string_view s)
 }
 }
 
+TagEditor::~TagEditor()
+{
+    close();
+}
+
+void TagEditor::launch(std::function<void()> work)
+{
+    progress_.cancel.store(false);
+    progress_.done.store(0);
+    progress_.total.store(static_cast<int>(node_paths_.size()));
+    try {
+        work_ = std::async(std::launch::async, std::move(work));
+    } catch (const std::exception&) {
+        error_ = "Could not start tag operation.";
+    }
+}
+
+void TagEditor::update()
+{
+    if (!work_.valid() || work_.wait_for(std::chrono::seconds{0}) != std::future_status::ready)
+        return;
+    try {
+        work_.get();
+    } catch (const std::exception&) {
+        error_ = "Tag operation failed.";
+    }
+    loading_ = false;
+    if (!pending_category_.empty() && error_.empty()) finish_add();
+    pending_tag_.clear();
+    pending_category_.clear();
+}
+
+void TagEditor::finish_add()
+{
+    const auto tmpl = vault::category_template(vault::vault_settings(vault_), pending_category_);
+    std::vector<std::string> fields;
+    for (const auto& field : tmpl)
+        fields.emplace_back(field.view());
+    fields_form_.open(pending_tag_, pending_category_, std::move(fields), false);
+}
+
 void TagEditor::open(std::string node_path)
 {
     open_multi({std::move(node_path)});
@@ -62,20 +106,42 @@ void TagEditor::open(std::string node_path)
 
 void TagEditor::open_multi(std::vector<std::string> node_paths)
 {
-    active_     = true;
+    close();
+    active_ = true;
+    if (queue_.busy()) {
+        error_ = "Wait for imports to finish before editing tags.";
+        return;
+    }
+    queue_.set_exclusive(true);
+    owns_exclusive_ = true;
     node_paths_ = std::move(node_paths);
     selected_   = 0;
     new_tag_buf_.clear();
     suggestions_.clear();
     sugg_sel_ = -1;
     error_.clear();
-    refresh_tags();
-    refresh_vocabulary();
+    loading_ = true;
+    launch([this] {
+        refresh_tags();
+        refresh_vocabulary();
+    });
     SDL_StartTextInput(win_.sdl_window());
 }
 
 void TagEditor::close()
 {
+    if (!active_ && !work_.valid()) return;
+    if (work_.valid()) {
+        progress_.cancel.store(true);
+        try {
+            work_.get();
+        } catch (const std::exception&) { /* teardown still releases ownership */
+        }
+    }
+    if (owns_exclusive_) queue_.set_exclusive(false);
+    owns_exclusive_ = false;
+    pending_tag_.clear();
+    pending_category_.clear();
     active_ = false;
     SDL_StopTextInput(win_.sdl_window());
     node_paths_.clear();
@@ -124,28 +190,21 @@ void TagEditor::add_chosen_tag()
     const std::string sheet_category =
         templated_new_tag_category(chosen, vocabulary_, s);
 
-    using enum vault::VaultResult;
-    if (vault::add_tag_batch(vault_, node_paths_, chosen) != Ok) {
-        error_ = "Failed to add tag.";
-        return;
-    }
+    pending_tag_ = chosen;
+    pending_category_ = sheet_category;
     new_tag_buf_.clear();
-    error_.clear();
-    refresh_tags();
-    refresh_vocabulary();
-    refresh_suggestions();   // buffer is empty → dropdown closes
-    select_tag(chosen);      // scroll the list to reveal it
-
-    // Open the template fields form if applicable (Phase 73)
-    if (!sheet_category.empty()) {
-        const auto tmpl = vault::category_template(s, sheet_category);
-        std::vector<std::string> fields;
-        fields.reserve(tmpl.size());
-        for (const auto& f : tmpl)
-            fields.emplace_back(f.view());
-        fields_form_.open(chosen, sheet_category, std::move(fields),
-                          /*with_description=*/false);
-    }
+    launch([this, chosen] {
+        if (vault::mutate_tags_batch(vault_, node_paths_, chosen, false, &progress_) !=
+            vault::VaultResult::Ok) {
+            error_ = "Failed to add tag.";
+            return;
+        }
+        refresh_tags();
+        refresh_vocabulary();
+        refresh_suggestions();
+        select_tag(chosen);
+        if (progress_.cancel.load()) pending_category_.clear();
+    });
 }
 
 void TagEditor::move_cursor(int dir)
@@ -188,20 +247,10 @@ void TagEditor::load_per_node_tags()
     per_node_tags.reserve(node_paths_.size());
     int resolved = 0;
 
-    for (const std::string& path : node_paths_) {
-        const auto segs = split_path(path);
-        if (segs.empty()) continue;
-
-        std::string parent_path;
-        if (segs.size() > 1) { parent_path = join_path(std::span(segs.data(), segs.size() - 1)); }
-
-        const auto& children = vault_.list(parent_path);
-        for (const auto* child : children) {
-            if (child->name == segs.back()) {
-                per_node_tags.push_back(tag_strings(child->tags));
-                ++resolved;
-                break;
-            }
+    for (const auto* node : vault::resolve_node_selection(vault_, node_paths_)) {
+        if (node) {
+            per_node_tags.push_back(tag_strings(node->tags));
+            ++resolved;
         }
     }
 
@@ -243,6 +292,16 @@ void TagEditor::select_tag(std::string_view tag)
 bool TagEditor::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
+    if (busy()) {
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE &&
+            progress_.done.load() < progress_.total.load())
+            progress_.cancel.store(true);
+        return true;
+    }
+    if (!owns_exclusive_) {
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) close();
+        return true;
+    }
 
     // Form handling (Phase 73): the fields_form modal takes precedence over the tag editor
     // input. When it becomes inactive after consuming an event, restart text input for the
@@ -311,20 +370,35 @@ void TagEditor::delete_selected_tag()
     if (selected_ < 0 || selected_ >= static_cast<int>(tally_.size())) return;
 
     const std::string tag_to_remove = tally_[selected_].tag;
-    if (vault::remove_tag_batch(vault_, node_paths_, tag_to_remove) == vault::VaultResult::Ok) {
+    launch([this, tag_to_remove] {
+        if (vault::mutate_tags_batch(vault_, node_paths_, tag_to_remove, true, &progress_) !=
+            vault::VaultResult::Ok) {
+            error_ = "Failed to remove tag.";
+            return;
+        }
         refresh_tags();
         refresh_vocabulary();
-        refresh_suggestions();   // the removed tag is suggestible again
+        refresh_suggestions();
         selected_ = std::min(selected_, static_cast<int>(tally_.size()) - 1);
-        error_.clear();
-    } else {
-        error_ = "Failed to remove tag.";
-    }
+    });
 }
 
 void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 {
     if (!active_) return;
+    if (busy()) {
+        const int done = progress_.done.load();
+        const int total = progress_.total.load();
+        draw_op_progress(
+            r, font, W, H,
+            {.title = loading_ ? "Loading selection tags" : "Updating selection tags",
+             .count_line = loading_ ? "Reading tags..." : std::format("{} / {} items", done, total),
+             .hint = done < total ? "Esc requests cancellation before save"
+                                  : "Saving and refreshing...",
+             .done = done,
+             .total = total});
+        return;
+    }
 
     using namespace gfx::theme;
     const float LINE      = line_pitch(font.pixel_height());
