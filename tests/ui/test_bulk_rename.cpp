@@ -73,11 +73,23 @@ TEST(bulk_rename_worker_preview_apply_edit_invalidation_and_close_join)
 
 #include <atomic>
 #include <stdexcept>
+#include <system_error>
 namespace ui {
 struct BulkRenameTestPeer {
-    static void fail_worker(BulkRename& modal)
+    static void fail_worker(BulkRename& modal, int kind = 0)
     {
-        modal.launch([] { throw std::runtime_error("private worker payload"); });
+        modal.launch([kind] {
+            switch (kind) {
+            case 0:
+                throw std::out_of_range("private worker payload");
+            case 1:
+                throw std::length_error("private worker payload");
+            case 2:
+                throw std::bad_alloc{};
+            default:
+                throw std::system_error(std::make_error_code(std::errc::io_error));
+            }
+        });
     }
     static void wait_for_cancel(BulkRename& modal, std::atomic_bool& joined)
     {
@@ -99,10 +111,12 @@ TEST(bulk_rename_owned_worker_consumes_errors_and_joins_before_release)
     gfx::Window window;
     ui::ImportQueue queue;
     ui::BulkRename modal(v, window, queue);
-    ui::BulkRenameTestPeer::fail_worker(modal);
-    REQUIRE(modal.busy());
-    REQUIRE(finish_rename(modal));
-    CHECK(ui::BulkRenameTestPeer::error(modal) == "Operation failed.");
+    for (int kind = 0; kind < 4; ++kind) {
+        ui::BulkRenameTestPeer::fail_worker(modal, kind);
+        REQUIRE(modal.busy());
+        REQUIRE(finish_rename(modal));
+        CHECK(ui::BulkRenameTestPeer::error(modal) == "Operation failed.");
+    }
     // Teardown must consume the failure as well, without leaking what().
     ui::BulkRenameTestPeer::fail_worker(modal);
     modal.close();

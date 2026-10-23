@@ -218,3 +218,29 @@ selection reconstruction, dual-pane refresh or GPU activity in the harness.
 They make no GUI, hardware-decoder or end-to-end application latency claim.
 The opt-in run passed; logs are `/tmp/osv-122c-bench-before.log` and
 `/tmp/osv-122c-optbench.log`.
+
+## PR 266 analysis follow-up
+
+The scan at `e656cd3` finished within the 45-minute job budget. All build/test
+jobs and the quality gate passed, but analysis posted 34 maintainability issues.
+The follow-up addresses each reported location without suppressions: a separate
+templated worker invoker catches only allocation, length, system, and bounds
+errors; smaller input/render/selection helpers preserve modal ownership; input
+and chrome are grouped per field; and declarations/container operations follow
+the reported conventions.
+
+PCRE2's required UTF-8 width macro belongs to its configuration wrapper. Its
+allocation storage now uses zero-initialized `std::byte[]` (whose allocation
+supports fundamental alignment), an explicitly constructed aligned header, and
+matching `delete[]`. Payload locking, wiping before release, and the shared
+8 MiB budget are unchanged. The C free callback adapts to a typed helper.
+
+Validation: 20 focused tests passed normally and with ASAN/UBSan/LSan, including
+all four transported worker error types, preview/apply/teardown, regex limits,
+swaps/cycles, collision and failed-save rollback, and existing v3 database tests.
+Only C sources/tests and PCRE2 were instrumented; unchanged dependencies reused
+the parent's Release objects with matching current headers through a local
+include overlay (Phase E changes `IndexNode` layout). This is not a full-project
+sanitizer gate. Changed production sources passed strict syntax checks against
+C's own headers; changed-line formatting and whitespace checks passed. Parent
+integration still requires full gates and a fresh Sonar scan to confirm closure.

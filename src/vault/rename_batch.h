@@ -18,8 +18,10 @@ struct RenameOptions {
 };
 enum class RenameState { Changed, Unchanged, Unmatched, Invalid, Collision };
 struct RenameRow {
-    RenameId id{}, parent{};
-    crypto::SecureString before, after;
+    RenameId id{};
+    RenameId parent{};
+    crypto::SecureString before;
+    crypto::SecureString after;
     RenameState state = RenameState::Unmatched;
 };
 struct RenamePreview {

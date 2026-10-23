@@ -2058,19 +2058,21 @@ void update_scroll_to_selection(GalleryGrid& g)
     g.follow_ = GalleryGrid::ScrollFollow::None;
 }
 
+void GalleryGrid::finish_bulk_rename()
+{
+    status_ = "Bulk rename saved.";
+    refresh();
+    const std::set<vault::RenameId> selected(bulk_rename_ids_.begin(), bulk_rename_ids_.end());
+    for (size_t i = 0; i < children_.size(); ++i)
+        if (selected.contains(children_[i]->node_id)) sel_.toggle(static_cast<int>(i));
+    bulk_rename_ids_.clear();
+}
+
 void GalleryGrid::update(double dt)
 {
     if (bulk_rename_.busy()) {
         bulk_rename_.update();
-        if (bulk_rename_.consume_completed()) {
-            status_ = "Bulk rename saved.";
-            refresh();
-            const std::set<vault::RenameId> selected(bulk_rename_ids_.begin(),
-                                                     bulk_rename_ids_.end());
-            for (size_t i = 0; i < children_.size(); ++i)
-                if (selected.contains(children_[i]->node_id)) sel_.toggle(static_cast<int>(i));
-            bulk_rename_ids_.clear();
-        }
+        if (bulk_rename_.consume_completed()) finish_bulk_rename();
         mark_dirty();
         return;
     }
