@@ -76,7 +76,8 @@ void TagEditor::launch(std::function<void()> work)
     work_.done.store(false);
     work_.failure = WorkFailure::None;
     try {
-        work_.thread = std::jthread(&TagEditor::run_work, this, std::move(work));
+        work_.thread =
+            std::jthread(&TagEditor::run_work<std::function<void()>>, this, std::move(work));
     } catch (const std::bad_alloc&) {
         loading_ = false;
         error_ = "Not enough memory to start tag operation.";
@@ -86,7 +87,7 @@ void TagEditor::launch(std::function<void()> work)
     }
 }
 
-void TagEditor::run_work(const std::function<void()>& work)
+template <typename Work> void TagEditor::run_work(const Work& work)
 {
     using enum WorkFailure;
     // Keep failure reporting allocation-free on this thread. The UI reads the
