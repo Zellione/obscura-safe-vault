@@ -168,3 +168,53 @@ repository warning set (`-Wall -Wextra -Werror -Wshadow -Wconversion`) also
 passes on the rename/modal files and tests; this caught and fixed an explicit
 float conversion needed in full-name wrapping. Logs are
 `/tmp/osv-122c-owned-all.log` and `/tmp/osv-122c-owned-asan.log`.
+
+## Reproducible synthetic selection benchmark
+
+The committed `bulk_rename_selection_benchmark` test is opt-in:
+
+```bash
+OSV_RENAME_SELECTION_BENCH=1 build/bin/Debug/osv_tests bulk_rename_selection_benchmark
+```
+
+Without that exact environment value it returns immediately. It creates a fresh
+v3 vault for each size, populates and persists 1k/10k/50k flat gallery nodes named
+`old-N`, selects every node by ID, then previews and applies `^old-(.*)$` with
+`new-$1`. Setup, ID-vector preparation and the initial metadata commit are outside
+the timed region. `open-call` and `call` measure synchronous modal entry points;
+`total` includes the worker and completion polling. `max-poll` measures the
+longest `modal.update()` call, including completion cleanup. Polls sleep 1 ms.
+The harness has a 120-second polling timeout per phase and checks completion and
+renamed endpoints; it does not enforce machine-dependent timing thresholds.
+
+Reference machine: Linux x86-64, AMD Ryzen 7 8845HS, 16 logical CPUs. New rename
+and harness code compiled at `-O0`, no sanitizers; SQLite/codec libraries retain
+their existing build settings. Vaults live under `/tmp`; cold/warm storage and
+concurrent machine load were not controlled. The process's hard memlock limit
+was 8 MiB, and 50k targets triggered the existing degraded-memory warning.
+
+Original baseline (`c864654`, unchanged project objects from Debug), all **ms**:
+
+| Targets | Open call | Preview call | Preview total | Apply call | Apply total | Max update, preview / apply |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1,000 | 0.082 | 0.041 | 14.934 | 0.069 | 162.513 | 0.022 / 0.811 |
+| 10,000 | 0.021 | 0.031 | 107.123 | 0.163 | 1291.979 | 0.024 / 7.232 |
+| 50,000 | 0.032 | 0.069 | 831.746 | 0.546 | 5120.490 | 0.296 / 19.250 |
+
+WorkState revision (`79b0fb3`, unchanged project objects from Release to avoid
+mixing the parent's evolving Phase F ABI), all **ms**:
+
+| Targets | Open call | Preview call | Preview total | Apply call | Apply total | Max update, preview / apply |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1,000 | 0.074 | 0.022 | 6.470 | 0.060 | 112.392 | 0.002 / 0.220 |
+| 10,000 | 0.022 | 0.031 | 61.142 | 0.114 | 1042.831 | 0.003 / 1.378 |
+| 50,000 | 0.026 | 0.039 | 457.247 | 1.257 | 4161.768 | 0.415 / 3.902 |
+
+**These are not comparable before/after performance builds:** unchanged object
+optimization differs. No speedup is attributed to WorkState. These measurements
+establish only the observed cost of synthetic headless modal calls. There is no
+initialized SDL window, drawing, actual event loop, grid refresh, thumbnail work,
+selection reconstruction, dual-pane refresh or GPU activity in the harness.
+They make no GUI, hardware-decoder or end-to-end application latency claim.
+The opt-in run passed; logs are `/tmp/osv-122c-bench-before.log` and
+`/tmp/osv-122c-optbench.log`.
