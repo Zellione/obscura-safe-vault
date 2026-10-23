@@ -51,7 +51,9 @@ encrypted backups. Object counts, sizes, and modification times remain visible.
 Explicit, consent-gated Export remains the sole
 feature that writes decrypted media to disk. See
 [`docs/V3_VAULT_FORMAT.md`](docs/V3_VAULT_FORMAT.md) and
-[`docs/V3_BACKUP_AND_RECOVERY.md`](docs/V3_BACKUP_AND_RECOVERY.md).
+[`docs/V3_BACKUP_AND_RECOVERY.md`](docs/V3_BACKUP_AND_RECOVERY.md). Upgrade rollback/retry and encrypted
+backup restoration are covered by [storage regression tests](docs/roadmap/phase-122h-validation.md);
+independent media objects still require an intact database mapping and backups.
 
 To export gallery folders, select them with **Space** (or **Ctrl+A**), press **X**,
 confirm the plaintext warning with **Y**, and choose a destination. Selected
@@ -89,6 +91,29 @@ save; once saving starts, wait for completion. Cancelling before save leaves the
 selection unchanged. Closing the application waits for the worker before locking
 the vault. Very large selections can still spend time saving metadata, but the
 progress modal continues to repaint.
+
+## Meta tags (tag bundles)
+
+Open the tag editor with **G**, then press **F3** for meta tags. Select a bundle
+with **Up/Down**; **Enter** applies it to the selection and **Delete** removes its
+application. Tags added manually, supplied by another bundle, or inherited from
+a parent remain when a bundle is removed. Adding an already-bundled tag manually
+also preserves it independently. The ordinary tag list shows manual ownership
+and supplying bundles; deleting there removes only the manual assignment.
+
+**F8** creates a bundle, **F4** edits one, and **F6** previews deleting its
+definition. **Tab** switches the name/member fields. Separate member tags with
+semicolons; use a backslash to escape a literal semicolon or backslash. **F5**
+previews affected applications and tag changes; **Enter** confirms, **Esc** cancels.
+Editing a definition updates all its applications. Bundles contain ordinary tags.
+Member tags have surrounding whitespace trimmed; empty members and case-insensitive
+duplicates are removed, preserving the first spelling, just like ordinary tags.
+Global **F2** continues to open Settings.
+
+Bundle definitions and ownership are stored in encrypted metadata schema 3.
+Existing tags become manual assignments during upgrade; media objects are not
+rewritten. Older app versions reject the newer metadata schema. Cross-vault copy
+preserves ownership and gives conflicting bundle definitions distinct names.
 
 ## Import progress
 

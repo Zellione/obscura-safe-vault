@@ -613,6 +613,7 @@ project "osv_tests"
         "src/ui/gallery_grid.cpp",
         "src/ui/search_overlay.cpp",
         "src/ui/tag_editor.cpp",
+        "src/ui/tag_editor_bundles.cpp",
         "src/ui/combine_dialog.cpp",
         "src/ui/tile_thumb.cpp",
         "src/ui/favorites_screen.cpp",

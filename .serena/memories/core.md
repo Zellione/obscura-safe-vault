@@ -67,7 +67,14 @@ vendor/      git submodules — pinned versions, build mechanics, CI matrix in m
 → unwraps a random 32-byte master key. Legacy vaults retain the original ambiguous
 `password || keyfile` encoding until the next successful password change, which migrates
 the wrap to the domain-separated encoding.
-All data/thumbnail/index chunks are encrypted with the master key + a fresh nonce per chunk.
+For production v3 directories, domain-separated keyed-BLAKE2b derivation creates
+separate SQLCipher database and per-object keys from the master key. Immutable
+objects use fresh XChaCha20-Poly1305 nonces with vault/node/object/role/frame-bound
+associated data. See `mem:vault_format` and `mem:module/vault` for the exact layout.
+
+The retained legacy single-file format encrypts data/thumbnail/index chunks with
+the master key + a fresh nonce per chunk. The following chunk/slot details apply
+to that legacy format, not the production directory backend.
 Since **Phase 99 (OSV-AUD-004)** every record's AEAD is context-bound: the AD carries a
 domain tag (DATA/THUMB/POSTER/VIDEO/INDEX/MKWrap), the node's persistent 128-bit
 `node_id`, a fresh per-record 128-bit `record` id, and (video only) a logical `sequence`
@@ -84,7 +91,7 @@ names are `crypto::SecureString`, while encoded saved-search queries use
 `crypto::SecureBlob` (see `src/crypto/secure_string.h` and `mem:module/vault`) —
 mlock'd best-effort + `crypto_wipe`'d on destroy. Page-lock ownership is
 reference-counted per OS page so allocator neighbors cannot unlock one another.
-The decrypted index blob on unlock lives in `crypto::SecureBytes`; serialized
+For legacy unlock, the decrypted index blob lives in `crypto::SecureBytes`; legacy
 save/CommitLane snapshots use an unlocked `WipingBytes` allocator that wipes
 every released capacity block. This closes the
 last large plaintext-without-wipe surface after Phase 89 (decoded pixels →
@@ -93,11 +100,24 @@ representation changed.
 
 ## Vault write atomicity & concurrency
 
-Append chunks → fsync → write index to inactive slot → fsync → flip `active_slot` → fsync.
+Production v3: encrypt and sync immutable objects, publish no-replace, then commit
+references and metadata in one SQLCipher transaction (FULL synchronous durability).
+Published but unreferenced objects can be reclaimed; a database commit must never
+reference an unpublished object. Password rewrap replaces and directory-syncs the
+header under the writer lease. Metadata schema upgrades do not rewrite objects.
+
+Tree access has one owner: normally the UI thread; tag/bulk-rename/maintenance
+jobs and import saves explicitly transfer ownership until their worker is joined.
+The App gates conflicting screen access and waits before vault/key teardown.
+Import producers stage objects independently under the directory session mutex;
+bounded UI drains attach records and trigger background metadata saves.
+
+Legacy retained writer only: append chunks → fsync → write index to inactive slot
+→ fsync → flip `active_slot` → fsync.
 (Full 3-phase detail in `mem:module/vault` index_io.*.)
 
-**Phase 50 main-thread-tree architecture:**
-- **Index tree is main-thread-only** — no tree locks, no concurrent mutations. Worker stages chunks; main thread attaches via `Vault::attach_staged`.
+**Legacy single-file writer mechanics:**
+- **Index tree has one owner** — no concurrent mutations. Workers stage chunks; the owning thread attaches via `Vault::attach_staged`.
 - **Vault has two FILE\* handles + write_mutex_:**
   - `read_fp_` (read-only) — all read paths (thumbnail decrypt, image fetch, VideoSource) to avoid contention.
   - `write_fp_` guarded by `write_mutex_` — worker appends chunks in whole-chunk holds.
