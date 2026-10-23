@@ -15,8 +15,14 @@ namespace {
 constexpr size_t ALLOCATION_LIMIT = 8 * 1024 * 1024;
 struct alignas(std::max_align_t) Allocation {
     size_t size;
-    bool locked;
 };
+struct AllocationDeleter {
+    void operator()(Allocation* storage) const noexcept
+    {
+        crypto::SecureAllocator<Allocation>{}.deallocate(storage, 0);
+    }
+};
+using AllocationOwner = std::unique_ptr<Allocation, AllocationDeleter>;
 struct Budget {
     size_t allocated = 0;
     size_t calls = 0;
@@ -28,15 +34,13 @@ void* regex_alloc(size_t size, void* context)
     auto& b = *static_cast<Budget*>(context);
     if (size > ALLOCATION_LIMIT - b.allocated) return nullptr;
     try {
-        auto storage = std::make_unique<std::byte[]>(sizeof(Allocation) + size);
-        auto* header =
-            std::construct_at(static_cast<Allocation*>(static_cast<void*>(storage.get())));
-        header->size = size;
-        auto* data = storage.get() + sizeof(Allocation);
-        header->locked = crypto::detail::mem_lock(data, size);
-        if (!header->locked) crypto::warn_mlock_failure_once();
+        const size_t units = 1 + (size + sizeof(Allocation) - 1) / sizeof(Allocation);
+        AllocationOwner storage{crypto::SecureAllocator<Allocation>{}.allocate(units)};
+        auto* bytes = static_cast<std::byte*>(static_cast<void*>(storage.get()));
+        std::fill_n(bytes, units * sizeof(Allocation), std::byte{});
+        std::construct_at(storage.get(), size);
         b.allocated += size;
-        return storage.release() + sizeof(Allocation);
+        return storage.release() + 1;
     } catch (const std::bad_alloc&) {
         return nullptr;
     }
@@ -44,10 +48,8 @@ void* regex_alloc(size_t size, void* context)
 void regex_free(std::byte* ptr, Budget& budget)
 {
     if (!ptr) return;
-    const std::unique_ptr<std::byte[]> storage(ptr - sizeof(Allocation));
-    auto* header = static_cast<Allocation*>(static_cast<void*>(storage.get()));
-    crypto_wipe(ptr, header->size);
-    if (header->locked) crypto::detail::mem_unlock(ptr, header->size);
+    auto* header = static_cast<Allocation*>(static_cast<void*>(ptr - sizeof(Allocation)));
+    const AllocationOwner storage{header};
     budget.allocated -= header->size;
     std::destroy_at(header);
 }
