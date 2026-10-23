@@ -186,6 +186,7 @@ VaultResult apply_tag_bundle(Vault& v, std::span<const std::string> paths, std::
         if (progress) progress->done.fetch_add(1);
     }
     if (progress && progress->cancel.load()) return Ok;
+    if (change.prior.empty()) return Ok;
     return change.finish();
 }
 VaultResult copy_tag_provenance(const IndexNode& source, const VaultSettings& source_settings,
@@ -262,6 +263,50 @@ VaultResult copy_tag_provenance(const IndexNode& source, const VaultSettings& so
     destination.explicit_tags = std::move(candidate.explicit_tags);
     destination.tag_bundles = std::move(candidate.tag_bundles);
     destination.tag_provenance = true;
+    return Ok;
+}
+
+VaultResult merge_tag_provenance(const IndexNode& source, const VaultSettings& source_settings,
+                                 Vault& v, std::string_view path,
+                                 std::span<const std::string> inherited, bool commit)
+{
+    using enum VaultResult;
+    if (!v.is_unlocked()) return Locked;
+    if (vault_is_read_only(v)) return InvalidArg;
+    auto* target = v.resolve_node(path);
+    if (!target) return NotFound;
+    const auto add = [](auto& tags, std::string_view tag) {
+        if (std::ranges::none_of(tags, [&](const auto& t) { return tag_ci_equal(t.view(), tag); }))
+            tags.emplace_back(tag);
+    };
+    // This union is intentional manual ownership, separate from contributions.
+    auto manual = target->tag_provenance ? target->explicit_tags : target->tags;
+    for (const auto& tag : source.tag_provenance ? source.explicit_tags : source.tags)
+        add(manual, tag.view());
+    for (const auto& tag : inherited)
+        add(manual, tag);
+    if (manual.size() > INDEX_MAX_TAGS) return InvalidArg;
+    if (!vault_uses_directory_storage(v)) {
+        if (!source.tag_bundles.empty()) return InvalidArg;
+        std::vector<std::string> tags;
+        for (const auto& tag : manual)
+            tags.emplace_back(tag.view());
+        if (commit) return v.set_tags(path, tags);
+        target->tags = std::move(manual);
+        target->explicit_tags = target->tags;
+        target->tag_provenance = true;
+        return Ok;
+    }
+    BundleAccess change(v);
+    change.capture(*target);
+    for (const auto& tag : source.tags)
+        add(target->tags, tag.view());
+    if (const auto r = copy_tag_provenance(source, source_settings, *target, v); r != Ok) return r;
+    target->explicit_tags = std::move(manual);
+    target->tag_provenance = true;
+    if (!rebuild_bundle_tags(*target, vault_settings(v))) return InvalidArg;
+    if (commit) return change.finish();
+    change.committed = true;
     return Ok;
 }
 

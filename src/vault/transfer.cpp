@@ -108,8 +108,6 @@ void collect_all_galleries(const Vault& v, std::string_view gallery, std::vector
 struct GallerySnap {
     std::string rel;
     std::vector<std::string> images;  // names of media children (images and videos)
-    std::vector<std::string>
-        tags;  // the gallery's OWN tags (root snap: effective tags — set by the driver)
     bool favorite = false;
     IndexNode provenance;
 };
@@ -130,9 +128,6 @@ void snapshot_subtree(const Vault& src, std::string_view abs, const std::string&
     }
     // Capture the gallery's own tags and favorite at snapshot time
     if (const IndexNode* self = src.resolve_node(abs); self && self->is_gallery()) {
-        snap.tags.clear();
-        for (const auto& t : self->tags)
-            snap.tags.emplace_back(t.view());
         snap.favorite = self->favorite;
         snap.provenance.tags = self->tags;
         snap.provenance.explicit_tags = self->explicit_tags;
@@ -368,6 +363,9 @@ VaultResult copy_one_media(const Vault& src, std::string_view src_gallery, Vault
     // Capture everything needed from `node` BEFORE the destination add: a
     // same-vault add can reallocate the index and dangle the pointer.
     const std::string src_path = child_path(src_gallery, fname);
+    // Retain the legacy writer's historical flattened-tag contract. V3 subtree
+    // copies preserve bundle inheritance through their copied gallery tree.
+    if (!vault_uses_directory_storage(dst)) materialize_inheritance = true;
     auto eff_tags = effective_tags(src, src_path);
     auto retained_inherited =
         materialize_inheritance ? effective_tags(src, src_gallery) : std::vector<std::string>{};
@@ -463,34 +461,14 @@ void copy_images(CopyCtx& c, const std::string& src_abs, const std::string& dst_
     }
 }
 
-// Union `tags` onto the gallery at `dst_path` (ci-deduped, existing casing kept)
-// and OR the favorite flag. Called after ensure_gallery_path so a pre-existing
-// destination gallery keeps its tags and a re-run stays idempotent. Tree-only
-// mutation — rides the batch commit.
-void apply_gallery_extras(Vault& dst, std::string_view dst_path,
-                          const std::vector<std::string>& tags, bool favorite)
-{
-    IndexNode* g = dst.resolve_node(dst_path);
-    if (!g || !g->is_gallery()) return;
-    for (const auto& t : tags) {
-        if (g->tags.size() >= INDEX_MAX_TAGS) break;
-        if (!std::ranges::any_of(g->tags, [&](const auto& o) { return tag_ci_equal(o.view(), t); }))
-            g->tags.emplace_back(t);
-        if (g->tag_provenance && std::ranges::none_of(g->explicit_tags, [&](const auto& o) {
-                return tag_ci_equal(o.view(), t);
-            }))
-            g->explicit_tags.emplace_back(t);
-    }
-    if (favorite) g->favorite = true;
-}
-
 // Recreate the snapshotted subtree under `dest_root` in `dst` and copy each gallery's
 // media (parent-before-child order). Collects failed sub-branch rel-prefixes for the
 // pruner. Never aborts on per-file failures; they are recorded in c.tally. snaps are
 // depth-first, parent-before-child, so a failed gallery's descendants form a CONTIGUOUS
 // run — the `skip_prefix` scan relies on this.
 void copy_subtree(CopyCtx& c, std::string_view src_gallery, const std::string& dest_root,
-                  const std::vector<GallerySnap>& snaps, std::vector<std::string>& failed_rels)
+                  const std::vector<GallerySnap>& snaps, std::vector<std::string>& failed_rels,
+                  bool materialize_ancestors)
 {
     using enum VaultResult;
     std::string skip_prefix;
@@ -523,30 +501,26 @@ void copy_subtree(CopyCtx& c, std::string_view src_gallery, const std::string& d
             continue;
         }
         c.dirty = true;  // ensured galleries need the next commit too
-        const auto* old_target = c.dst.resolve_node(dst_gallery);
-        auto retained_manual =
-            old_target->tag_provenance ? old_target->explicit_tags : old_target->tags;
-        if (snap.rel.empty() && !src_gallery.empty()) {
+        std::vector<std::string> inherited;
+        if (materialize_ancestors && snap.rel.empty() && !src_gallery.empty()) {
             const auto slash = src_gallery.find_last_of('/');
             const auto parent =
                 slash == src_gallery.npos ? std::string_view{} : src_gallery.substr(0, slash);
-            for (const auto& tag : effective_tags(c.src, parent))
-                retained_manual.emplace_back(tag);
+            inherited = effective_tags(c.src, parent);
         }
-        apply_gallery_extras(c.dst, dst_gallery, snap.tags, snap.favorite);
-        if (const auto result = copy_tag_provenance(snap.provenance, vault_settings(c.src),
-                                                    *c.dst.resolve_node(dst_gallery), c.dst);
+        if (const auto result = merge_tag_provenance(snap.provenance, vault_settings(c.src), c.dst,
+                                                     dst_gallery, inherited, false);
             result != Ok) {
             record_failure(c.tally, src_abs, result, TransferFailure::Stage::Write);
+            c.tally.failed += static_cast<int>(snap.images.size());
+            if (c.progress) c.progress->done.fetch_add(static_cast<int>(snap.images.size()));
+            failed_rels.push_back(snap.rel);
+            if (snap.rel.empty()) return;
+            skip_prefix = snap.rel;
+            skipping = true;
             continue;
         }
-        auto* target = c.dst.resolve_node(dst_gallery);
-        for (const auto& tag : retained_manual)
-            if (std::ranges::none_of(target->explicit_tags, [&](const auto& t) {
-                    return tag_ci_equal(t.view(), tag.view());
-                }))
-                target->explicit_tags.push_back(tag);
-        (void)rebuild_bundle_tags(*target, vault_settings(c.dst));
+        c.dst.resolve_node(dst_gallery)->favorite |= snap.favorite;
         copy_images(c, src_abs, dst_gallery, snap.images);
     }
 }
@@ -677,6 +651,15 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery, Vault& ds
 
     if (!gallery_exists(src, src_gallery)) return NotFound;
 
+    if (!vault_uses_directory_storage(dst)) {
+        const auto has_bundles = [&](auto&& self, const IndexNode& node) -> bool {
+            if (!node.tag_bundles.empty()) return true;
+            return std::ranges::any_of(node.children,
+                                       [&](const auto& child) { return self(self, child); });
+        };
+        if (has_bundles(has_bundles, *src.resolve_node(src_gallery))) return InvalidArg;
+    }
+
     std::string dest_name = name;
     const CollisionResolution collision =
         resolve_dest_collision(src, src_gallery, dst, dst_parent, mode, opts, name);
@@ -691,9 +674,6 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery, Vault& ds
     // Snapshot the source subtree (parent-before-child), then recreate + copy.
     std::vector<GallerySnap> snaps;
     snapshot_subtree(src, src_gallery, "", snaps);
-
-    // Materialize the ROOT snap's tags with effective tags (ancestors cascade in).
-    if (!snaps.empty()) snaps[0].tags = effective_tags(src, src_gallery);
 
     // Total media across the subtree drives the progress bar ("N / M files").
     if (progress) {
@@ -710,7 +690,7 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery, Vault& ds
     CopyCtx ctx{
         .src = src, .dst = dst, .mode = mode, .plain = plain, .progress = progress, .tally = t};
     std::vector<std::string> failed_rels;
-    copy_subtree(ctx, src_gallery, dest_root, snaps, failed_rels);
+    copy_subtree(ctx, src_gallery, dest_root, snaps, failed_rels, opts.materialize_inheritance);
 
     // The subtree root itself could not be created: structural failure, source
     // untouched (nothing was copied — copy_one_media was never reached).
@@ -722,6 +702,9 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery, Vault& ds
     // leaves items moved so far only in the destination — no duplicates,
     // nothing lost.
     finish_copies(ctx);
+    // Empty galleries carry metadata too: never remove their source before the
+    // destination metadata transaction is durable, even with no pending media.
+    if (ctx.commit_failed) return IoError;
 
     // Skip pruning on cancel: galleries not yet recreated at the destination
     // must survive.
@@ -761,7 +744,7 @@ TransferTally transfer_images(Vault& src, std::string_view src_gallery,
         // Stop between files on a user cancel (clean partial) or a destination
         // commit failure (hard stop).
         if ((progress && progress->cancel.load()) || ctx.commit_failed) break;
-        copy_one_media_ex(ctx, src_gallery, dst_gallery, fname);
+        copy_one_media_ex(ctx, src_gallery, dst_gallery, fname, prog.materialize_inheritance);
     }
     finish_copies(ctx);  // one dst commit + one deferred source removal batch
     return tally;

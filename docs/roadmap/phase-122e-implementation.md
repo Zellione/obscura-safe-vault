@@ -80,13 +80,54 @@ rollback. The v2 migration test caught and fixed a live SELECT locking the table
 being replaced. Changed translation units passed strict no-AV syntax checks.
 Additional Vault/UI integration tests cover manual promotion, overlapping bundles,
 editing/deletion, bundle rename/reopen, cancellation, inheritance, and transfer
-conflict preservation, and the administration keyboard flow; the parent must
-execute these in the integrated runner.
+conflict preservation, and the administration keyboard flow. These were later
+executed in the isolated integration follow-up below.
 
-The isolated full build stopped on disk quota. Per parent instruction it was
-not retried: copied build/dependency artifacts were removed only from this
+The initial isolated full build stopped on disk quota. At that point, per parent
+instruction it was not retried: copied build/dependency artifacts were removed only from this
 worktree and replaced with read-only-use dependency symlinks. Focused binaries
 were built outside the repository build tree. Do not run dependency build scripts
 against these symlinks. Full Debug/Release/ASAN/no-AV gates, graphical interaction,
 large-selection latency measurements, and SonarCloud remain parent integration
 checks. Regenerate build files to include the new C++ translation units.
+
+
+## Isolated integration follow-up
+
+The isolated no-AV Debug `osv_tests_Debug_x64` target was built against read-only
+shared vendor prefixes, with compiler scratch under the dedicated
+`build/tmp-phase122e` directory on project disk. No shared build targets or
+vendor artifacts were modified. The linked build found and fixed the missing
+`tag_editor_bundles.cpp` entry in the test target's explicit Premake source list.
+
+Executed against the final follow-up build:
+
+- `osv_tests tag`: **301 passed**, including all nine Vault bundle integration
+  tests and all three TagEditor worker/administration tests.
+- `osv_tests transfer`: **89 passed**.
+- `osv_tests combine`: **29 passed**.
+
+These filter sets overlap and are not a count of distinct tests. Full integrated
+Debug/Release/ASAN and CI/Sonar remain parent gates.
+
+Self-review added regressions for `set_tags`, manual promotion via batch add,
+batch removal while bundles remain effective, duplicate selection paths,
+overlapping bundles, definition edits/deletion, cold reopen, failed metadata
+commits, real subtree/media transfer, and Combine conflicts. A deliberately
+invalid unrelated node makes the metadata snapshot fail after the live tag edit,
+checking restoration of explicit assignments, active bundle IDs, definitions,
+and effective tags as well as the prior durable state.
+
+The review reproduced and fixed three transfer problems: unsupported bundle
+moves could prune the empty source gallery; a failed destination commit could
+also prune source metadata; and Combine flattened bundle contributions into
+manual tags, including when Combine copied a whole nested subtree. Gallery
+metadata now uses `merge_tag_provenance`, preserving both
+sources' manual ownership and independently applied bundles, with an atomic
+commit for Combine or preparation within the subtree transfer's existing batch.
+Failed metadata preparation marks its source branch as failed. Failed destination
+commits stop source pruning. Legacy writer transfers retain their historical
+flattened-tag behavior; v3 subtree copies preserve internal bundle inheritance.
+Repeated application/removal with no changed nodes avoids an unnecessary commit.
+
+The Phase 122D `visit_bundle_tag_references` integration hook is unchanged.

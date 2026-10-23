@@ -25,4 +25,10 @@ void visit_bundle_tag_references(IndexNode& root, VaultSettings& settings,
 [[nodiscard]] VaultResult copy_tag_provenance(const IndexNode& source,
                                               const VaultSettings& source_settings,
                                               IndexNode& destination, Vault& destination_vault);
+// Atomically merge gallery tag ownership and definitions before moving children.
+// commit=false stages the merge in the transfer driver's existing batch transaction.
+[[nodiscard]] VaultResult
+merge_tag_provenance(const IndexNode& source, const VaultSettings& source_settings,
+                     Vault& destination_vault, std::string_view destination_path,
+                     std::span<const std::string> inherited = {}, bool commit = true);
 }  // namespace vault
