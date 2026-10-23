@@ -121,6 +121,11 @@ source fixture construction. Temporary encrypted vaults are removed after each r
 
 ## Archive decoder (Phase 121)
 
+VP8 fixture: `python3 tests/media/fixtures/generate_vp8.py` regenerates the CC0
+synthetic odd-size color bars using a development FFmpeg/libvpx encoder. Shipped
+builds remain decode-only. `build/bin/Debug/osv_tests vp8_` runs color/seek/poster
+and worker/fallback checks; these do not establish NVIDIA driver correctness.
+
 Selection tag metadata benchmark: `OSV_TAG_SELECTION_BENCH=1000
 build/bin/Debug/osv_tests tag_editor_selection_benchmark` (also 10000 or 50000).
 Reports UI call latency separately from asynchronous completion; synthetic

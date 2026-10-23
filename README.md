@@ -158,6 +158,44 @@ apply to the next clip opened; hardware failures still fall back to software.
 F1 reports the selected software mode or hardware probe status. Existing saved
 hardware-disabled or force-software preferences remain software-only until changed.
 
+#### Green or corrupt VP8/WebM playback on NVIDIA
+
+Select **F2 → Playback → Video decoding → Software**, then close and reopen
+the affected clip. The setting changes the next decoder, not the one already
+playing. `Ctrl+Shift+H` toggles the same choice; check the toast says **Software
+(next clip)**. This bypass needs no export or conversion of decrypted media.
+Software VP8 color, seek, reopen, and poster checks pass on the project's
+synthetic fixture. If software fixes your clip, leave it selected; if it does
+not, report that result too. The reported NVIDIA hardware failure has not been
+reproduced here, so a driver-specific fix is not claimed.
+
+Obscura uses VAAPI. On NVIDIA, the VAAPI-to-NVDEC bridge is separate from the
+`nvidia-open` kernel driver. For a native Arch installation, inspect it with:
+
+```sh
+pacman -Q nvidia-open nvidia-utils libva-nvidia-driver libva-utils
+vainfo
+```
+
+Use your installed kernel-package variant, such as `nvidia-open-dkms`, where
+appropriate. Arch packages the bridge as
+[`libva-nvidia-driver`](https://archlinux.org/packages/extra/x86_64/libva-nvidia-driver/)
+and the diagnostic utilities as
+[`libva-utils`](https://archlinux.org/packages/extra/x86_64/libva-utils/).
+If you want to retry hardware playback, update/install them with a full system
+upgrade (`sudo pacman -Syu libva-nvidia-driver libva-utils`), reboot if required
+by the driver/kernel update, restart Obscura, and reopen the clip in Hardware
+mode. On multiple GPUs, confirm which device `vainfo` tests. Container runtimes
+may use different drivers from the host.
+
+The [bridge's upstream documentation](https://github.com/elFarto/nvidia-vaapi-driver)
+lists VP8 support but cautions about application compatibility. Its
+[v0.0.15 release](https://github.com/elFarto/nvidia-vaapi-driver/releases/tag/v0.0.15)
+contains a VP8 slice-header fix; updating is not a verified fix for this report.
+If hardware still fails, keep Software selected and report GPU model,
+kernel/NVIDIA/bridge versions, app build, and the `[HwAccel]` startup diagnostic.
+See the [investigation and reproducible synthetic fixture](docs/roadmap/phase-122g-implementation.md).
+
 #### Locked-memory limit (`RLIMIT_MEMLOCK`)
 
 Application-controlled decrypted data is held in `mlock`'d buffers so it is
