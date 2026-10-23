@@ -51,7 +51,9 @@ encrypted backups. Object counts, sizes, and modification times remain visible.
 Explicit, consent-gated Export remains the sole
 feature that writes decrypted media to disk. See
 [`docs/V3_VAULT_FORMAT.md`](docs/V3_VAULT_FORMAT.md) and
-[`docs/V3_BACKUP_AND_RECOVERY.md`](docs/V3_BACKUP_AND_RECOVERY.md).
+[`docs/V3_BACKUP_AND_RECOVERY.md`](docs/V3_BACKUP_AND_RECOVERY.md). Upgrade rollback/retry and encrypted
+backup restoration are covered by [storage regression tests](docs/roadmap/phase-122h-validation.md);
+independent media objects still require an intact database mapping and backups.
 
 To export gallery folders, select them with **Space** (or **Ctrl+A**), press **X**,
 confirm the plaintext warning with **Y**, and choose a destination. Selected

@@ -77,6 +77,9 @@ There are no production fault-injection hooks or schema changes in this commit.
 
 ## Validation and limits
 
+Integrated stack: full Debug suite passes **2,529 tests**. Full integrated
+ASAN/UBSan/LSan is running; the focused sanitizer evidence below also passes.
+
 The focused runner includes the new file plus existing `test_v3_db.cpp`,
 `test_v3_backup.cpp`, `test_v3_mutation.cpp`, `test_v3_recovery.cpp`, and
 `test_v3_transaction_model.cpp`: **26 tests, zero failures**. It compiles the
