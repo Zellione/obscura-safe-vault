@@ -27,25 +27,29 @@ void* regex_alloc(size_t size, void* context)
 {
     auto& b = *static_cast<Budget*>(context);
     if (size > ALLOCATION_LIMIT - b.allocated) return nullptr;
-    auto* storage = new (std::nothrow) std::byte[sizeof(Allocation) + size]{};
-    if (!storage) return nullptr;
-    auto* header = std::construct_at(reinterpret_cast<Allocation*>(storage));
-    header->size = size;
-    auto* data = storage + sizeof(Allocation);
-    header->locked = crypto::detail::mem_lock(data, size);
-    if (!header->locked) crypto::warn_mlock_failure_once();
-    b.allocated += size;
-    return data;
+    try {
+        auto storage = std::make_unique<std::byte[]>(sizeof(Allocation) + size);
+        auto* header =
+            std::construct_at(static_cast<Allocation*>(static_cast<void*>(storage.get())));
+        header->size = size;
+        auto* data = storage.get() + sizeof(Allocation);
+        header->locked = crypto::detail::mem_lock(data, size);
+        if (!header->locked) crypto::warn_mlock_failure_once();
+        b.allocated += size;
+        return storage.release() + sizeof(Allocation);
+    } catch (const std::bad_alloc&) {
+        return nullptr;
+    }
 }
 void regex_free(std::byte* ptr, Budget& budget)
 {
     if (!ptr) return;
-    auto* header = reinterpret_cast<Allocation*>(ptr - sizeof(Allocation));
+    const std::unique_ptr<std::byte[]> storage(ptr - sizeof(Allocation));
+    auto* header = static_cast<Allocation*>(static_cast<void*>(storage.get()));
     crypto_wipe(ptr, header->size);
     if (header->locked) crypto::detail::mem_unlock(ptr, header->size);
     budget.allocated -= header->size;
     std::destroy_at(header);
-    delete[] (ptr - sizeof(Allocation));
 }
 bool cancelled(const OpProgress* p)
 {
@@ -64,7 +68,7 @@ struct Entry {
     bool selected;
 };
 using Tree = std::map<RenameId, Entry>;
-bool scan(Vault& v, std::span<const RenameId> ids, bool recursive, Tree& tree, OpProgress* p)
+bool scan(Vault& v, std::span<const RenameId> ids, bool recursive, Tree& tree, const OpProgress* p)
 {
     auto* root = v.resolve_node("");
     if (!root) return false;
@@ -75,8 +79,7 @@ bool scan(Vault& v, std::span<const RenameId> ids, bool recursive, Tree& tree, O
         auto e = pending.back();
         pending.pop_back();
         const bool chosen = wanted.contains(e.node->node_id) || (recursive && e.selected);
-        if (e.node != root &&
-            !tree.try_emplace(e.node->node_id, Entry{e.node, e.parent, chosen}).second)
+        if (e.node != root && !tree.try_emplace(e.node->node_id, e.node, e.parent, chosen).second)
             return false;
         for (auto& child : e.node->children)
             pending.emplace_back(&child, e.node->node_id, chosen);
