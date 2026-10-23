@@ -548,6 +548,14 @@ bool subtree_has_bundles(const IndexNode& node)
     return !node.tag_bundles.empty() || std::ranges::any_of(node.children, subtree_has_bundles);
 }
 
+int snapshot_media_count(const std::vector<GallerySnap>& snapshots)
+{
+    int count = 0;
+    for (const auto& snapshot : snapshots)
+        count += static_cast<int>(snapshot.images.size());
+    return count;
+}
+
 // A same-vault transfer forms a cycle when the destination parent is the moved
 // gallery itself or any descendant of it (moving a subtree into itself). Always
 // false across two different vaults.
@@ -693,12 +701,7 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery, Vault& ds
     snapshot_subtree(src, src_gallery, "", snaps);
 
     // Total media across the subtree drives the progress bar ("N / M files").
-    if (progress) {
-        int media = 0;
-        for (const auto& snap : snaps)
-            media += static_cast<int>(snap.images.size());
-        progress->total.store(media);
-    }
+    if (progress) progress->total.store(snapshot_media_count(snaps));
 
     TransferTally local;
     TransferTally& t = tally ? *tally : local;

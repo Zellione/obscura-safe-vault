@@ -156,3 +156,7 @@ destination preparation failures on the same source-preserving path. These chang
 address the posted 67 findings without suppressions; a fresh remote scan verifies
 closure. Focused review tests passed 305 tag, 90 transfer and 29 combine cases.
 The combined review fixes passed the full Debug suite: **2,546 tests, zero failures**.
+They also passed the full Release and ASAN/UBSan/LSan suites (2,546 tests each).
+The final regex allocator cleanup passed full Debug and sanitizer suites plus
+35 Release rename tests. The remaining transfer-complexity extraction passed all
+90 focused transfer tests; remote confirmation is tracked on the PR.
