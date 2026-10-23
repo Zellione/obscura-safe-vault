@@ -8,7 +8,7 @@ ASAN, interactive UI acceptance, or SonarCloud gates.
 
 In the selection tag editor, F3 opens vault-local bundles. Up/Down selects a
 bundle; Enter applies it to the selection; Delete removes its application.
-F2 creates a definition, F4 edits it, and F6 previews deletion. Administration
+F8 creates a definition, F4 edits it, and F6 previews deletion. Administration
 uses separate name and member fields, switched with Tab. Members are separated
 by semicolons; a backslash escapes a literal semicolon or backslash. F5 previews
 the number of affected applications and effective tag additions/removals;
@@ -37,7 +37,7 @@ settings on failure. Selection cancellation before commit restores changes.
 Overlapping bundles contribute independently. Ordinary tagging retains B's
 worker and commit mechanism, now mutating explicit assignments.
 
-For Phase 122D, include `vault/tag_bundles.h` and call
+Phase 122D integration includes `vault/tag_bundles.h` and call
 `visit_bundle_tag_references(root, settings, visitor)` while preparing the
 category rename replacement list. It visits explicit assignments and all bundle
 member strings, including unused definitions. Existing node tags must still be
@@ -131,3 +131,13 @@ flattened-tag behavior; v3 subtree copies preserve internal bundle inheritance.
 Repeated application/removal with no changed nodes avoids an unnecessary commit.
 
 The Phase 122D `visit_bundle_tag_references` integration hook is unchanged.
+
+## Integrated validation
+
+Full integrated Debug suite: **2,544 tests pass**, including H's failed-upgrade
+retry/object-preservation and nested encrypted-backup tests against schema 3.
+The category integration regression failed before adding explicit/bundle-member
+references, then passed with namespace collision checks and manual ownership
+preserved after reopen/removal. The F8 administration regression also failed
+before replacing F2, which the App reserves for global Settings. Full integrated
+sanitizer and CI/Sonar gates are pending.

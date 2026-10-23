@@ -182,7 +182,7 @@ bool TagEditor::handle_bundle_event(const SDL_Event& e)
     case SDLK_DELETE:
         run_bundle_action(true);
         break;
-    case SDLK_F2:
+    case SDLK_F8:
         open_bundle_form(true);
         break;
     case SDLK_F4:
@@ -230,7 +230,7 @@ void TagEditor::render_bundles(gfx::Renderer& r, gfx::FontAtlas& font, float W, 
         } else
             line(9, "[Tab] Switch field  [F5] Preview save  [Esc] Cancel");
     } else {
-        line(1, "[F2] New  [F4] Edit  [F6] Delete definition  [Up/Down] Select");
+        line(1, "[F8] New  [F4] Edit  [F6] Delete definition  [Up/Down] Select");
         const auto& bundles = vault::vault_settings(vault_).tag_bundles;
         const int rows = std::max(1, static_cast<int>(height / pitch) - 6);
         const int first = std::max(0, bundle_selected_ - rows + 1);

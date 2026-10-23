@@ -185,3 +185,9 @@ handle whose timeout could invalidate an open pane. Pane lifetime controls locki
 atomic completion and typed failure state, joined before tree ownership returns. Preview
 and apply are worker tasks; changing fields/options invalidates confirmation.
 GalleryGrid gates tree rendering/update while busy and restores selection by ID.
+
+`tag_editor_bundles.cpp` implements TagEditor bundle view/admin using its owned
+worker. G → F3 selects bundle mode: Enter applies, Delete removes application;
+F8 new, F4 edit, F6 delete definition, Tab fields, F5 preview, Enter confirmation.
+F8 avoids the app-wide F2 Settings binding. Ordinary rows show manual/bundle
+provenance. Deleting an explicit assignment cannot remove another contribution.

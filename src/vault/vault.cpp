@@ -2411,6 +2411,8 @@ VaultResult rename_tag_category(Vault& v, std::string_view old_name, std::string
     CategoryRenamePlan plan{old_name, new_name, Ok, {}};
     std::vector<crypto::SecureString*> refs;
     inspect_node_tags(v.root_, [&refs](auto& tag) { refs.push_back(&tag); });
+    visit_bundle_tag_references(v.root_, v.settings_,
+                                [&refs](auto& tag) { refs.push_back(&tag); });
     for (auto& item : v.settings_.tag_descriptions)
         refs.push_back(&item.tag);
     for (auto& item : v.settings_.tag_field_values)

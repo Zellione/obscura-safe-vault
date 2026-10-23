@@ -3,6 +3,7 @@
 #include "vault/file_util.h"
 #include "vault/fixtures.h"
 #include "vault/vault_search.h"
+#include "vault/tag_bundles.h"
 
 TEST(category_rename_updates_assignments_metadata_and_queries_atomically)
 {
@@ -96,6 +97,48 @@ TEST(category_rename_commit_failure_restores_category_tags_and_descriptions)
         CHECK(vault::rename_tag_category(readonly, "person", "people") ==
               vault::VaultResult::InvalidArg);
         CHECK(readonly.resolve_node("")->tags[0] == "person:Alice");
+    }
+    std::filesystem::remove_all(path);
+}
+
+TEST(category_rename_updates_bundle_members_and_manual_provenance_after_reopen)
+{
+    const auto path = std::filesystem::temp_directory_path() / "osv-category-bundles.osv";
+    std::filesystem::remove_all(path);
+    {
+        vault::Vault v;
+        REQUIRE(vaulttest::make_directory_vault(v, path));
+        REQUIRE(v.create_gallery("gallery") == vault::VaultResult::Ok);
+        REQUIRE(v.set_tags("gallery", {"person:manual", "person:shared"}) ==
+                vault::VaultResult::Ok);
+        auto settings = vault::vault_settings(v);
+        settings.categories.push_back({crypto::SecureString("person"), 0, {}});
+        REQUIRE(vault::set_vault_settings(v, settings) == vault::VaultResult::Ok);
+        REQUIRE(vault::save_tag_bundle(v, "active", {"person:shared", "person:bundle"}) ==
+                vault::VaultResult::Ok);
+        REQUIRE(vault::save_tag_bundle(v, "unused", {"person:unused"}) == vault::VaultResult::Ok);
+        REQUIRE(vault::save_tag_bundle(v, "reserved", {"blocked:value"}) == vault::VaultResult::Ok);
+        const std::vector<std::string> paths{"gallery"};
+        REQUIRE(vault::apply_tag_bundle(v, paths, "active", false) == vault::VaultResult::Ok);
+        CHECK(vault::rename_tag_category(v, "person", "blocked") == vault::VaultResult::AlreadyExists);
+        REQUIRE(vault::rename_tag_category(v, "person", "people") == vault::VaultResult::Ok);
+        const auto& bundles = vault::vault_settings(v).tag_bundles;
+        REQUIRE(bundles.size() == 3);
+        CHECK(bundles[0].tags[0] == "people:shared");
+        CHECK(bundles[0].tags[1] == "people:bundle");
+        CHECK(bundles[1].tags[0] == "people:unused");
+        v.lock();
+        REQUIRE(v.unlock(vaulttest::kPassword, {}) == vault::VaultResult::Ok);
+        REQUIRE(vault::apply_tag_bundle(v, paths, "active", true) == vault::VaultResult::Ok);
+        const auto* node = v.resolve_node("gallery");
+        REQUIRE(node != nullptr);
+        REQUIRE(node->tags.size() == 2);
+        CHECK(node->tags[0] == "people:manual");
+        CHECK(node->tags[1] == "people:shared");
+        v.lock();
+        REQUIRE(v.unlock(vaulttest::kPassword, {}) == vault::VaultResult::Ok);
+        CHECK(v.resolve_node("gallery")->tags.size() == 2);
+        CHECK(v.resolve_node("gallery")->tags[0] == "people:manual");
     }
     std::filesystem::remove_all(path);
 }

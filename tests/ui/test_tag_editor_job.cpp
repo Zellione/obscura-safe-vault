@@ -206,7 +206,7 @@ TEST(tag_editor_bundle_admin_preview_apply_remove_and_delete)
             return editor.handle_event(text);
         };
         CHECK(press(SDLK_F3));
-        CHECK(press(SDLK_F2));
+        CHECK(press(SDLK_F8));
         CHECK(type("bundle"));
         CHECK(press(SDLK_TAB));
         CHECK(type("manual;bundled"));
