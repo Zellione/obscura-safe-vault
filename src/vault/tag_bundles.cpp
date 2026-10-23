@@ -1,5 +1,6 @@
 #include "vault/tag_bundles.h"
 #include <algorithm>
+#include <memory>
 #include "crypto/random.h"
 #include "vault/vault.h"
 
@@ -57,6 +58,10 @@ struct BundleAccess {
     std::vector<Prior> prior;
     bool committed = false;
     explicit BundleAccess(Vault& vault) : v(vault), settings(vault.settings_) {}
+    BundleAccess(const BundleAccess&) = delete;
+    BundleAccess& operator=(const BundleAccess&) = delete;
+    BundleAccess(BundleAccess&&) = delete;
+    BundleAccess& operator=(BundleAccess&&) = delete;
     ~BundleAccess()
     {
         if (committed) return;
@@ -126,7 +131,7 @@ VaultResult save_tag_bundle(Vault& v, std::string_view name, const std::vector<s
     });
     if (!original_name.empty() && found == bundles.end()) return NotFound;
     if (std::ranges::any_of(bundles, [&](const auto& b) {
-            return &b != (found == bundles.end() ? nullptr : &*found) &&
+            return &b != (found == bundles.end() ? nullptr : std::to_address(found)) &&
                    tag_ci_equal(b.name.view(), name);
         }))
         return AlreadyExists;
