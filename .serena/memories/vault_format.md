@@ -224,8 +224,8 @@ cold-open recovery copy if the active slot is torn or damaged. See
 ## See also
 
 Index tree serialisation (`IndexNode`, tags, favorites, video metadata,
-saved searches, sort keys, tag descriptions) and the framed-chunk compression codec: `mem:core`
-(vault/ section — `index.*`, `chunk_codec.*`, `index_io.*`).
+saved searches, sort keys, tag descriptions) and the framed-chunk compression codec:
+`mem:module/vault` (`index.*`, `chunk_codec.*`, `index_io.*`).
 
 Directory SQL schema **v3** (container format remains v3, object format 1)
 retains v2's microsecond durations, case-sensitive sibling names, u16-length tags
