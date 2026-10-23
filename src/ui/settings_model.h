@@ -88,7 +88,7 @@ void settings_remove_category(SettingsState& state, int row) noexcept;
 
 // Rename category at the given index, with duplicate detection. Returns false if
 // the new name matches another category (case-insensitive) or if renaming to
-// itself.
+// exactly the same spelling. Case-only renames are supported.
 [[nodiscard]] bool settings_rename_category(SettingsState& state, int row,
                                             std::string name);
 

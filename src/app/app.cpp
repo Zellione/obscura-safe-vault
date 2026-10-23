@@ -1358,8 +1358,12 @@ void App::update(double dt)  // NOSONAR cpp:S3776 -- ordered lifecycle coordinat
         MaintenanceUi::Result result;
         try {
             result = maintenance_ui_.future.get();
-        } catch (const std::exception&) {
-            result = {false, "Vault operation failed"};
+        } catch (const std::bad_alloc&) {
+            result = {false, "Not enough memory for the vault operation"};
+        } catch (const std::future_error&) {
+            result = {false, "Vault worker result unavailable"};
+        } catch (const std::system_error&) {
+            result = {false, "Vault worker system error"};
         }
         maintenance_ui_.running = false;
         import_ui_.queue.set_exclusive(false);

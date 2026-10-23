@@ -2326,9 +2326,10 @@ struct CategoryRenamePlan {
 
 VaultResult prepare_category_queries(CategoryRenamePlan& plan, std::vector<SavedSearch>& searches)
 {
+    using enum VaultResult;
     for (auto& search : searches) {
         ui::AdvancedQuery query;
-        if (!ui::deserialize_query(search.query.as_span(), query)) return VaultResult::BadFormat;
+        if (!ui::deserialize_query(search.query.as_span(), query)) return BadFormat;
         bool changed = false;
         for (auto& item : query.include)
             changed = plan.rewrite(item.tag) || changed;
@@ -2337,12 +2338,12 @@ VaultResult prepare_category_queries(CategoryRenamePlan& plan, std::vector<Saved
         for (auto& group : query.groups)
             for (auto& tag : group.tags)
                 changed = plan.rewrite(tag) || changed;
-        if (plan.status != VaultResult::Ok) return plan.status;
+        if (plan.status != Ok) return plan.status;
         if (!changed) continue;
         const auto blob = ui::serialize_query(query);
-        if (!search.query.assign(blob)) return VaultResult::IoError;
+        if (!search.query.assign(blob)) return IoError;
     }
-    return VaultResult::Ok;
+    return Ok;
 }
 
 struct AppliedCategoryRename {
@@ -2358,6 +2359,10 @@ struct AppliedCategoryRename {
             target->swap(value);
         stored.swap(prepared);
     }
+    AppliedCategoryRename(const AppliedCategoryRename&) = delete;
+    AppliedCategoryRename& operator=(const AppliedCategoryRename&) = delete;
+    AppliedCategoryRename(AppliedCategoryRename&&) = delete;
+    AppliedCategoryRename& operator=(AppliedCategoryRename&&) = delete;
     ~AppliedCategoryRename()
     {
         if (committed) return;
@@ -2386,7 +2391,7 @@ VaultResult rename_tag_category(Vault& v, std::string_view old_name, std::string
     if (category == v.settings_.categories.end()) return NotFound;
     if (category->name == new_name) return Ok;
     for (const auto& item : v.settings_.categories)
-        if (&item != &*category && tag_ci_equal(item.name.view(), new_name)) return AlreadyExists;
+        if (&item != std::to_address(category) && tag_ci_equal(item.name.view(), new_name)) return AlreadyExists;
 
     CategoryRenamePlan plan{old_name, new_name, Ok, {}};
     std::vector<crypto::SecureString*> refs;
