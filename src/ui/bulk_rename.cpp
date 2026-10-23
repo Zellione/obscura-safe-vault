@@ -227,7 +227,7 @@ bool BulkRename::handle_key(SDL_Keycode key)
     }
     return false;
 }
-void BulkRename::render_progress(gfx::Renderer& r, gfx::FontAtlas& font, float w, float h)
+void BulkRename::render_progress(gfx::Renderer& r, gfx::FontAtlas& font, float w, float h) const
 {
     const int total = progress_.total.load();
     const int done = progress_.done.load();

@@ -41,7 +41,7 @@ private:
     void launch(std::function<void()> task);
     template <typename Work> void run_work(const Work& task);
     bool handle_key(SDL_Keycode key);
-    void render_progress(gfx::Renderer& r, gfx::FontAtlas& font, float w, float h);
+    void render_progress(gfx::Renderer& r, gfx::FontAtlas& font, float w, float h) const;
     [[nodiscard]] bool finish_work();
     void preview();
     void apply();
