@@ -63,7 +63,7 @@ private:
     friend struct TagEditorTestAccess;
     std::string_view finish_work();
     void launch(std::function<void()> work);
-    void run_work(const std::function<void()>& work);
+    template <typename Work> void run_work(const Work& work);
     bool handle_bundle_event(const SDL_Event& event);
     void render_bundles(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
     void open_bundle_form(bool create);
