@@ -76,6 +76,10 @@ locked-memory warning in both versions. No memory-limit workaround was applied.
 
 ## Validation and integration notes
 
+Integrated stack: full Debug suite passes **2,514 tests**. Full sanitizer and CI
+gates are pending. The App integration retains both maintenance and import-save
+ownership guards and shutdown joins.
+
 - Focused Debug runner: **42 tests pass**, covering import queue integration,
   progress formatting, small-batch cold reopen without a shutdown save, bounded
   drains, cancellation waking a backpressured producer, and existing ZIP/folder/

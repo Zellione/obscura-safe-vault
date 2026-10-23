@@ -634,3 +634,7 @@ all nested originals and empty galleries. This applies to grid, favorites/tag
 collections, and advanced search. Overlapping selections export once. Existing
 names are suffixed, never merged/overwritten. Progress counts files and folders
 as items; Esc keeps completed output and stops between entries.
+
+Import status rows expose discovery, extraction/reading, and processing phases.
+V3 metadata saves show an animated indeterminate modal; navigation waits for the
+durable save and no cancellation hint is offered during this non-cancellable step.

@@ -76,6 +76,16 @@ selection unchanged. Closing the application waits for the worker before locking
 the vault. Very large selections can still spend time saving metadata, but the
 progress modal continues to repaint.
 
+## Import progress
+
+Folder and archive imports show discovery, extraction/reading, and processing
+stages in **Shift+I**. Queued results are applied in bounded batches so the UI can
+repaint between batches. Metadata saves run in the background with an animated
+progress modal; navigation waits until the durable save completes. Saving has no
+reliable percentage and cannot be cancelled once started. Large files and archive
+decoding can still take time; the progress display does not imply parallel archive
+extraction. Closing the application waits for pending durability work.
+
 ## Copy between vaults
 
 Press **F3** in a gallery, then **Ctrl+O** to open a vault in the right pane.
@@ -140,7 +150,7 @@ build/bin/Release/osv
 
 #### Hardware decode on Linux (optional)
 
-FFmpeg is configured with `--enable-vaapi` and `--enable-hwaccel=h264_vaapi,hevc_vaapi,vp8_vaapi,vp9_vaapi,av1_vaapi,mpeg2_vaapi,mpeg4_vaapi,vc1_vaapi,wmv3_vaapi,h263_vaapi`. The hw decode is **opportunistic** — Phase 41's software `VideoDecodeWorker` is the automatic silent fallback whenever hardware is unavailable (no GPU decode block, missing/outdated driver, codec/profile the GPU can't handle), so every clip plays either way. To enable it:
+FFmpeg is configured with `--enable-vaapi` and `--enable-hwaccel=h264_vaapi,hevc_vaapi,vp8_vaapi,vp9_vaapi,av1_vaapi,mpeg2_vaapi,mpeg4_vaapi,vc1_vaapi,wmv3_vaapi,h263_vaapi`. The hw decode is **opportunistic** — Phase 41's software `VideoDecodeWorker` is the automatic silent fallback whenever hardware is unavailable (no GPU decode block, missing/outdated driver, codec/profile the GPU can't handle), so unsupported hardware can fall back to software. To enable it:
 
 1. Install `libva` + a vendor driver (`libva-mesa-driver` for AMD/Radeon, `intel-media-driver` for Intel iGPU/Arc).
 2. Make sure your user is in the `render` group for `/dev/dri/renderD128` access; log out/in after the change.
