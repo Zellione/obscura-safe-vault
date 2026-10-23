@@ -24,7 +24,8 @@ on:
       - '.gitignore'
       - '.serena/**'
   pull_request:
-    branches: [main]
+    # Phase 122 is delivered as cascading PRs; validate each predecessor base.
+    branches: [main, 'phase-122*']
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
