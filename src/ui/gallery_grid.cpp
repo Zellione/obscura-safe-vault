@@ -1323,6 +1323,12 @@ void GalleryGrid::handle_event(const SDL_Event& e)
         case SDL_EVENT_KEY_DOWN:
             handle_key_down(e.key);
             break;
+        case SDL_EVENT_MOUSE_MOTION:
+            // Use the same scroll-aware hit test as clicks. Keyboard navigation
+            // retains focus until the pointer moves again; modal input is gated above.
+            if (const int idx = hit_test(e.motion.x, e.motion.y); idx >= 0)
+                nav_.select(idx);
+            break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {
             // Phase 50: check if click is on footer band while import summary is active
             if (e.button.y >= content_bottom(*this) && !queue_.footer_summary().empty()) {
@@ -2098,7 +2104,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         }},
         {"Import & export", {
             {"I", "Import files"}, {"Shift+I", "Import status"}, {"Z", "Import ZIP/CBZ"}, {"O", "Import folder"}, {"N", "New gallery"},
-            {"X", "Export selection"}, {"M", "Move/copy to — or pull from — another vault"}, {"Shift+M", "Combine gallery (move or copy)"}, {"R", "Rename"}, {"Del", "Delete (acts on selection)"},
+            {"X", "Export selection"}, {"M", "Move/copy to — or pull from — another vault"}, {"Shift+M", "Combine gallery (move or copy)"}, {"R", "Rename hovered or keyboard-focused item"}, {"Del", "Delete (acts on selection)"},
         }},
         {"Vault tools", {
             {"Shift+C", shift_c_action}, {"Ctrl+D", "Find duplicate files"},
