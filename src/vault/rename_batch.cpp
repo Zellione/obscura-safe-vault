@@ -257,6 +257,11 @@ VaultResult apply_rename(Vault& v, const RenamePreview& preview, OpProgress* pro
     if (cancelled(progress)) return VaultResult::InvalidArg;
     if (changes.empty()) return VaultResult::Ok;
     struct Rollback {
+        explicit Rollback(decltype(changes)& pending) noexcept : values(pending) {}
+        Rollback(const Rollback&) = delete;
+        Rollback& operator=(const Rollback&) = delete;
+        Rollback(Rollback&&) = delete;
+        Rollback& operator=(Rollback&&) = delete;
         decltype(changes)& values;
         bool committed = false;
         ~Rollback()

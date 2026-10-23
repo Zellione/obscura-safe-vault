@@ -70,3 +70,47 @@ TEST(bulk_rename_worker_preview_apply_edit_invalidation_and_close_join)
     }
     std::filesystem::remove_all(path);
 }
+
+#include <atomic>
+#include <stdexcept>
+namespace ui {
+struct BulkRenameTestPeer {
+    static void fail_worker(BulkRename& modal)
+    {
+        modal.launch([] { throw std::runtime_error("private worker payload"); });
+    }
+    static void wait_for_cancel(BulkRename& modal, std::atomic_bool& joined)
+    {
+        modal.launch([&modal, &joined] {
+            while (!modal.progress_.cancel.load())
+                std::this_thread::yield();
+            joined = true;
+        });
+    }
+    static std::string_view error(const BulkRename& modal)
+    {
+        return modal.error_;
+    }
+};
+}  // namespace ui
+TEST(bulk_rename_owned_worker_consumes_errors_and_joins_before_release)
+{
+    vault::Vault v;
+    gfx::Window window;
+    ui::ImportQueue queue;
+    ui::BulkRename modal(v, window, queue);
+    ui::BulkRenameTestPeer::fail_worker(modal);
+    REQUIRE(modal.busy());
+    REQUIRE(finish_rename(modal));
+    CHECK(ui::BulkRenameTestPeer::error(modal) == "Operation failed.");
+    // Teardown must consume the failure as well, without leaking what().
+    ui::BulkRenameTestPeer::fail_worker(modal);
+    modal.close();
+    CHECK(!modal.busy());
+    CHECK(ui::BulkRenameTestPeer::error(modal) == "Operation failed.");
+    std::atomic_bool joined{false};
+    ui::BulkRenameTestPeer::wait_for_cancel(modal, joined);
+    modal.close();
+    CHECK(joined.load());
+    CHECK(!modal.busy());
+}

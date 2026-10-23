@@ -7,6 +7,7 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/error_log.h"
 #include "ui/import_queue.h"
 #include "ui/progress_modal.h"
 #include "ui/text_input_event.h"
@@ -43,10 +44,7 @@ void BulkRename::close()
 {
     if (work_.valid()) {
         progress_.cancel = true;
-        try {
-            work_.get();
-        } catch (const std::exception&) {
-        }
+        (void)finish_work();
     }
     if (exclusive_) queue_.set_exclusive(false);
     exclusive_ = false;
@@ -56,6 +54,46 @@ void BulkRename::close()
     ids_.clear();
     pattern_.clear();
     replacement_.clear();
+}
+void BulkRename::launch(std::function<void()> task)
+{
+    try {
+        std::promise<void> completion;
+        auto ready = completion.get_future();
+        progress_.cancel = false;
+        worker_ =
+            std::jthread([task = std::move(task), completion = std::move(completion)]() mutable {
+                try {
+                    task();
+                    completion.set_value();
+                } catch (...) {
+                    completion.set_exception(std::current_exception());
+                }
+            });
+        // Publish the future only once a worker exists. A launch failure must
+        // not leave a valid future that keeps the modal permanently busy.
+        work_ = std::move(ready);
+    } catch (...) {
+        error_ = "Could not start rename operation.";
+        platform::log_error("BulkRename", "Could not start worker.");
+    }
+}
+bool BulkRename::finish_work()
+{
+    // Promise readiness precedes destruction of the worker's captures. Join
+    // before returning tree ownership or freeing any modal data they can use.
+    if (worker_.joinable()) worker_.join();
+    try {
+        work_.get();
+        return true;
+    } catch (...) {
+        error_ = "Operation failed.";
+        preview_ready_ = false;
+        // Never log what(): a library exception may contain private metadata.
+        platform::log_error("BulkRename",
+                            "Worker failed; result consumed before releasing ownership.");
+        return false;
+    }
 }
 void BulkRename::preview()
 {
@@ -68,13 +106,7 @@ void BulkRename::preview()
     preview_ready_ = false;
     first_row_ = 0;
     error_.clear();
-    try {
-        work_ = std::async(std::launch::async, [this] {
-            preview_ = vault::preview_rename(vault_, ids_, options_, &progress_);
-        });
-    } catch (const std::exception&) {
-        error_ = "Could not start preview.";
-    }
+    launch([this] { preview_ = vault::preview_rename(vault_, ids_, options_, &progress_); });
 }
 void BulkRename::apply()
 {
@@ -82,23 +114,12 @@ void BulkRename::apply()
     progress_.done = 0;
     progress_.total = 0;
     applying_ = true;
-    try {
-        work_ = std::async(std::launch::async,
-                           [this] { result_ = vault::apply_rename(vault_, preview_, &progress_); });
-    } catch (const std::exception&) {
-        error_ = "Could not start rename.";
-    }
+    launch([this] { result_ = vault::apply_rename(vault_, preview_, &progress_); });
 }
 void BulkRename::update()
 {
     if (!busy() || work_.wait_for(std::chrono::seconds{0}) != std::future_status::ready) return;
-    try {
-        work_.get();
-    } catch (const std::exception&) {
-        error_ = "Operation failed.";
-        preview_ready_ = false;
-        return;
-    }
+    if (!finish_work()) return;
     if (applying_) {
         if (result_ == vault::VaultResult::Ok) {
             completed_ = true;
@@ -219,7 +240,8 @@ void BulkRename::render(gfx::Renderer& r, gfx::FontAtlas& font, float w, float h
                     std::span(reinterpret_cast<const uint8_t*>(value.data()), value.size());
                 while (end < value.size()) {
                     const size_t next = utf8_next_boundary(bytes, end);
-                    if (end != 0 && font.measure(value.substr(0, next)) > width) break;
+                    if (end != 0 && static_cast<float>(font.measure(value.substr(0, next))) > width)
+                        break;
                     end = next;
                 }
                 line(value.substr(0, end));

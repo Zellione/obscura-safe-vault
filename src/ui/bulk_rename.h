@@ -1,6 +1,8 @@
 #pragma once
 #include <SDL3/SDL.h>
+#include <functional>
 #include <future>
+#include <thread>
 #include "ui/secure_text_input.h"
 #include "ui/widgets.h"
 #include "vault/rename_batch.h"
@@ -15,6 +17,10 @@ class BulkRename {
 public:
     BulkRename(vault::Vault& v, gfx::Window& w, ImportQueue& q) : vault_(v), win_(w), queue_(q) {}
     ~BulkRename();
+    BulkRename(const BulkRename&) = delete;
+    BulkRename& operator=(const BulkRename&) = delete;
+    BulkRename(BulkRename&&) = delete;
+    BulkRename& operator=(BulkRename&&) = delete;
     void open(std::vector<vault::RenameId> ids);
     void close();
     void update();
@@ -31,12 +37,16 @@ public:
     [[nodiscard]] bool consume_completed();
 
 private:
+    friend struct BulkRenameTestPeer;
+    void launch(std::function<void()> task);
+    [[nodiscard]] bool finish_work();
     void preview();
     void apply();
     vault::Vault& vault_;
     gfx::Window& win_;
     ImportQueue& queue_;
     std::future<void> work_;
+    std::jthread worker_;
     vault::OpProgress progress_;
     std::vector<vault::RenameId> ids_;
     vault::RenamePreview preview_;

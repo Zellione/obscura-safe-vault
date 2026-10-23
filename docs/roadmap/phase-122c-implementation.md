@@ -140,3 +140,29 @@ Integration tasks for the parent:
 - Re-run `scripts/gen.sh` for the integrated compilation database. This worktree
   generated the equivalent Premake/Ninja database directly because symlinked
   submodules prevent the normal checkout-completeness check.
+
+## Owned-worker follow-up
+
+The bulk modal now owns a `std::jthread` and uses a promise/future only for
+completion and exception transport. The future is published after successful
+thread creation; construction failures leave the modal non-busy. Both polling
+and teardown join before consuming the result and releasing tree ownership.
+Worker exceptions produce a fixed diagnostic, never exception `what()` text,
+and teardown no longer has an empty catch. The modal and name rollback guard
+explicitly delete copy/move operations. No Sonar suppressions were added.
+
+A regression test injects a throwing task through a private test peer, exercises
+polling and teardown error paths, then verifies cancellation is observed and
+the worker has finished before close returns. The focused runner uses existing
+Release dependency objects as read-only inputs: the parent's evolving Phase F
+Debug `ImportQueue` layout is incompatible with this older isolated base. An
+integrated rebuild remains required; mixed-version Debug objects must not be
+used to validate the isolated modal.
+
+Follow-up validation: 20 focused checks pass (18 committed cases plus the local
+benchmark and combined name/order transaction probe). The 18 committed cases
+pass targeted ASAN/UBSan/leak checking with the updated worker code. The full
+repository warning set (`-Wall -Wextra -Werror -Wshadow -Wconversion`) also
+passes on the rename/modal files and tests; this caught and fixed an explicit
+float conversion needed in full-name wrapping. Logs are
+`/tmp/osv-122c-owned-all.log` and `/tmp/osv-122c-owned-asan.log`.
