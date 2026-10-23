@@ -1,7 +1,29 @@
 # Phase 122 — Vault organisation, responsive bulk operations, and VP8 reliability
 
-Status: implementation started; A and storage documentation in the first PR.
-Performance measurements and the remaining implementation are pending.
+Status: implementation in cascading PRs. A and H's storage documentation are in
+[PR #261](https://github.com/Zellione/obscura-safe-vault/pull/261), ready for owner
+review with all CI gates green and zero SonarCloud issues. Local Debug and Release
+each passed 2,497 tests. The remaining H validation is not marked complete.
+B is being validated on `phase-122b-responsive-tagging`, based on the A branch.
+
+### B implementation findings
+
+The selection editor previously listed and sorted an entire parent gallery once
+per selected path, then synchronously saved the full metadata snapshot. Selection
+resolution now indexes each parent once. Loading, mutation, save, and refresh run
+on a worker while the owning screen renders progress and gates tree access.
+The import queue is held exclusive for the editor session; App does not drain it
+while a screen's worker owns the tree. Teardown joins before releasing ownership
+or wiping vault keys. Tag edits restore live assignments on pre-save cancellation
+or failed commit. The full v3 metadata transaction remains; this change does not
+claim incremental SQL updates or a constant-time save.
+
+Initial synthetic Debug measurements (flat gallery nodes to isolate metadata,
+not representative media-import throughput): 1k nodes: open call 0.12 ms,
+background add/save 78 ms; 10k nodes: open call 0.93 ms, background add/save
+1.90 s. The first 50k run exceeded the benchmark's initial 10-second completion
+wait; a longer measurement is pending. `OSV_TAG_SELECTION_BENCH` runs 1k/10k/50k
+scales and separately reports UI call duration and background completion.
 
 ## Goal and current evidence
 

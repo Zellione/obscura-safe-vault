@@ -577,6 +577,12 @@ the vault and are discarded on session teardown. Mapping preserves destination
 metadata; cleanup never changes explicit edits. Empty results are skipped.
 
 ## Tag rename (Phase 118)
+Selection tag editing loads and applies tags asynchronously. While the worker
+owns the vault tree, GalleryGrid/ImageViewer draw only the progress modal and
+block global mutations/idle lock. Esc requests cancellation before final save;
+closing joins before vault teardown. Imports must be idle before opening the
+editor and remain held until it closes.
+
 Gallery/list pointer motion focuses the item under the pointer using the
 scroll-aware hit test. R renames that gallery/image/video; keyboard navigation
 overrides focus until the next pointer motion. Enter saves and Esc cancels.

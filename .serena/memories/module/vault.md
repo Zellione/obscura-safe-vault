@@ -264,6 +264,13 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   I/O and metadata header reads flow through the dedicated, contention-free `thumb_fp_`.
 
 ### staging.* (Phase 50 + Phase 67 transfer + Phase 69 batching) — worker-to-tree hand-off
+
+`resolve_node_selection` resolves each parent once and indexes direct children,
+returning borrowed pointers in input order (missing paths are null). The caller
+must own the tree. `mutate_tags_batch` implements add/remove selection edits with
+OpProgress, one commit, and secure rollback snapshots: cancellation before save
+and commit failure restore live assignments. The tag editor runs it exclusively
+off-thread; it does not change the v3 format or replace full metadata persistence.
 - `stage_image(Vault, data, ...)` / `stage_video(Vault, data, precomputed_meta, ...)` — any thread, stream encrypted chunks to disk with fflush (no fsync), return a ready IndexNode with chunk spans. Plaintext stays mlock'd; nodes are ready but **not attached**. **Phase 67:** `stage_video` gains a 5th `precomputed_meta` param (a `StagedVideoInfo{dimensions, duration, codec, poster_offset, poster_len}`) so cross-vault transfers avoid re-probing videos already decoded at the source. Null metadata falls back to `MediaProbe::probe_bytes` on attach (backward compat). `StagedVideoInfo` is computed at source by `MediaProbe::extract_staged_video_info`.
 - `attach_image_prestaged` / `attach_video_prestaged` — **free friends, Phase 69.** Main-thread only: pre-check (safe name, gallery exists, no sibling collision) → stage → attach, **no fsync, no commit** — bulk transfer loops attach many files and batch durability. **Phase 75:** all four `attach_*`/`add_*_prestaged` take a trailing `const NodeExtras* extras = nullptr` (`vault::NodeExtras{std::vector<std::string> tags; bool favorite;}`, staging.h) applied to the node BEFORE tree insertion (tags capped at INDEX_MAX_TAGS by truncation) — transferred tags/favorites ride the same batched commit, never a separate one. On a crash before the next commit the attached nodes vanish; their chunks are orphaned dead ciphertext reclaimed by compact (same contract as a cancelled import).
 - `commit_staged(Vault&)` — **free friend, Phase 69.** One chunk-store fsync + one crash-safe `commit_index()` for everything attached since the last commit.

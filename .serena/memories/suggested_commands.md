@@ -121,6 +121,11 @@ source fixture construction. Temporary encrypted vaults are removed after each r
 
 ## Archive decoder (Phase 121)
 
+Selection tag metadata benchmark: `OSV_TAG_SELECTION_BENCH=1000
+build/bin/Debug/osv_tests tag_editor_selection_benchmark` (also 10000 or 50000).
+Reports UI call latency separately from asynchronous completion; synthetic
+gallery nodes isolate metadata overhead rather than measuring media imports.
+
 - `scripts/build_7zip.sh [--asan|--tsan]`: build the extraction-only private shared
   decoder; refresh existing matching app/test copies as well as the prefix.
 - Normal build/test/setup scripts call it automatically. The library lives next

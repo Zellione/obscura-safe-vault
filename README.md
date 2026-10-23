@@ -67,6 +67,15 @@ name selected: **Enter** saves, **Esc** cancels. Renaming changes metadata witho
 rewriting media; unsafe names and sibling collisions are rejected. Legacy vaults
 are read-only.
 
+For selection tagging, select files with **Space** or **Ctrl+A**, then press **G**.
+Loading tags and adding/removing a tag run in the background with a progress
+modal. Imports must finish before the editor opens, and new import work waits
+until it closes. During an edit, **Esc** requests cancellation before the final
+save; once saving starts, wait for completion. Cancelling before save leaves the
+selection unchanged. Closing the application waits for the worker before locking
+the vault. Very large selections can still spend time saving metadata, but the
+progress modal continues to repaint.
+
 ## Copy between vaults
 
 Press **F3** in a gallery, then **Ctrl+O** to open a vault in the right pane.
