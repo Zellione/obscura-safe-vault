@@ -202,6 +202,7 @@ private:
     // Internal state helpers
     void maybe_end_batch();
     void request_save();
+    void run_save_worker();
     bool post_record(StagedRecord record, const std::shared_ptr<vault::OpProgress>& progress);
     void mark_task_skipped(uint64_t task_id);
     void mark_task_imported(uint64_t task_id);

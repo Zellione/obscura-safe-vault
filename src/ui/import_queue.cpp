@@ -1418,19 +1418,7 @@ void ImportQueue::request_save()
     save_.succeeded = false;
     try {
         if (test_save_launch_hook_) test_save_launch_hook_();
-        save_.worker = std::jthread([this] {
-            const platform::PerfScope perf("import.save", 0.0);
-            try {
-                save_.succeeded = lane_->enqueue_snapshot();
-            } catch (const std::bad_alloc&) {
-                platform::log_error("Import", "metadata save ran out of memory");
-            } catch (const std::length_error&) {
-                platform::log_error("Import", "metadata save exceeded a container size limit");
-            } catch (const std::system_error&) {
-                platform::log_error("Import", "metadata save encountered a system error");
-            }
-            save_.done.store(true);
-        });
+        save_.worker = std::jthread(&ImportQueue::run_save_worker, this);
     } catch (const std::bad_alloc&) {
         save_failed_ = true;
         platform::log_error("Import", "not enough memory to start metadata save worker");
@@ -1438,6 +1426,21 @@ void ImportQueue::request_save()
         save_failed_ = true;
         platform::log_error("Import", "could not start metadata save worker");
     }
+}
+
+void ImportQueue::run_save_worker()
+{
+    const platform::PerfScope perf("import.save", 0.0);
+    try {
+        save_.succeeded = lane_->enqueue_snapshot();
+    } catch (const std::bad_alloc&) {
+        platform::log_error("Import", "metadata save ran out of memory");
+    } catch (const std::length_error&) {
+        platform::log_error("Import", "metadata save exceeded a container size limit");
+    } catch (const std::system_error&) {
+        platform::log_error("Import", "metadata save encountered a system error");
+    }
+    save_.done.store(true);
 }
 
 bool ImportQueue::poll_save()
