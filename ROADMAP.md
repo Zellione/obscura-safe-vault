@@ -204,7 +204,7 @@ ends; preserve buffered audio and reset EOF on seek/reopen. See the
 | 119 | Split-view cross-vault copy and transfer lifetime safety | 🚧 | Open another vault in F3, copy in either direction, and prevent UI access while transfer workers own the vaults. → [details](docs/roadmap/phase-119-split-vault-copy.md) |
 | 120 | Export gallery folders | 🔜 | Export selected galleries with all nested folders and original media to a chosen destination, with consent, collision suffixing, cancellation, and descriptor-relative safe writes. → [details](docs/roadmap/phase-120-gallery-folder-export.md) |
 | 121 | Multipart, solid and encrypted archive import | 🚧 | Group selected volumes; support solid/encrypted 7z and RAR4/5 with secure in-process decoding and password prompts; correct worker password handoff and import counts. → [details](docs/roadmap/phase-121-multipart-archive-import.md) |
-| 122 | Vault organisation, responsive bulk operations, and VP8 reliability | ⬜ | Document R rename; add regex bulk rename, responsive tagging/imports, vault-wide category rename, and provenance-aware meta tags; diagnose VP8 green output and explain v3 storage tradeoffs. Subphases A–H. → [details](docs/roadmap/phase-122-vault-organisation-and-responsiveness.md) |
+| 122 | Vault organisation, responsive bulk operations, and VP8 reliability | 🚧 | Document R rename; add regex bulk rename, responsive tagging/imports, vault-wide category rename, and provenance-aware meta tags; diagnose VP8 green output and explain v3 storage tradeoffs. Subphases A–H. → [details](docs/roadmap/phase-122-vault-organisation-and-responsiveness.md) |
 
 ---
 

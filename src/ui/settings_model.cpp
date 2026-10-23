@@ -199,7 +199,8 @@ bool settings_add_category(SettingsState& state, std::string name)
     }
 
     // Reject if too long
-    if (name.length() > static_cast<size_t>(vault::INDEX_MAX_CATEGORY_BYTES)) {
+    if (name.length() > static_cast<size_t>(vault::INDEX_MAX_CATEGORY_BYTES) ||
+        name.contains(':') || name.contains('\0')) {
         return false;
     }
 
@@ -258,13 +259,13 @@ bool settings_rename_category(SettingsState& state, int row, std::string name)
     }
 
     // Reject if too long
-    if (name.length() > static_cast<size_t>(vault::INDEX_MAX_CATEGORY_BYTES)) {
+    if (name.length() > static_cast<size_t>(vault::INDEX_MAX_CATEGORY_BYTES) ||
+        name.contains(':') || name.contains('\0')) {
         return false;
     }
 
-    // Reject if renaming to itself (case-insensitive comparison)
-    if (const auto& current_name = state.draft.categories[row].name;
-        tag_ci_equal(current_name.view(), name)) {
+    // Exact no-op is rejected; case-only renames update every displayed prefix.
+    if (const auto& current_name = state.draft.categories[row].name; current_name == name) {
         return false;
     }
 
@@ -275,7 +276,9 @@ bool settings_rename_category(SettingsState& state, int row, std::string name)
         }
     }
 
-    // Update the name
+    state.category_rename =
+        SettingsState::CategoryRename{state.draft.categories[row].name, crypto::SecureString(name)};
+    // Update the preview; App applies the queued request transactionally.
     state.draft.categories[row].name = std::move(name);
     return true;
 }

@@ -3,6 +3,7 @@
 // Phase 49: pure settings-overlay state — section rail, row navigation, value
 // cycling and category CRUD. SDL-free.
 
+#include <optional>
 #include <string>
 
 #include "gfx/theme.h"
@@ -23,6 +24,11 @@ enum class VaultMaintenanceAction : uint8_t {
 };
 
 struct SettingsState {
+    struct CategoryRename {
+        crypto::SecureString old_name;
+        crypto::SecureString new_name;
+    };
+    std::optional<CategoryRename> category_rename;
     SettingsSection    section           = SettingsSection::Appearance;
     bool               in_pane           = false;      // false: focus is on the section rail
     int                row               = 0;          // focused row within the pane
