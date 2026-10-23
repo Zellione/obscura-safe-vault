@@ -1,5 +1,8 @@
 # Tech Stack
 
+CI pull-request bases include `main` and `phase-122*` for the owner-requested
+cascading Phase 122 delivery. Push CI remains limited to `main`.
+
 ## Language / standard
 - C++23 — use `std::span`, designated initialisers, `[[nodiscard]]`, `constexpr` freely.
 

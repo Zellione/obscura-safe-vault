@@ -229,6 +229,7 @@ void apply_value_delta(SettingsState& state, int delta, bool& commit_out)
 
 void open_settings(SettingsState& state, SettingsSection section)
 {
+    state.category_rename.reset();
     state.open    = true;
     state.section = section;
     state.row     = 0;
@@ -241,6 +242,7 @@ void open_settings(SettingsState& state, SettingsSection section)
 
 void close_settings(SettingsState& state, const gfx::Window& window)
 {
+    state.category_rename.reset();
     state.open = false;
     state.prompting = false;
     state.prompt_row = -1;

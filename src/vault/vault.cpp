@@ -2279,6 +2279,145 @@ VaultResult rename_tag(Vault& v, std::string_view old_tag, std::string_view new_
     return result;
 }
 
+namespace {
+
+struct CategoryRenamePlan {
+    std::string_view old_name;
+    std::string_view new_name;
+    VaultResult status = VaultResult::Ok;
+    std::vector<std::pair<crypto::SecureString*, crypto::SecureString>> changes;
+
+    std::optional<crypto::SecureString> replacement(std::string_view tag)
+    {
+        const auto prefix = tag_category_prefix(tag);
+        if (tag_ci_equal(prefix, old_name)) {
+            if (new_name.size() + tag.size() - old_name.size() > 65535) {
+                status = VaultResult::InvalidArg;
+                return std::nullopt;
+            }
+            crypto::SecureString result;
+            const auto suffix = tag.substr(old_name.size());
+            if (!result.resize(new_name.size() + suffix.size())) {
+                status = VaultResult::IoError;
+                return std::nullopt;
+            }
+            std::memcpy(result.data(), new_name.data(), new_name.size());
+            std::memcpy(result.data() + new_name.size(), suffix.data(), suffix.size());
+            return result;
+        }
+        if (tag_ci_equal(prefix, new_name)) status = VaultResult::AlreadyExists;
+        return std::nullopt;
+    }
+
+    void inspect(crypto::SecureString& tag)
+    {
+        if (auto next = replacement(tag.view())) changes.emplace_back(&tag, std::move(*next));
+    }
+
+    bool rewrite(std::string& tag)
+    {
+        if (auto next = replacement(tag)) {
+            tag.assign(next->view());
+            return true;
+        }
+        return false;
+    }
+};
+
+VaultResult prepare_category_queries(CategoryRenamePlan& plan, std::vector<SavedSearch>& searches)
+{
+    using enum VaultResult;
+    for (auto& search : searches) {
+        ui::AdvancedQuery query;
+        if (!ui::deserialize_query(search.query.as_span(), query)) return BadFormat;
+        bool changed = false;
+        for (auto& item : query.include)
+            changed = plan.rewrite(item.tag) || changed;
+        for (auto& tag : query.exclude)
+            changed = plan.rewrite(tag) || changed;
+        for (auto& group : query.groups)
+            for (auto& tag : group.tags)
+                changed = plan.rewrite(tag) || changed;
+        if (plan.status != Ok) return plan.status;
+        if (!changed) continue;
+        const auto blob = ui::serialize_query(query);
+        if (!search.query.assign(blob)) return IoError;
+    }
+    return Ok;
+}
+
+struct AppliedCategoryRename {
+    CategoryRenamePlan& plan;
+    std::vector<SavedSearch>& stored;
+    std::vector<SavedSearch>& prepared;
+    bool committed = false;
+    AppliedCategoryRename(CategoryRenamePlan& p, std::vector<SavedSearch>& s,
+                          std::vector<SavedSearch>& next)
+        : plan(p), stored(s), prepared(next)
+    {
+        for (auto& [target, value] : plan.changes)
+            target->swap(value);
+        stored.swap(prepared);
+    }
+    AppliedCategoryRename(const AppliedCategoryRename&) = delete;
+    AppliedCategoryRename& operator=(const AppliedCategoryRename&) = delete;
+    AppliedCategoryRename(AppliedCategoryRename&&) = delete;
+    AppliedCategoryRename& operator=(AppliedCategoryRename&&) = delete;
+    ~AppliedCategoryRename()
+    {
+        if (committed) return;
+        for (auto& [target, value] : plan.changes)
+            target->swap(value);
+        stored.swap(prepared);
+    }
+};
+
+}  // namespace
+
+VaultResult rename_tag_category(Vault& v, std::string_view old_name, std::string_view new_name,
+                                OpProgress* progress)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
+    old_name = normalise_tag(old_name);
+    new_name = normalise_tag(new_name);
+    if (old_name.empty() || new_name.empty() || new_name.size() > INDEX_MAX_CATEGORY_BYTES ||
+        new_name.contains(':') || new_name.contains('\0'))
+        return InvalidArg;
+    auto category = std::ranges::find_if(v.settings_.categories, [old_name](const auto& item) {
+        return tag_ci_equal(item.name.view(), old_name);
+    });
+    if (category == v.settings_.categories.end()) return NotFound;
+    if (category->name == new_name) return Ok;
+    for (const auto& item : v.settings_.categories)
+        if (&item != std::to_address(category) && tag_ci_equal(item.name.view(), new_name)) return AlreadyExists;
+
+    CategoryRenamePlan plan{old_name, new_name, Ok, {}};
+    std::vector<crypto::SecureString*> refs;
+    inspect_node_tags(v.root_, [&refs](auto& tag) { refs.push_back(&tag); });
+    for (auto& item : v.settings_.tag_descriptions)
+        refs.push_back(&item.tag);
+    for (auto& item : v.settings_.tag_field_values)
+        refs.push_back(&item.tag);
+    if (progress) {
+        progress->total.store(static_cast<int>(refs.size()));
+        progress->done.store(0);
+    }
+    for (auto* ref : refs) {
+        plan.inspect(*ref);
+        if (progress) progress->done.fetch_add(1);
+    }
+    if (plan.status != Ok) return plan.status;
+    plan.changes.emplace_back(&category->name, crypto::SecureString(new_name));
+    auto searches = v.saved_searches_;
+    if (const auto result = prepare_category_queries(plan, searches); result != Ok) return result;
+    AppliedCategoryRename applied{plan, v.saved_searches_, searches};
+    const auto result = v.commit_index();
+    applied.committed = result == Ok;
+    return result;
+}
+
 VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::string>& tags)
 {
     using enum VaultResult;

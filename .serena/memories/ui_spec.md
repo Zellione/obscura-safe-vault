@@ -577,6 +577,12 @@ the vault and are discarded on session teardown. Mapping preserves destination
 metadata; cleanup never changes explicit edits. Empty results are skipped.
 
 ## Tag rename (Phase 118)
+F2 Tag Colours R queues a vault-wide category rename, including structured tag
+references and saved-query conditions. Preparation/save runs under App maintenance
+worker ownership with progress; navigation and import attachment wait. A failed
+rename returns to the same settings section with unchanged metadata. Case-only
+renames work; target namespaces and malformed queries are rejected.
+
 Selection tag editing loads and applies tags asynchronously. While the worker
 owns the vault tree, GalleryGrid/ImageViewer draw only the progress modal and
 block global mutations/idle lock. Esc requests cancellation before final save;

@@ -329,6 +329,14 @@ scripts/       setup.sh · gen.sh · build.sh · test.sh · build_codecs.sh ·
 In the tag overview (`Shift+T`), select a tag and press `R` to rename it throughout
 the vault. Assignments, descriptions, field values, and saved-search tag conditions
 follow the rename. Enter saves; Esc cancels. Existing target names are rejected.
+
+To rename a category, open **F2 → Tag Colours**, focus the category, and press
+**R**. The rename updates that category's tag prefixes throughout the vault,
+including assignments, descriptions' tag keys, template field values, and saved
+search tag conditions. Free-text descriptions and search names stay unchanged.
+Case-only changes are supported. An occupied destination category/tag namespace
+or a malformed saved search blocks the entire rename. Imports must finish first;
+a progress modal remains visible during preparation and the atomic save.
 Changing the category prefix requires compatible template fields.
 
 The tag overview (`Shift+T`) imports a JSON tag dictionary with `Ctrl+I`: a file of
