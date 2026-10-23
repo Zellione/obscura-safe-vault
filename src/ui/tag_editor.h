@@ -65,19 +65,25 @@ private:
     void launch(std::function<void()> work);
     template <typename Work> void run_work(const Work& work);
     bool handle_bundle_event(const SDL_Event& event);
+    bool handle_bundle_form_event(const SDL_Event& e);
     void render_bundles(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
     void open_bundle_form(bool create);
     void run_bundle_action(bool remove);
     void preview_bundle_change();
-    std::string bundle_original_name_, bundle_preview_;
+    void confirm_bundle_change();
+    bool handle_fields_event(const SDL_Event& e);
+    std::string bundle_original_name_;
+    std::string bundle_preview_;
     bool bundle_mode_ = false;
     bool bundle_form_ = false;
     bool bundle_confirm_ = false;
     bool bundle_delete_ = false;
     int bundle_selected_ = 0;
     int bundle_field_ = 0;
-    TextInputModel bundle_name_, bundle_members_;
-    TextFieldChrome bundle_name_chrome_, bundle_members_chrome_;
+    TextInputModel bundle_name_;
+    TextInputModel bundle_members_;
+    TextFieldChrome bundle_name_chrome_;
+    TextFieldChrome bundle_members_chrome_;
     void finish_add();
     void refresh_tags();              // reload the node's current tags from the vault
     void refresh_vocabulary();        // reload the vault-wide tag vocabulary (Phase 29)

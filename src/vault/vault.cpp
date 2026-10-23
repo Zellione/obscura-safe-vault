@@ -1961,7 +1961,8 @@ struct TagBatchChanges {
     TagBatchChanges& operator=(TagBatchChanges&&) = delete;
     struct Prior {
         IndexNode* node;
-        std::vector<crypto::SecureString> tags, explicit_tags;
+        std::vector<crypto::SecureString> tags;
+        std::vector<crypto::SecureString> explicit_tags;
         bool initialized;
     };
     std::vector<Prior> originals;
@@ -1983,10 +1984,12 @@ struct TagBatchChanges {
         const auto matches = [tag](const crypto::SecureString& item) {
             return tag_ci_equal(item.view(), tag);
         };
-        const auto& manual =
-            node->tag_provenance && !node->tag_bundles.empty() ? node->explicit_tags : node->tags;
-        if (std::ranges::any_of(manual, matches) != remove) return Ok;
-        originals.push_back({node, node->tags, node->explicit_tags, node->tag_provenance});
+        if (const auto& manual = node->tag_provenance && !node->tag_bundles.empty()
+                                     ? node->explicit_tags
+                                     : node->tags;
+            std::ranges::any_of(manual, matches) != remove)
+            return Ok;
+        originals.emplace_back(node, node->tags, node->explicit_tags, node->tag_provenance);
         initialize_tag_provenance(*node);
         if (remove)
             std::erase_if(node->explicit_tags, matches);
@@ -2402,13 +2405,13 @@ VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::s
     if (!node) return NotFound;
 
     auto normalised = normalise_tags(tags);
-    const auto& manual =
-        node->tag_provenance && !node->tag_bundles.empty() ? node->explicit_tags : node->tags;
-    if (std::ranges::equal(manual, normalised, [](const auto& a, const auto& b) { return a == b; }))
+    if (const auto &manual =
+            node->tag_provenance && !node->tag_bundles.empty() ? node->explicit_tags : node->tags;
+        std::ranges::equal(manual, normalised, [](const auto& a, const auto& b) { return a == b; }))
         return Ok;
 
     TagBatchChanges rollback;
-    rollback.originals.push_back({node, node->tags, node->explicit_tags, node->tag_provenance});
+    rollback.originals.emplace_back(node, node->tags, node->explicit_tags, node->tag_provenance);
     node->tag_provenance = true;
     node->explicit_tags.clear();
     for (const auto& t : normalised)
@@ -2431,7 +2434,7 @@ VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
     IndexNode* node = resolve_node(node_path);
     if (!node) return NotFound;
 
-    const std::vector<std::string> paths{std::string(node_path)};
+    const std::vector paths{std::string(node_path)};
     return mutate_tags_batch(*this, paths, trimmed, false);
 }
 
@@ -2442,9 +2445,9 @@ void prune_node_tags(IndexNode& node, const std::function<bool(std::string_view)
                      PruneTagsStats& stats, const VaultSettings& settings)
 {
     initialize_tag_provenance(node);
-    const auto removed = std::erase_if(
-        node.explicit_tags, [&keep](const crypto::SecureString& t) { return !keep(t.view()); });
-    if (removed > 0) {
+    if (const auto removed = std::erase_if(
+            node.explicit_tags, [&keep](const crypto::SecureString& t) { return !keep(t.view()); });
+        removed > 0) {
         stats.tags_removed += removed;
         ++stats.nodes_touched;
     }
@@ -2484,7 +2487,7 @@ VaultResult Vault::remove_tag(std::string_view node_path, std::string_view tag)
     IndexNode* node = resolve_node(node_path);
     if (!node) return NotFound;
 
-    const std::vector<std::string> paths{std::string(node_path)};
+    const std::vector paths{std::string(node_path)};
     return mutate_tags_batch(*this, paths, trimmed, true);
 }
 

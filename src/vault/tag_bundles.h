@@ -1,5 +1,4 @@
 #pragma once
-#include <functional>
 #include "vault/index.h"
 #include "vault/op_progress.h"
 
@@ -10,8 +9,23 @@ void initialize_tag_provenance(IndexNode& node);
 [[nodiscard]] bool rebuild_bundle_tags(IndexNode& node, const VaultSettings& settings);
 // Visit stored references in addition to effective node.tags. Category rename
 // must include these references in its existing atomic replacement plan.
-void visit_bundle_tag_references(IndexNode& root, VaultSettings& settings,
-                                 const std::function<void(crypto::SecureString&)>& visit);
+template <typename Visitor>
+void visit_explicit_tag_references(IndexNode& node, const Visitor& visit)
+{
+    for (auto& tag : node.explicit_tags)
+        visit(tag);
+    for (auto& child : node.children)
+        visit_explicit_tag_references(child, visit);
+}
+
+template <typename Visitor>
+void visit_bundle_tag_references(IndexNode& root, VaultSettings& settings, const Visitor& visit)
+{
+    visit_explicit_tag_references(root, visit);
+    for (auto& bundle : settings.tag_bundles)
+        for (auto& tag : bundle.tags)
+            visit(tag);
+}
 [[nodiscard]] VaultResult save_tag_bundle(Vault& v, std::string_view name,
                                           const std::vector<std::string>& tags,
                                           std::string_view original_name = {});

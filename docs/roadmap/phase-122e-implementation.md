@@ -148,3 +148,11 @@ and editor preview now share ordinary tags' whitespace trimming and case-insensi
 deduplication. Removal after reopen preserves matching manual assignments. The
 focused tag suite passed 305 tests with this fix; the full Debug suite then passed
 all **2,546 tests**. Final sanitizer and remote review results are tracked on the PR.
+
+The normalization integration also passed all 2,546 tests under ASAN/UBSan/LSan.
+Review cleanup extracts bounded UI preview/event helpers, bundle-definition
+reconciliation, and SQL assignment/definition readers and writers. Transfer keeps
+destination preparation failures on the same source-preserving path. These changes
+address the posted 67 findings without suppressions; a fresh remote scan verifies
+closure. Focused review tests passed 305 tag, 90 transfer and 29 combine cases.
+The combined review fixes passed the full Debug suite: **2,546 tests, zero failures**.

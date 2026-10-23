@@ -33,12 +33,66 @@ std::vector<std::string> parse_members(std::string_view text)
     if (!member.empty()) tags.push_back(std::move(member));
     return vault::normalise_tags(tags);
 }
+struct BundlePreview {
+    size_t affected = 0;
+    size_t added = 0;
+    size_t removed = 0;
+    bool valid = true;
+
+    void inspect(const vault::IndexNode& node, const vault::VaultSettings& settings)
+    {
+        ++affected;
+        vault::IndexNode copy;
+        copy.tag_provenance = node.tag_provenance;
+        copy.explicit_tags = node.explicit_tags;
+        copy.tag_bundles = node.tag_bundles;
+        if (!vault::rebuild_bundle_tags(copy, settings)) {
+            valid = false;
+            return;
+        }
+        const auto contains = [](const auto& tags, const auto& tag) {
+            return std::ranges::any_of(
+                tags, [&tag](const auto& t) { return vault::tag_ci_equal(t.view(), tag.view()); });
+        };
+        for (const auto& tag : node.tags)
+            if (!contains(copy.tags, tag)) ++removed;
+        for (const auto& tag : copy.tags)
+            if (!contains(node.tags, tag)) ++added;
+    }
+
+    void walk(const vault::IndexNode& node, const vault::VaultSettings& settings,
+              const vault::TagBundle& bundle)
+    {
+        if (std::ranges::find(node.tag_bundles, bundle.id) != node.tag_bundles.end())
+            inspect(node, settings);
+        for (const auto& child : node.children)
+            walk(child, settings, bundle);
+    }
+};
+
+BundlePreview preview_change(const vault::IndexNode& root, vault::VaultSettings settings,
+                             std::string_view name, const std::vector<std::string>& members,
+                             bool deleting)
+{
+    BundlePreview preview;
+    const auto found = std::ranges::find_if(settings.tag_bundles, [name](const auto& bundle) {
+        return vault::tag_ci_equal(bundle.name.view(), name);
+    });
+    if (found == settings.tag_bundles.end()) return preview;
+    found->tags.clear();
+    if (!deleting)
+        for (const auto& tag : members)
+            found->tags.emplace_back(tag);
+    preview.walk(root, settings, *found);
+    return preview;
+}
 }  // namespace
 
 void TagEditor::open_bundle_form(bool create)
 {
     bundle_form_ = true;
-    bundle_confirm_ = bundle_delete_ = false;
+    bundle_confirm_ = false;
+    bundle_delete_ = false;
     bundle_field_ = 0;
     bundle_original_name_.clear();
     bundle_name_.clear();
@@ -80,46 +134,48 @@ void TagEditor::preview_bundle_change()
     const auto members = parse_members(bundle_members_.str());
     const bool deleting = bundle_delete_;
     launch([this, name, members, deleting] {
-        auto settings = vault::vault_settings(vault_);
-        const auto found = std::ranges::find_if(settings.tag_bundles, [&](const auto& b) {
-            return vault::tag_ci_equal(b.name.view(), name);
-        });
-        size_t affected = 0, added = 0, removed = 0;
-        if (found != settings.tag_bundles.end()) {
-            found->tags.clear();
-            if (!deleting)
-                for (const auto& tag : members)
-                    found->tags.emplace_back(tag);
-            const auto walk = [&](auto&& self, const vault::IndexNode& node) -> void {
-                if (std::ranges::find(node.tag_bundles, found->id) != node.tag_bundles.end()) {
-                    ++affected;
-                    vault::IndexNode copy;
-                    copy.tag_provenance = node.tag_provenance;
-                    copy.explicit_tags = node.explicit_tags;
-                    copy.tag_bundles = node.tag_bundles;
-                    if (!vault::rebuild_bundle_tags(copy, settings)) {
-                        error_ = "Bundle would exceed the per-node tag limit.";
-                        return;
-                    }
-                    const auto contains = [](const auto& tags, const auto& tag) {
-                        return std::ranges::any_of(tags, [&](const auto& t) {
-                            return vault::tag_ci_equal(t.view(), tag.view());
-                        });
-                    };
-                    for (const auto& tag : node.tags)
-                        if (!contains(copy.tags, tag)) ++removed;
-                    for (const auto& tag : copy.tags)
-                        if (!contains(node.tags, tag)) ++added;
-                }
-                for (const auto& child : node.children)
-                    self(self, child);
-            };
-            walk(walk, *vault_.resolve_node(""));
-        }
+        const auto preview = preview_change(*vault_.resolve_node(""), vault::vault_settings(vault_),
+                                            name, members, deleting);
+        if (!preview.valid) error_ = "Bundle would exceed the per-node tag limit.";
         bundle_preview_ = std::format("{}: {} applications, {} tags added, {} removed.",
-                                      deleting ? "Delete" : "Save", affected, added, removed);
+                                      deleting ? "Delete" : "Save", preview.affected, preview.added,
+                                      preview.removed);
         bundle_confirm_ = error_.empty();
     });
+}
+
+void TagEditor::confirm_bundle_change()
+{
+    const std::string name(bundle_name_.str());
+    const auto members = parse_members(bundle_members_.str());
+    const bool deleting = bundle_delete_;
+    const auto original = bundle_original_name_;
+    bundle_confirm_ = false;
+    bundle_form_ = false;
+    launch([this, name, members, deleting, original] {
+        progress_.done.store(progress_.total.load());
+        const auto r = deleting ? vault::delete_tag_bundle(vault_, name)
+                                : vault::save_tag_bundle(vault_, name, members, original);
+        bundle_selected_ = 0;
+        refresh_tags();
+        refresh_vocabulary();
+        if (r != vault::VaultResult::Ok) error_ = "Bundle save failed; no changes saved.";
+    });
+}
+
+bool TagEditor::handle_bundle_form_event(const SDL_Event& e)
+{
+    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_TAB) {
+        bundle_field_ ^= 1;
+        return true;
+    }
+    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F5) {
+        preview_bundle_change();
+        return true;
+    }
+    auto& field = bundle_field_ == 0 ? bundle_name_ : bundle_members_;
+    (void)handle_text_input_event(field, e);
+    return true;
 }
 
 bool TagEditor::handle_bundle_event(const SDL_Event& e)
@@ -135,38 +191,13 @@ bool TagEditor::handle_bundle_event(const SDL_Event& e)
     }
     if (bundle_confirm_) {
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_RETURN) {
-            const std::string name(bundle_name_.str());
-            const auto members = parse_members(bundle_members_.str());
-            const bool deleting = bundle_delete_;
-            const auto original = bundle_original_name_;
-            bundle_confirm_ = bundle_form_ = false;
-            launch([this, name, members, deleting, original] {
-                progress_.done.store(progress_.total.load());
-                const auto r = deleting ? vault::delete_tag_bundle(vault_, name)
-                                        : vault::save_tag_bundle(vault_, name, members, original);
-                bundle_selected_ = 0;
-                refresh_tags();
-                refresh_vocabulary();
-                if (r != vault::VaultResult::Ok) error_ = "Bundle save failed; no changes saved.";
-            });
+            confirm_bundle_change();
         }
         return true;
     }
-    if (bundle_form_) {
-        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_TAB) {
-            bundle_field_ ^= 1;
-            return true;
-        }
-        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F5) {
-            preview_bundle_change();
-            return true;
-        }
-        auto& field = bundle_field_ == 0 ? bundle_name_ : bundle_members_;
-        (void)handle_text_input_event(field, e);
-        return true;
-    }
+    if (bundle_form_) return handle_bundle_form_event(e);
     if (e.type != SDL_EVENT_KEY_DOWN) return true;
-    const int count = static_cast<int>(vault::vault_settings(vault_).tag_bundles.size());
+    const auto count = static_cast<int>(vault::vault_settings(vault_).tag_bundles.size());
     switch (e.key.key) {
     case SDLK_F3:
         bundle_mode_ = false;
@@ -205,8 +236,11 @@ bool TagEditor::handle_bundle_event(const SDL_Event& e)
 void TagEditor::render_bundles(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 {
     using namespace gfx::theme;
-    const float width = std::min(720.0f, W - 32), height = std::min(460.0f, H - 32);
-    const float x = (W - width) / 2, y = (H - height) / 2, pitch = line_pitch(font.pixel_height());
+    const float width = std::min(720.0f, W - 32);
+    const float height = std::min(460.0f, H - 32);
+    const float x = (W - width) / 2;
+    const float y = (H - height) / 2;
+    const float pitch = line_pitch(font.pixel_height());
     r.draw_round_rect({x, y, width, height}, RADIUS, SURFACE);
     r.draw_round_rect({x, y, width, height}, RADIUS, ACCENT, false);
     const auto line = [&](float row, std::string_view text) {
@@ -215,7 +249,7 @@ void TagEditor::render_bundles(gfx::Renderer& r, gfx::FontAtlas& font, float W, 
     line(0, bundle_form_ ? "Bundle administration" : "Meta-tag bundles");
     if (bundle_form_) {
         line(1, "Bundle name");
-        const auto field = [&](float row, TextInputModel& model, TextFieldChrome& chrome,
+        const auto field = [&](float row, const TextInputModel& model, TextFieldChrome& chrome,
                                bool focus) {
             const SDL_FRect box{x + 16, y + 16 + row * pitch, width - 32, pitch + 8};
             r.draw_round_rect(box, RADIUS_SMALL, focus ? SURFACE_HI : SURFACE);

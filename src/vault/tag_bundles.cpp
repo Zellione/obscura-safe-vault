@@ -1,5 +1,6 @@
 #include "vault/tag_bundles.h"
 #include <algorithm>
+#include <format>
 #include <memory>
 #include "crypto/random.h"
 #include "vault/tag_normalization.h"
@@ -31,27 +32,13 @@ bool rebuild_bundle_tags(IndexNode& node, const VaultSettings& settings)
     return true;
 }
 
-void visit_bundle_tag_references(IndexNode& root, VaultSettings& settings,
-                                 const std::function<void(crypto::SecureString&)>& visit)
-{
-    const auto walk = [&](auto&& self, IndexNode& node) -> void {
-        for (auto& tag : node.explicit_tags)
-            visit(tag);
-        for (auto& child : node.children)
-            self(self, child);
-    };
-    walk(walk, root);
-    for (auto& bundle : settings.tag_bundles)
-        for (auto& tag : bundle.tags)
-            visit(tag);
-}
-
 // Owns the transaction's live rollback, without replacing tree nodes/pointers.
 struct BundleAccess {
     struct Prior {
         IndexNode* node;
         bool initialized;
-        std::vector<crypto::SecureString> tags, explicit_tags;
+        std::vector<crypto::SecureString> tags;
+        std::vector<crypto::SecureString> explicit_tags;
         std::vector<std::array<uint8_t, crypto::NODE_ID_SIZE>> bundles;
     };
     Vault& v;
@@ -77,8 +64,8 @@ struct BundleAccess {
     }
     void capture(IndexNode& node)
     {
-        prior.push_back(
-            {&node, node.tag_provenance, node.tags, node.explicit_tags, node.tag_bundles});
+        prior.emplace_back(&node, node.tag_provenance, node.tags, node.explicit_tags,
+                           node.tag_bundles);
     }
     VaultResult finish()
     {
@@ -86,10 +73,11 @@ struct BundleAccess {
         committed = result == VaultResult::Ok;
         return result;
     }
-    static VaultResult check(Vault& v)
+    static VaultResult check(const Vault& v)
     {
-        if (!v.unlocked_) return VaultResult::Locked;
-        return v.v3_ ? VaultResult::Ok : VaultResult::InvalidArg;
+        using enum VaultResult;
+        if (!v.unlocked_) return Locked;
+        return v.v3_ ? Ok : InvalidArg;
     }
     static auto& settings_of(Vault& v)
     {
@@ -194,6 +182,54 @@ VaultResult apply_tag_bundle(Vault& v, std::span<const std::string> paths, std::
     if (change.prior.empty()) return Ok;
     return change.finish();
 }
+namespace {
+bool same_bundle_members(const TagBundle& a, const TagBundle& b)
+{
+    return std::ranges::equal(a.tags, b.tags, [](const auto& x, const auto& y) {
+        return tag_ci_equal(x.view(), y.view());
+    });
+}
+
+VaultResult import_bundle_definition(TagBundle definition, VaultSettings& settings,
+                                     IndexNode& candidate)
+{
+    using enum VaultResult;
+    const auto compatible = [&definition](const TagBundle& bundle) {
+        return (bundle.id == definition.id ||
+                tag_ci_equal(bundle.name.view(), definition.name.view())) &&
+               same_bundle_members(bundle, definition);
+    };
+    auto match = std::ranges::find_if(settings.tag_bundles, compatible);
+    if (match == settings.tag_bundles.end()) {
+        const std::string name(definition.name.view());
+        unsigned suffix = 2;
+        const auto same_name = [&definition](const TagBundle& bundle) {
+            return tag_ci_equal(bundle.name.view(), definition.name.view());
+        };
+        while (std::ranges::any_of(settings.tag_bundles, same_name)) {
+            definition.name = std::format("{} (import {})", name.substr(0, 220), suffix++);
+            match = std::ranges::find_if(
+                settings.tag_bundles, [&definition, &same_name](const auto& bundle) {
+                    return same_name(bundle) && same_bundle_members(bundle, definition);
+                });
+            if (match != settings.tag_bundles.end()) break;
+        }
+    }
+    if (match == settings.tag_bundles.end()) {
+        if (settings.tag_bundles.size() >= INDEX_MAX_TAGS) return InvalidArg;
+        if (std::ranges::find(settings.tag_bundles, definition.id, &TagBundle::id) !=
+                settings.tag_bundles.end() &&
+            !crypto::fill_random(definition.id))
+            return IoError;
+        settings.tag_bundles.push_back(std::move(definition));
+        match = std::prev(settings.tag_bundles.end());
+    }
+    if (std::ranges::find(candidate.tag_bundles, match->id) == candidate.tag_bundles.end())
+        candidate.tag_bundles.push_back(match->id);
+    return Ok;
+}
+}  // namespace
+
 VaultResult copy_tag_provenance(const IndexNode& source, const VaultSettings& source_settings,
                                 IndexNode& destination, Vault& destination_vault)
 {
@@ -219,48 +255,13 @@ VaultResult copy_tag_provenance(const IndexNode& source, const VaultSettings& so
             });
         if (!manual)
             std::erase_if(candidate.explicit_tags,
-                          [&](const auto& t) { return tag_ci_equal(t.view(), tag.view()); });
+                          [&tag](const auto& t) { return tag_ci_equal(t.view(), tag.view()); });
     }
     for (const auto& id : source.tag_bundles) {
         const auto found = std::ranges::find(source_settings.tag_bundles, id, &TagBundle::id);
         if (found == source_settings.tag_bundles.end()) return InvalidArg;
-        auto definition = *found;
-        const auto same_members = [&](const TagBundle& bundle) {
-            return bundle.tags.size() == definition.tags.size() &&
-                   std::ranges::equal(bundle.tags, definition.tags,
-                                      [](const auto& a, const auto& b) {
-                                          return tag_ci_equal(a.view(), b.view());
-                                      });
-        };
-        auto match = std::ranges::find_if(settings.tag_bundles, [&](const auto& b) {
-            return (b.id == id || tag_ci_equal(b.name.view(), definition.name.view())) &&
-                   same_members(b);
-        });
-        if (match == settings.tag_bundles.end()) {
-            const auto name = std::string(definition.name.view());
-            unsigned suffix = 2;
-            while (std::ranges::any_of(settings.tag_bundles, [&](const auto& b) {
-                return tag_ci_equal(b.name.view(), definition.name.view());
-            })) {
-                definition.name =
-                    name.substr(0, 220) + " (import " + std::to_string(suffix++) + ")";
-                match = std::ranges::find_if(settings.tag_bundles, [&](const auto& b) {
-                    return tag_ci_equal(b.name.view(), definition.name.view()) && same_members(b);
-                });
-                if (match != settings.tag_bundles.end()) break;
-            }
-            if (match == settings.tag_bundles.end()) {
-                if (settings.tag_bundles.size() >= INDEX_MAX_TAGS) return InvalidArg;
-                if (std::ranges::any_of(settings.tag_bundles,
-                                        [&](const auto& b) { return b.id == id; }) &&
-                    !crypto::fill_random(definition.id))
-                    return IoError;
-                settings.tag_bundles.push_back(std::move(definition));
-                match = std::prev(settings.tag_bundles.end());
-            }
-        }
-        if (std::ranges::find(candidate.tag_bundles, match->id) == candidate.tag_bundles.end())
-            candidate.tag_bundles.push_back(match->id);
+        if (const auto result = import_bundle_definition(*found, settings, candidate); result != Ok)
+            return result;
     }
     if (!rebuild_bundle_tags(candidate, settings)) return InvalidArg;
     BundleAccess::settings_of(destination_vault) = std::move(settings);

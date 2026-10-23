@@ -36,6 +36,14 @@
 namespace ui {
 
 namespace {
+std::string tag_source_key(std::string_view tag)
+{
+    std::string result(tag);
+    for (char& ch : result)
+        if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch + ('a' - 'A'));
+    return result;
+}
+
 constexpr float MODAL_W = 500.0f;
 
 // Phase 91: a node's secure tag list as transient plain strings for the tag
@@ -151,7 +159,9 @@ void TagEditor::open(std::string node_path)
 void TagEditor::open_multi(std::vector<std::string> node_paths)
 {
     close();
-    bundle_mode_ = bundle_form_ = bundle_confirm_ = false;
+    bundle_mode_ = false;
+    bundle_form_ = false;
+    bundle_confirm_ = false;
     active_ = true;
     if (queue_.busy()) {
         error_ = "Wait for imports to finish before editing tags.";
@@ -192,7 +202,9 @@ void TagEditor::close()
     bundle_members_.clear();
     bundle_original_name_.clear();
     bundle_preview_.clear();
-    bundle_mode_ = bundle_form_ = bundle_confirm_ = false;
+    bundle_mode_ = false;
+    bundle_form_ = false;
+    bundle_confirm_ = false;
     tally_.clear();
     inherited_.clear();
     from_contents_.clear();
@@ -294,29 +306,22 @@ void TagEditor::load_per_node_tags()
     std::vector<std::vector<std::string>> per_node_tags;
     per_node_tags.reserve(node_paths_.size());
     int resolved = 0;
-    const auto key = [](std::string_view tag) {
-        std::string result(tag);
-        for (char& ch : result)
-            if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch + ('a' - 'A'));
-        return result;
-    };
-    std::map<std::string, size_t> manual_counts;
-    std::map<std::string, std::set<std::string>> bundle_sources;
+    std::map<std::string, size_t, std::less<>> manual_counts;
+    std::map<std::string, std::set<std::string, std::less<>>, std::less<>> bundle_sources;
     const auto& bundles = vault::vault_settings(vault_).tag_bundles;
 
     for (const auto* node : vault::resolve_node_selection(vault_, node_paths_)) {
-        if (node) {
-            per_node_tags.push_back(tag_strings(node->tags));
-            for (const auto& tag : node->tag_provenance ? node->explicit_tags : node->tags)
-                ++manual_counts[key(tag.view())];
-            for (const auto& id : node->tag_bundles) {
-                const auto bundle = std::ranges::find(bundles, id, &vault::TagBundle::id);
-                if (bundle != bundles.end())
-                    for (const auto& tag : bundle->tags)
-                        bundle_sources[key(tag.view())].emplace(bundle->name.view());
-            }
-            ++resolved;
+        if (!node) continue;
+        per_node_tags.push_back(tag_strings(node->tags));
+        for (const auto& tag : node->tag_provenance ? node->explicit_tags : node->tags)
+            ++manual_counts[tag_source_key(tag.view())];
+        for (const auto& id : node->tag_bundles) {
+            const auto bundle = std::ranges::find(bundles, id, &vault::TagBundle::id);
+            if (bundle == bundles.end()) continue;
+            for (const auto& tag : bundle->tags)
+                bundle_sources[tag_source_key(tag.view())].emplace(bundle->name.view());
         }
+        ++resolved;
     }
 
     if (resolved == 0) {
@@ -326,7 +331,7 @@ void TagEditor::load_per_node_tags()
     tally_ = compute_tag_tally(per_node_tags);
     tag_sources_.clear();
     for (const auto& row : tally_) {
-        const auto tag = key(row.tag);
+        const auto tag = tag_source_key(row.tag);
         std::string sources = std::format("Manual: {} selection items", manual_counts[tag]);
         for (const auto& bundle : bundle_sources[tag])
             sources += "; bundle: " + bundle;
@@ -362,6 +367,16 @@ void TagEditor::select_tag(std::string_view tag)
     selected_ = std::max(0, static_cast<int>(tally_.size()) - 1);
 }
 
+bool TagEditor::handle_fields_event(const SDL_Event& e)
+{
+    const bool consumed = fields_form_.handle_event(e);
+    if (!fields_form_.active()) {
+        SDL_StartTextInput(win_.sdl_window());
+        if (fields_form_.consume_saved()) refresh_vocabulary();
+    }
+    return consumed;
+}
+
 bool TagEditor::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
@@ -383,17 +398,7 @@ bool TagEditor::handle_event(const SDL_Event& e)
         return true;
     }
 
-    // Form handling (Phase 73): the fields_form modal takes precedence over the tag editor
-    // input. When it becomes inactive after consuming an event, restart text input for the
-    // tag editor (the form calls StopTextInput on close, we restart it here).
-    if (fields_form_.active()) {
-        const bool consumed = fields_form_.handle_event(e);
-        if (!fields_form_.active()) {
-            SDL_StartTextInput(win_.sdl_window());   // back to the tag input
-            if (fields_form_.consume_saved()) refresh_vocabulary();
-        }
-        return consumed;
-    }
+    if (fields_form_.active()) return handle_fields_event(e);
 
     // Precedence rule (Phase 54): the tag field consumes editing keys first.
     // field_owns_event keeps the empty-buffer behaviour intact — with nothing

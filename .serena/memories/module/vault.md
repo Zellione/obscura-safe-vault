@@ -666,3 +666,5 @@ mutations operate on explicit ownership; category/tag rename visits effective,
 explicit, and bundle-member references. transfer/combine preserve independent
 ownership, materialize boundary inheritance, and never prune source branches after
 failed destination preparation/commit. See vault_format for schema 3 persistence.
+`visit_bundle_tag_references` and its recursive `visit_explicit_tag_references`
+helper are header templates, preserving the caller's visitor type.
