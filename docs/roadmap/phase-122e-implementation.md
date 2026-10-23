@@ -159,4 +159,4 @@ The combined review fixes passed the full Debug suite: **2,546 tests, zero failu
 They also passed the full Release and ASAN/UBSan/LSan suites (2,546 tests each).
 The final regex allocator cleanup passed full Debug and sanitizer suites plus
 35 Release rename tests. The remaining transfer-complexity extraction passed all
-90 focused transfer tests; remote confirmation is tracked on the PR.
+92 focused transfer tests; remote confirmation is tracked on the PR.
