@@ -3,7 +3,8 @@
 #include <SDL3/SDL.h>
 
 #include <functional>
-#include <future>
+#include <atomic>
+#include <thread>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -48,7 +49,7 @@ public:
     [[nodiscard]] bool active() const noexcept { return active_; }
     [[nodiscard]] bool busy() const noexcept
     {
-        return work_.valid();
+        return work_.thread.joinable();
     }
     // Poll only on the UI thread. A busy editor exclusively owns the vault tree.
     void update();
@@ -59,6 +60,8 @@ public:
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
 
 private:
+    friend struct TagEditorTestAccess;
+    std::string_view finish_work();
     void launch(std::function<void()> work);
     void finish_add();
     void refresh_tags();              // reload the node's current tags from the vault
@@ -85,7 +88,14 @@ private:
     vault::Vault&        vault_;
     gfx::Window&         win_;
     ImportQueue& queue_;
-    std::future<void> work_;
+    enum class WorkFailure { None, Memory, Size, System };
+    struct WorkState {
+        std::atomic<bool> done{false};
+        WorkFailure failure = WorkFailure::None; // Read only after join.
+        std::jthread thread;
+    };
+    WorkState work_;
+
     vault::OpProgress progress_;
     bool owns_exclusive_ = false;
     bool loading_ = false;

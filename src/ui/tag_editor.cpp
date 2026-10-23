@@ -1,9 +1,13 @@
 #include "ui/tag_editor.h"
-#include <chrono>
+#include <new>
+#include <stdexcept>
+#include <system_error>
+#include "platform/error_log.h"
 #include "ui/import_queue.h"
 #include "ui/progress_modal.h"
 
 #include <algorithm>
+#include <cassert>
 #include <format>
 #include <string>
 #include <string_view>
@@ -65,25 +69,58 @@ TagEditor::~TagEditor()
 
 void TagEditor::launch(std::function<void()> work)
 {
+    assert(!busy());
     progress_.cancel.store(false);
     progress_.done.store(0);
     progress_.total.store(static_cast<int>(node_paths_.size()));
+    work_.done.store(false);
+    work_.failure = WorkFailure::None;
     try {
-        work_ = std::async(std::launch::async, std::move(work));
-    } catch (const std::exception&) {
-        error_ = "Could not start tag operation.";
+        work_.thread = std::jthread([this, work = std::move(work)] {
+            // Known operations allocate containers/strings or acquire system
+            // synchronization resources. Keep failure reporting allocation-free
+            // on this thread; the UI reads the outcome only after joining.
+            try {
+                work();
+            } catch (const std::bad_alloc&) {
+                work_.failure = WorkFailure::Memory;
+            } catch (const std::length_error&) {
+                work_.failure = WorkFailure::Size;
+            } catch (const std::system_error&) {
+                work_.failure = WorkFailure::System;
+            }
+            work_.done.store(true);
+        });
+    } catch (const std::bad_alloc&) {
+        loading_ = false;
+        error_ = "Not enough memory to start tag operation.";
+    } catch (const std::system_error&) {
+        loading_ = false;
+        error_ = "Could not start tag operation worker.";
     }
+}
+
+std::string_view TagEditor::finish_work()
+{
+    if (!work_.thread.joinable()) return {};
+    work_.thread.join();
+    std::string_view failure;
+    switch (work_.failure) {
+        case WorkFailure::None: return {};
+        case WorkFailure::Memory: failure = "Tag operation ran out of memory."; break;
+        case WorkFailure::Size: failure = "Tag operation exceeded a container size limit."; break;
+        case WorkFailure::System: failure = "Tag operation encountered a system error."; break;
+    }
+    // Also report failures collected by close(): its UI state is about to be
+    // cleared, but teardown must not silently swallow a failed operation.
+    platform::log_error("Tags", failure);
+    return failure;
 }
 
 void TagEditor::update()
 {
-    if (!work_.valid() || work_.wait_for(std::chrono::seconds{0}) != std::future_status::ready)
-        return;
-    try {
-        work_.get();
-    } catch (const std::exception&) {
-        error_ = "Tag operation failed.";
-    }
+    if (!busy() || !work_.done.load()) return;
+    if (const auto failure = finish_work(); !failure.empty()) error_ = failure;
     loading_ = false;
     if (!pending_category_.empty() && error_.empty()) finish_add();
     pending_tag_.clear();
@@ -130,13 +167,10 @@ void TagEditor::open_multi(std::vector<std::string> node_paths)
 
 void TagEditor::close()
 {
-    if (!active_ && !work_.valid()) return;
-    if (work_.valid()) {
+    if (!active_ && !busy()) return;
+    if (busy()) {
         progress_.cancel.store(true);
-        try {
-            work_.get();
-        } catch (const std::exception&) { /* teardown still releases ownership */
-        }
+        (void)finish_work(); // Static failure text: teardown does not allocate an error string.
     }
     if (owns_exclusive_) queue_.set_exclusive(false);
     owns_exclusive_ = false;

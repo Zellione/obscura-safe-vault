@@ -1960,10 +1960,21 @@ VaultResult set_favorites_batch(Vault& v, std::span<const std::string> node_path
     return changed ? v.commit_index() : Ok;
 }
 
+namespace {
+using SelectionChildren = std::unordered_map<std::string_view, IndexNode*>;
+
+void index_selection_children(SelectionChildren& children, IndexNode* parent)
+{
+    if (!parent || !parent->is_gallery()) return;
+    children.reserve(parent->children.size());
+    for (auto& child : parent->children)
+        children.try_emplace(child.name.view(), &child);
+}
+} // namespace
+
 std::vector<IndexNode*> resolve_node_selection(Vault& v, std::span<const std::string> paths)
 {
-    using Children = std::unordered_map<std::string_view, IndexNode*>;
-    std::unordered_map<std::string_view, Children> parents;
+    std::unordered_map<std::string_view, SelectionChildren> parents;
     std::vector<IndexNode*> result;
     result.reserve(paths.size());
     for (const auto& path : paths) {
@@ -1973,16 +1984,10 @@ std::vector<IndexNode*> resolve_node_selection(Vault& v, std::span<const std::st
         }
         const std::string_view view{path};
         const auto slash = view.find_last_of('/');
-        const auto parent = slash == view.npos ? std::string_view{} : view.substr(0, slash);
-        const auto leaf = slash == view.npos ? view : view.substr(slash + 1);
+        const auto parent = slash == std::string_view::npos ? std::string_view{} : view.substr(0, slash);
+        const auto leaf = slash == std::string_view::npos ? view : view.substr(slash + 1);
         auto [it, inserted] = parents.try_emplace(parent);
-        if (inserted) {
-            if (auto* node = v.resolve_node(parent); node && node->is_gallery()) {
-                it->second.reserve(node->children.size());
-                for (auto& child : node->children)
-                    it->second.emplace(child.name.view(), &child);
-            }
-        }
+        if (inserted) index_selection_children(it->second, v.resolve_node(parent));
         const auto child = it->second.find(leaf);
         result.push_back(child == it->second.end() ? nullptr : child->second);
     }
@@ -1991,6 +1996,11 @@ std::vector<IndexNode*> resolve_node_selection(Vault& v, std::span<const std::st
 
 namespace {
 struct TagBatchChanges {
+    TagBatchChanges() = default;
+    TagBatchChanges(const TagBatchChanges&) = delete;
+    TagBatchChanges& operator=(const TagBatchChanges&) = delete;
+    TagBatchChanges(TagBatchChanges&&) = delete;
+    TagBatchChanges& operator=(TagBatchChanges&&) = delete;
     std::vector<std::pair<IndexNode*, std::vector<crypto::SecureString>>> originals;
     bool committed = false;
     ~TagBatchChanges()

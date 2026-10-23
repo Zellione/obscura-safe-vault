@@ -96,7 +96,9 @@ Modal dialogs: transfer/combine operations, file pickers, rename/tag editing, se
   consume_completed(status_out).
 - `tag_editor.*` — `G` add/remove-tags modal in GalleryGrid + ImageViewer. Current-tags list
   loads asynchronously with selection edits/save/refresh under worker ownership.
-  `update()` joins a ready future; while `busy()`, owners render only its progress
+  `update()` joins an explicitly owned `jthread` after atomic completion; resource
+  failures are reported on the UI thread, including logged failures during close.
+  While `busy()`, owners render only its progress
   and gate vault access. It holds ImportQueue exclusive until close; close joins
   before release/key teardown. `resolve_node_selection` avoids per-item listing/sort.
   scrolls (Up/Down) via pure `tag_scroll.h` + auto-scrolls to a just-added tag. Read-only

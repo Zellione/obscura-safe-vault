@@ -2,6 +2,9 @@
 #include <cstdlib>
 #include <print>
 #include <thread>
+#include <new>
+#include <stdexcept>
+#include <system_error>
 #include "crypto/random.h"
 #include "gfx/window.h"
 #include "test_framework.h"
@@ -121,6 +124,56 @@ TEST(tag_editor_worker_add_remove_and_close_join_before_vault_teardown)
         editor.close();
         CHECK(!editor.busy());
         CHECK(!editor.active());
+        v.lock();
+    }
+    std::filesystem::remove_all(path);
+}
+
+namespace ui {
+struct TagEditorTestAccess {
+    static void launch(TagEditor& editor, std::function<void()> work)
+    {
+        editor.launch(std::move(work));
+    }
+    static bool has_error(const TagEditor& editor) { return !editor.error_.empty(); }
+};
+}
+
+TEST(tag_editor_worker_resource_failures_join_and_allow_retry)
+{
+    const auto path = std::filesystem::temp_directory_path() / "osv-tag-worker-failure.osv";
+    std::filesystem::remove_all(path);
+    {
+        vault::Vault v;
+        REQUIRE(vaulttest::make_directory_vault(v, path));
+        REQUIRE(v.create_gallery("one") == vault::VaultResult::Ok);
+        gfx::Window window;
+        ui::ImportQueue queue;
+        ui::TagEditor editor(v, window, queue);
+        for (int failure = 0; failure < 3; ++failure) {
+            editor.open("one");
+            REQUIRE(finish(editor));
+            ui::TagEditorTestAccess::launch(editor, [failure] {
+                if (failure == 0) throw std::bad_alloc{};
+                if (failure == 1) throw std::length_error("synthetic size failure");
+                throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
+            });
+            CHECK(editor.busy());
+            REQUIRE(finish(editor));
+            CHECK(ui::TagEditorTestAccess::has_error(editor));
+            editor.close();
+            CHECK(!editor.busy());
+        }
+        // Teardown joins and handles a failed worker even without update().
+        editor.open("one");
+        REQUIRE(finish(editor));
+        ui::TagEditorTestAccess::launch(editor, [] { throw std::bad_alloc{}; });
+        editor.close();
+        CHECK(!editor.busy());
+        editor.open("one");
+        REQUIRE(finish(editor));
+        CHECK(!ui::TagEditorTestAccess::has_error(editor));
+        editor.close();
         v.lock();
     }
     std::filesystem::remove_all(path);
