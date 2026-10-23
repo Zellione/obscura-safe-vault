@@ -16,9 +16,16 @@ saves, and phase progress. See [measurements and limits](phase-122f-implementati
 
 C is [PR #266](https://github.com/Zellione/obscura-safe-vault/pull/266), following F
 with bounded PCRE2 preview/apply, atomic swaps, and Shift+R UI. Full integrated
-Debug and unrestricted ASAN/UBSan/LSan each pass 2,527 tests. H follows C; E will
-include H's upgrade tests in its final schema validation.
+Debug and unrestricted ASAN/UBSan/LSan each pass 2,527 tests. H is [PR #267](https://github.com/Zellione/obscura-safe-vault/pull/267), following C,
+with 2,529 Debug and unrestricted sanitizer tests passing. E follows H, including
+its upgrade tests in the final schema validation.
 See [implementation and limits](phase-122c-implementation.md).
+
+E integrates encrypted bundle definitions and explicit assignment provenance,
+including transfer/combine preservation and schema 1/2→3 migration. A new test
+reproduced category rename missing unused bundle namespaces and provenance;
+the integration now visits these references. The bundle creation action uses F8
+because app-wide F2 opens Settings. See [E details](phase-122e-implementation.md).
 
 ### B implementation findings
 

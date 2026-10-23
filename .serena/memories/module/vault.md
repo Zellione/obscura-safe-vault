@@ -18,7 +18,7 @@ provides domain-separated keyed-BLAKE2b database/per-object key derivation into
 `SecureBuffer` plus canonical 66-byte object-frame AD; `v3_detect.*` classifies
 legacy files versus v3 directories while rejecting symlink/odd shapes (advisory
 only—the Phase 106 descriptor-relative open is authoritative); `v3_schema.h`
-freezes schema v2 DDL; and `v3_transaction_model.h` models publish-before-
+defines schema v3 DDL; and `v3_transaction_model.h` models publish-before-
 reference crash states. `v3_sqlcipher_key.*` converts a derived 32-byte key to
 SQLCipher's required 67-byte raw keyspec inside a wipe-on-release
 `SecureBuffer`, avoiding SQL interpolation and SQLCipher's password KDF. The
@@ -39,7 +39,7 @@ Phase 107 adds `v3_db.*`, the production-linked, move-only
 SQLCipher boundary: it applies the raw derived key without SQL interpolation,
 enables cipher memory security, rollback journal + FULL synchronous durability,
 foreign keys, defensive/untrusted-schema modes and bounded SQLite limits before
-accepting the connection. Create installs schema v2 plus the root/meta
+accepting the connection. Create installs schema v3 plus the root/meta
 rows transactionally; open verifies the key immediately, rejects unsupported
 versions, and runs an integrity check. SQLite handles and rows stay private and
 failures map to `DbStatus`. Prepared repositories cover nodes/search, immutable
@@ -48,9 +48,9 @@ saved searches and settings; decrypted results use secure string/blob owners. Li
 connection queries live as free helpers (`database_healthy`, `database_root_node_id`, and the
 test-only `set_database_user_version_for_test`) so `Database` stays below Sonar's 35-method cap.
 `backup_to` uses SQLCipher online backup into exclusive encrypted staging,
-verifies it, fsyncs, publishes no-replace, and directory-syncs. Schema v1 is
-both the supported minimum and maximum; future versions fail closed, and the
-first later migration must be transactional before raising `SCHEMA_VERSION`.
+verifies it, fsyncs, publishes no-replace, and directory-syncs. Schema versions 1 and 2 upgrade transactionally to 3; versions above 3 fail
+closed. Read-only older snapshots upgrade a private in-memory copy, preserving
+the source backup. Container format remains v3.
 
 Phase 108 adds `v3_object_store.*`, which writes immutable,
 independently-keyed `.osvo` files through `v3_fs` staging and durable no-replace
@@ -655,3 +655,16 @@ secure before/after names and validates the final sibling namespace. Apply rejec
 stale IDs/parents/names, prepares rollback before mutation, and commits once.
 `Database::sync_metadata` uses transaction-local BLOB ID placeholders for names
 before upserts, permitting swaps/cycles without changing sibling uniqueness.
+
+`tag_normalization.h` shares whitespace trimming and case-insensitive deduplication
+between ordinary tag edits, bundle persistence and the bundle editor preview.
+
+`tag_bundles.*`: VaultSettings definitions keyed by stable 128-bit IDs; IndexNode
+explicit_tags + tag_bundles + tag_provenance yield local effective tags. Definition
+edit/delete and selection apply/remove commit atomically with rollback. Direct tag
+mutations operate on explicit ownership; category/tag rename visits effective,
+explicit, and bundle-member references. transfer/combine preserve independent
+ownership, materialize boundary inheritance, and never prune source branches after
+failed destination preparation/commit. See vault_format for schema 3 persistence.
+`visit_bundle_tag_references` and its recursive `visit_explicit_tag_references`
+helper are header templates, preserving the caller's visitor type.

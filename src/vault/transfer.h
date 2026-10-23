@@ -49,6 +49,8 @@ struct GalleryTransferOpts {
     OpProgress*     progress = nullptr;
     TransferTally*  tally    = nullptr;
     CollisionPolicy policy   = CollisionPolicy::Fail;
+    // False when a Combine operation already copied the source ancestors.
+    bool materialize_inheritance = true;
 };
 
 // Bump `failed` and store the entry while under MAX_TRANSFER_FAILURES (further
@@ -92,6 +94,8 @@ void record_failure(TransferTally& t, std::string path, VaultResult code,
 struct TransferProgress {
     OpProgress* progress  = nullptr;
     bool        set_total = true;
+    // Combine already preserves the containing gallery and its tag sources.
+    bool materialize_inheritance = true;
 };
 [[nodiscard]] TransferTally transfer_images(Vault& src, std::string_view src_gallery,
                                             const std::vector<std::string>& filenames,

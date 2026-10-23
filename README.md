@@ -92,6 +92,29 @@ selection unchanged. Closing the application waits for the worker before locking
 the vault. Very large selections can still spend time saving metadata, but the
 progress modal continues to repaint.
 
+## Meta tags (tag bundles)
+
+Open the tag editor with **G**, then press **F3** for meta tags. Select a bundle
+with **Up/Down**; **Enter** applies it to the selection and **Delete** removes its
+application. Tags added manually, supplied by another bundle, or inherited from
+a parent remain when a bundle is removed. Adding an already-bundled tag manually
+also preserves it independently. The ordinary tag list shows manual ownership
+and supplying bundles; deleting there removes only the manual assignment.
+
+**F8** creates a bundle, **F4** edits one, and **F6** previews deleting its
+definition. **Tab** switches the name/member fields. Separate member tags with
+semicolons; use a backslash to escape a literal semicolon or backslash. **F5**
+previews affected applications and tag changes; **Enter** confirms, **Esc** cancels.
+Editing a definition updates all its applications. Bundles contain ordinary tags.
+Member tags have surrounding whitespace trimmed; empty members and case-insensitive
+duplicates are removed, preserving the first spelling, just like ordinary tags.
+Global **F2** continues to open Settings.
+
+Bundle definitions and ownership are stored in encrypted metadata schema 3.
+Existing tags become manual assignments during upgrade; media objects are not
+rewritten. Older app versions reject the newer metadata schema. Cross-vault copy
+preserves ownership and gives conflicting bundle definitions distinct names.
+
 ## Import progress
 
 Folder and archive imports show discovery, extraction/reading, and processing

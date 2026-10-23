@@ -39,13 +39,16 @@ public:
 private:
     friend struct BulkRenameTestPeer;
     void launch(std::function<void()> task);
+    template <typename Work> void run_work(const Work& task);
+    bool handle_key(SDL_Keycode key);
+    void render_progress(gfx::Renderer& r, gfx::FontAtlas& font, float w, float h) const;
     [[nodiscard]] bool finish_work();
     void preview();
     void apply();
     vault::Vault& vault_;
     gfx::Window& win_;
     ImportQueue& queue_;
-    enum class WorkFailure { None, Memory, Size, System, Runtime, Bounds };
+    enum class WorkFailure { None, Memory, Size, System, Bounds };
     struct WorkState {
         std::atomic_bool done{false};
         WorkFailure failure = WorkFailure::None;  // Read only after joining.
@@ -56,10 +59,19 @@ private:
     std::vector<vault::RenameId> ids_;
     vault::RenamePreview preview_;
     vault::RenameOptions options_;
-    SecureTextInput pattern_{4096}, replacement_{4096};
-    TextFieldChrome pattern_chrome_, replacement_chrome_;
-    bool active_ = false, exclusive_ = false, applying_ = false, completed_ = false;
-    bool second_field_ = false, preview_ready_ = false, details_ = false;
+    struct RenameField {
+        SecureTextInput input{4096};
+        TextFieldChrome chrome;
+    };
+    RenameField pattern_;
+    RenameField replacement_;
+    bool active_ = false;
+    bool exclusive_ = false;
+    bool applying_ = false;
+    bool completed_ = false;
+    bool second_field_ = false;
+    bool preview_ready_ = false;
+    bool details_ = false;
     size_t first_row_ = 0;
     vault::VaultResult result_ = vault::VaultResult::Ok;
     std::string error_;

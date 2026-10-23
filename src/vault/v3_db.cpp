@@ -1,4 +1,5 @@
 #include "vault/v3_db.h"
+#include "vault/tag_bundles.h"
 
 #include "crypto/random.h"
 #include "vault/v3_fs.h"
@@ -76,6 +77,110 @@ bool id_valid(const Id& id) noexcept
 void bind_id(sqlite3_stmt* statement, int index, const Id& id) noexcept
 {
     sqlite3_bind_blob(statement, index, id.data(), static_cast<int>(id.size()), SQLITE_TRANSIENT);
+}
+
+std::string_view column_text(sqlite3_stmt* statement, int column)
+{
+    const auto* data = reinterpret_cast<const char*>(sqlite3_column_text(statement, column));
+    return data ? std::string_view(data,
+                                   static_cast<size_t>(sqlite3_column_bytes(statement, column)))
+                : std::string_view{};
+}
+
+DbStatus insert_node_tag(sqlite3* db, const IndexNode& node, size_t position, int64_t tag_id)
+{
+    const auto& tag = node.tags[position];
+    Statement insert{
+        db, "INSERT INTO node_tags(node_id,tag_id,display_name,tag_order,explicit_assignment) "
+            "VALUES(?,?,?,?,?)"};
+    if (!insert.get()) return IoError;
+    bind_id(insert.get(), 1, node.node_id);
+    sqlite3_bind_int64(insert.get(), 2, tag_id);
+    sqlite3_bind_text(insert.get(), 3, tag.view().data(), static_cast<int>(tag.size()),
+                      SQLITE_TRANSIENT);
+    sqlite3_bind_int64(insert.get(), 4, static_cast<int64_t>(position));
+    const bool manual = node.tag_bundles.empty() || !node.tag_provenance ||
+                        std::ranges::any_of(node.explicit_tags, [&tag](const auto& item) {
+                            return tag_ci_equal(item.view(), tag.view());
+                        });
+    sqlite3_bind_int(insert.get(), 5, manual ? 1 : 0);
+    return map_status(sqlite3_step(insert.get()));
+}
+
+DbStatus write_bundle_definition(sqlite3* db, const TagBundle& bundle)
+{
+    Statement insert{db, "INSERT INTO tag_bundles(bundle_id,name) VALUES(?,?)"};
+    if (!insert.get()) return IoError;
+    bind_id(insert.get(), 1, bundle.id);
+    sqlite3_bind_text(insert.get(), 2, bundle.name.view().data(),
+                      static_cast<int>(bundle.name.size()), SQLITE_TRANSIENT);
+    if (const auto r = map_status(sqlite3_step(insert.get())); r != Ok) return r;
+    if (bundle.tags.size() > INDEX_MAX_TAGS) return Constraint;
+    for (size_t i = 0; i < bundle.tags.size(); ++i) {
+        Statement member{db, "INSERT INTO bundle_tags(bundle_id,tag,position) VALUES(?,?,?)"};
+        if (!member.get()) return IoError;
+        bind_id(member.get(), 1, bundle.id);
+        sqlite3_bind_text(member.get(), 2, bundle.tags[i].view().data(),
+                          static_cast<int>(bundle.tags[i].size()), SQLITE_TRANSIENT);
+        sqlite3_bind_int64(member.get(), 3, static_cast<int64_t>(i));
+        if (const auto r = map_status(sqlite3_step(member.get())); r != Ok) return r;
+    }
+    return Ok;
+}
+
+DbStatus read_bundle_members(sqlite3* db, TagBundle& bundle)
+{
+    Statement members{db, "SELECT tag FROM bundle_tags WHERE bundle_id=? ORDER BY position"};
+    if (!members.get()) return IoError;
+    bind_id(members.get(), 1, bundle.id);
+    int step = SQLITE_DONE;
+    while ((step = sqlite3_step(members.get())) == SQLITE_ROW) {
+        if (bundle.tags.size() >= INDEX_MAX_TAGS) return Constraint;
+        bundle.tags.emplace_back(column_text(members.get(), 0));
+    }
+    return map_status(step);
+}
+
+DbStatus read_node_assignments(sqlite3* db, IndexNode& node)
+{
+    node.tag_provenance = true;
+    Statement manual{
+        db, "SELECT COALESCE(nt.display_name,t.display_name) FROM node_tags nt JOIN tags t "
+            "USING(tag_id) WHERE node_id=? AND explicit_assignment=1 ORDER BY tag_order,nt.rowid"};
+    if (!manual.get()) return IoError;
+    bind_id(manual.get(), 1, node.node_id);
+    int row = SQLITE_DONE;
+    while ((row = sqlite3_step(manual.get())) == SQLITE_ROW) {
+        if (node.explicit_tags.size() >= INDEX_MAX_TAGS) return Constraint;
+        node.explicit_tags.emplace_back(column_text(manual.get(), 0));
+    }
+    if (row != SQLITE_DONE) return map_status(row);
+    Statement applied{db, "SELECT bundle_id FROM node_bundles WHERE node_id=? ORDER BY position"};
+    if (!applied.get()) return IoError;
+    bind_id(applied.get(), 1, node.node_id);
+    while ((row = sqlite3_step(applied.get())) == SQLITE_ROW) {
+        if (node.tag_bundles.size() >= INDEX_MAX_TAGS ||
+            sqlite3_column_bytes(applied.get(), 0) != 16)
+            return Constraint;
+        Id id{};
+        std::copy_n(static_cast<const uint8_t*>(sqlite3_column_blob(applied.get(), 0)), 16,
+                    id.begin());
+        node.tag_bundles.push_back(id);
+    }
+    return map_status(row);
+}
+
+bool verify_bundle_tags(IndexNode& node, const VaultSettings& settings)
+{
+    const auto stored = node.tags;
+    if (!rebuild_bundle_tags(node, settings) || stored.size() != node.tags.size()) return false;
+    for (const auto& tag : stored)
+        if (std::ranges::none_of(node.tags, [&tag](const auto& item) {
+                return tag_ci_equal(item.view(), tag.view());
+            }))
+            return false;
+    node.tags = stored;
+    return true;
 }
 
 template <typename T>
@@ -364,7 +469,7 @@ DbStatus migrate_schema_v1(sqlite3* db) noexcept
         status = exec(db, definition);
         std::string select = "*";
         if (table == "vault_meta")
-            select = "singleton,2,root_node_id,app_generation,default_sort,tiles_show_tags,"
+            select = "singleton,3,root_node_id,app_generation,default_sort,tiles_show_tags,"
                      "migrated_index_version,migrated_probe_caps,migrated_thumb_side";
         if (table == "nodes")
             select =
@@ -396,6 +501,43 @@ DbStatus migrate_schema_v1(sqlite3* db) noexcept
     if (status != Ok) (void)exec(db, "ROLLBACK");
     const auto restored = exec(db, "PRAGMA foreign_keys=ON");
     return status == Ok ? restored : status;
+}
+
+DbStatus migrate_schema_v2(sqlite3* db) noexcept
+{
+    auto status = exec(db, "BEGIN IMMEDIATE");
+    // v1 migration already rebuilt vault_meta using the current definition.
+    if (status == Ok) {
+        int stored_version = 0;
+        {
+            Statement version{db, "SELECT schema_version FROM vault_meta"};
+            if (!version.get() || sqlite3_step(version.get()) != SQLITE_ROW)
+                status = WrongKeyOrCorrupt;
+            else
+                stored_version = sqlite3_column_int(version.get(), 0);
+        }
+        if (status == Ok && stored_version == 2) {
+            const auto start = SCHEMA_SQL.find("CREATE TABLE vault_meta");
+            const auto end = SCHEMA_SQL.find("\n);", start) + 3;
+            auto sql = std::string(SCHEMA_SQL.substr(start, end - start));
+            sql.replace(13, 10, "vault_meta_new");
+            status = exec(db, sql);
+            if (status == Ok)
+                status = exec(
+                    db, "INSERT INTO vault_meta_new SELECT singleton,3,root_node_id,app_generation,"
+                        "default_sort,tiles_show_tags,migrated_index_version,migrated_probe_caps,"
+                        "migrated_thumb_side FROM vault_meta; DROP TABLE vault_meta;"
+                        "ALTER TABLE vault_meta_new RENAME TO vault_meta");
+        }
+    }
+    if (status == Ok)
+        status = exec(db, "ALTER TABLE node_tags ADD COLUMN explicit_assignment INTEGER NOT NULL "
+                          "DEFAULT 1 CHECK(explicit_assignment IN (0,1))");
+    if (status == Ok)
+        status = exec(db, SCHEMA_SQL.substr(SCHEMA_SQL.find("CREATE TABLE tag_bundles")));
+    if (status == Ok) status = exec(db, "COMMIT");
+    if (status != Ok) (void)exec(db, "ROLLBACK");
+    return status;
 }
 
 void remove_file(const std::filesystem::path& path) noexcept
@@ -503,7 +645,7 @@ Database::OpenResult Database::create(const std::filesystem::path& path,
         return {status, std::nullopt};
     }
     Statement meta{db,
-                   "INSERT INTO vault_meta(singleton,schema_version,root_node_id) VALUES(1,2,?)"};
+                   "INSERT INTO vault_meta(singleton,schema_version,root_node_id) VALUES(1,3,?)"};
     if (Statement root{
             db,
             "INSERT INTO nodes(node_id,parent_id,node_type,display_name,sibling_order,sort_key) "
@@ -550,7 +692,7 @@ Database::create_in_root(const VaultRoot& root,
         return {map_status(sqlite3_extended_errcode(db)), std::nullopt};
     }
     Statement meta{db,
-                   "INSERT INTO vault_meta(singleton,schema_version,root_node_id) VALUES(1,2,?)"};
+                   "INSERT INTO vault_meta(singleton,schema_version,root_node_id) VALUES(1,3,?)"};
     if (Statement root_row{
             db,
             "INSERT INTO nodes(node_id,parent_id,node_type,display_name,sibling_order,sort_key) "
@@ -580,7 +722,7 @@ Database::OpenResult Database::open(const std::filesystem::path& path,
     if (version < 0) return {WrongKeyOrCorrupt, std::nullopt};
     if (version > SCHEMA_VERSION) return {UnsupportedVersion, std::nullopt};
     if (version < SCHEMA_VERSION) {
-        if (version != 1) return {UnsupportedVersion, std::nullopt};
+        if (version != 1 && version != 2) return {UnsupportedVersion, std::nullopt};
         if (!writable) {
             // Older backups remain immutable: upgrade a private in-memory
             // SQLCipher copy for inspection/restore, never the source snapshot.
@@ -593,7 +735,11 @@ Database::OpenResult Database::open(const std::filesystem::path& path,
                 return {copied, std::nullopt};
             result = std::move(memory);
         }
-        if (const auto migrated = migrate_schema_v1(result.database->handle_); migrated != Ok)
+        if (version == 1) {
+            if (const auto migrated = migrate_schema_v1(result.database->handle_); migrated != Ok)
+                return {migrated, std::nullopt};
+        }
+        if (const auto migrated = migrate_schema_v2(result.database->handle_); migrated != Ok)
             return {migrated, std::nullopt};
     }
     if (!database_healthy(*result.database)) return {WrongKeyOrCorrupt, std::nullopt};
@@ -843,7 +989,8 @@ DbStatus Database::sync_metadata(const IndexNode& root,          // NOSONAR cpp:
     // Rebuild the bounded metadata joins inside the same transaction. Object
     // rows are deliberately untouched for every live node.
     for (const char* sql :
-         {"DELETE FROM node_tags", "DELETE FROM tag_field_values", "DELETE FROM tag_descriptions",
+         {"DELETE FROM node_bundles", "DELETE FROM bundle_tags", "DELETE FROM tag_bundles",
+          "DELETE FROM node_tags", "DELETE FROM tag_field_values", "DELETE FROM tag_descriptions",
           "DELETE FROM category_fields", "DELETE FROM tag_categories", "DELETE FROM tags",
           "DELETE FROM saved_searches"})
         if (status == Ok) status = exec(handle_, sql);
@@ -889,26 +1036,13 @@ DbStatus Database::sync_metadata(const IndexNode& root,          // NOSONAR cpp:
         return it == tags.end() ? 0 : static_cast<int64_t>(std::distance(tags.begin(), it) + 1);
     };
     std::function<void(const IndexNode&)> assign_tags = [&](const IndexNode& node) {
-        for (size_t i = 0; i < node.tags.size() && status == Ok; ++i) {
-            const auto& tag = node.tags[i];
-            Statement insert{
-                handle_,
-                "INSERT INTO node_tags(node_id,tag_id,display_name,tag_order) VALUES(?,?,?,?)"};
-            if (!insert.get()) {
-                status = IoError;
-                break;
-            }
-            bind_id(insert.get(), 1, node.node_id);
-            sqlite3_bind_int64(insert.get(), 2, tag_id(tag.view()));
-            sqlite3_bind_text(insert.get(), 3, tag.view().data(), static_cast<int>(tag.size()),
-                              SQLITE_TRANSIENT);
-            sqlite3_bind_int64(insert.get(), 4, static_cast<int64_t>(i));
-            status = map_status(sqlite3_step(insert.get()));
-        }
+        for (size_t i = 0; i < node.tags.size() && status == Ok; ++i)
+            status = insert_node_tag(handle_, node, i, tag_id(node.tags[i].view()));
         for (const auto& child : node.children)
             assign_tags(child);
     };
     if (status == Ok) assign_tags(root);
+    if (status == Ok) status = write_bundles(root, settings);
     if (status == Ok) {
         for (size_t i = 0; i < settings.categories.size() && status == Ok; ++i) {
             const auto& category = settings.categories[i];
@@ -1339,6 +1473,56 @@ DbStatus Database::assign_tag(const Id& node_id, int64_t tag_id) noexcept
     bind_id(statement.get(), 1, node_id);
     sqlite3_bind_int64(statement.get(), 2, tag_id);
     return map_status(sqlite3_step(statement.get()));
+}
+
+DbStatus Database::write_bundles(const IndexNode& root, const VaultSettings& settings) noexcept
+{
+    if (settings.tag_bundles.size() > INDEX_MAX_TAGS) return Constraint;
+    for (const auto& bundle : settings.tag_bundles)
+        if (const auto result = write_bundle_definition(handle_, bundle); result != Ok)
+            return result;
+    const auto walk = [this](auto&& self, const IndexNode& node) -> DbStatus {
+        for (size_t i = 0; i < node.tag_bundles.size(); ++i) {
+            Statement insert{handle_,
+                             "INSERT INTO node_bundles(node_id,bundle_id,position) VALUES(?,?,?)"};
+            if (!insert.get()) return IoError;
+            bind_id(insert.get(), 1, node.node_id);
+            bind_id(insert.get(), 2, node.tag_bundles[i]);
+            sqlite3_bind_int64(insert.get(), 3, static_cast<int64_t>(i));
+            if (const auto r = map_status(sqlite3_step(insert.get())); r != Ok) return r;
+        }
+        for (const auto& child : node.children)
+            if (const auto r = self(self, child); r != Ok) return r;
+        return Ok;
+    };
+    return walk(walk, root);
+}
+
+DbStatus Database::read_bundles(IndexNode& root, VaultSettings& settings) const noexcept
+{
+    Statement definitions{handle_, "SELECT bundle_id,name FROM tag_bundles ORDER BY rowid"};
+    if (!definitions.get()) return IoError;
+    int step = SQLITE_DONE;
+    while ((step = sqlite3_step(definitions.get())) == SQLITE_ROW) {
+        if (settings.tag_bundles.size() >= INDEX_MAX_TAGS ||
+            sqlite3_column_bytes(definitions.get(), 0) != 16)
+            return Constraint;
+        TagBundle bundle;
+        std::copy_n(static_cast<const uint8_t*>(sqlite3_column_blob(definitions.get(), 0)), 16,
+                    bundle.id.begin());
+        bundle.name = column_text(definitions.get(), 1);
+        if (const auto result = read_bundle_members(handle_, bundle); result != Ok) return result;
+        settings.tag_bundles.push_back(std::move(bundle));
+    }
+    if (step != SQLITE_DONE) return map_status(step);
+    const auto walk = [this, &settings](auto&& self, IndexNode& node) -> DbStatus {
+        if (const auto result = read_node_assignments(handle_, node); result != Ok) return result;
+        if (!verify_bundle_tags(node, settings)) return Constraint;
+        for (auto& child : node.children)
+            if (const auto r = self(self, child); r != Ok) return r;
+        return Ok;
+    };
+    return walk(walk, root);
 }
 
 DbResult<std::vector<crypto::SecureString>> Database::node_tags(const Id& node_id) const noexcept

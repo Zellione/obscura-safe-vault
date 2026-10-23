@@ -1,11 +1,10 @@
 #include "vault/rename_batch.h"
 
-#define PCRE2_CODE_UNIT_WIDTH 8
 #include <algorithm>
 #include <chrono>
-#include <cstdlib>
 #include <map>
 #include <memory>
+#include <new>
 #include <pcre2.h>
 #include <set>
 #include "vault/safe_name.h"
@@ -16,8 +15,14 @@ namespace {
 constexpr size_t ALLOCATION_LIMIT = 8 * 1024 * 1024;
 struct alignas(std::max_align_t) Allocation {
     size_t size;
-    bool locked;
 };
+struct AllocationDeleter {
+    void operator()(Allocation* storage) const noexcept
+    {
+        crypto::SecureAllocator<Allocation>{}.deallocate(storage, 0);
+    }
+};
+using AllocationOwner = std::unique_ptr<Allocation, AllocationDeleter>;
 struct Budget {
     size_t allocated = 0;
     size_t calls = 0;
@@ -28,33 +33,34 @@ void* regex_alloc(size_t size, void* context)
 {
     auto& b = *static_cast<Budget*>(context);
     if (size > ALLOCATION_LIMIT - b.allocated) return nullptr;
-    auto* header = static_cast<Allocation*>(std::calloc(1, sizeof(Allocation) + size));
-    if (!header) return nullptr;
-    header->size = size;
-    auto* data = reinterpret_cast<uint8_t*>(header + 1);
-    header->locked = crypto::detail::mem_lock(data, size);
-    if (!header->locked) crypto::warn_mlock_failure_once();
-    b.allocated += size;
-    return data;
+    try {
+        const size_t units = 1 + (size + sizeof(Allocation) - 1) / sizeof(Allocation);
+        AllocationOwner storage{crypto::SecureAllocator<Allocation>{}.allocate(units)};
+        auto* bytes = static_cast<std::byte*>(static_cast<void*>(storage.get()));
+        std::fill_n(bytes, units * sizeof(Allocation), std::byte{});
+        std::construct_at(storage.get(), size);
+        b.allocated += size;
+        return storage.release() + 1;
+    } catch (const std::bad_alloc&) {
+        return nullptr;
+    }
 }
-void regex_free(void* ptr, void* context)
+void regex_free(std::byte* ptr, Budget& budget)
 {
     if (!ptr) return;
-    auto* header = static_cast<Allocation*>(ptr) - 1;
-    crypto_wipe(ptr, header->size);
-    if (header->locked) crypto::detail::mem_unlock(static_cast<uint8_t*>(ptr), header->size);
-    static_cast<Budget*>(context)->allocated -= header->size;
-    std::free(header);
+    auto* header = static_cast<Allocation*>(static_cast<void*>(ptr - sizeof(Allocation)));
+    const AllocationOwner storage{header};
+    budget.allocated -= header->size;
+    std::destroy_at(header);
 }
-bool cancelled(OpProgress* p)
+bool cancelled(const OpProgress* p)
 {
     return p && p->cancel.load();
 }
 int callout(pcre2_callout_block*, void* context)
 {
-    auto& b = *static_cast<Budget*>(context);
-    if (++b.calls > 100000 || cancelled(b.progress) ||
-        std::chrono::steady_clock::now() > b.deadline)
+    if (auto& b = *static_cast<Budget*>(context); ++b.calls > 100000 || cancelled(b.progress) ||
+                                                  std::chrono::steady_clock::now() > b.deadline)
         return PCRE2_ERROR_CALLOUT;
     return 0;
 }
@@ -64,7 +70,7 @@ struct Entry {
     bool selected;
 };
 using Tree = std::map<RenameId, Entry>;
-bool scan(Vault& v, std::span<const RenameId> ids, bool recursive, Tree& tree, OpProgress* p)
+bool scan(Vault& v, std::span<const RenameId> ids, bool recursive, Tree& tree, const OpProgress* p)
 {
     auto* root = v.resolve_node("");
     if (!root) return false;
@@ -75,11 +81,10 @@ bool scan(Vault& v, std::span<const RenameId> ids, bool recursive, Tree& tree, O
         auto e = pending.back();
         pending.pop_back();
         const bool chosen = wanted.contains(e.node->node_id) || (recursive && e.selected);
-        if (e.node != root &&
-            !tree.emplace(e.node->node_id, Entry{e.node, e.parent, chosen}).second)
+        if (e.node != root && !tree.try_emplace(e.node->node_id, e.node, e.parent, chosen).second)
             return false;
         for (auto& child : e.node->children)
-            pending.push_back({&child, e.node->node_id, chosen});
+            pending.emplace_back(&child, e.node->node_id, chosen);
     }
     return std::ranges::all_of(wanted, [&](const auto& id) { return tree.contains(id); });
 }
@@ -87,14 +92,14 @@ bool collisions(const Tree& tree, RenamePreview& preview)
 {
     std::map<RenameId, size_t> rows;
     for (size_t i = 0; i < preview.rows.size(); ++i)
-        rows.emplace(preview.rows[i].id, i);
+        rows.try_emplace(preview.rows[i].id, i);
     std::map<std::pair<RenameId, std::string_view>, RenameId> names;
     bool ok = true;
     for (const auto& [id, e] : tree) {
         const auto row = rows.find(id);
         const auto name =
             row == rows.end() ? e.node->name.view() : preview.rows[row->second].after.view();
-        const auto [at, inserted] = names.emplace(std::make_pair(e.parent, name), id);
+        const auto [at, inserted] = names.try_emplace(std::make_pair(e.parent, name), id);
         if (inserted) continue;
         // Existing duplicate names outside the selection do not invalidate it.
         if (row == rows.end() && !rows.contains(at->second)) continue;
@@ -124,7 +129,12 @@ public:
         budget_.progress = progress;
         if (o.pattern.empty() || o.pattern.size() > 4096 || o.replacement.size() > 4096)
             return false;
-        general_.reset(pcre2_general_context_create(regex_alloc, regex_free, &budget_));
+        general_.reset(pcre2_general_context_create(
+            regex_alloc,
+            [](auto* ptr, auto* context) {
+                regex_free(static_cast<std::byte*>(ptr), *static_cast<Budget*>(context));
+            },
+            &budget_));
         if (!general_) return false;
         compile_.reset(pcre2_compile_context_create(general_.get()));
         match_.reset(pcre2_match_context_create(general_.get()));
@@ -148,8 +158,9 @@ public:
     }
     void replace(RenameRow& row, bool media, const RenameOptions& o)
     {
+        using enum RenameState;
         if (row.before.size() > MAX_NODE_NAME_BYTES) {
-            row.state = RenameState::Invalid;
+            row.state = Invalid;
             return;
         }
         auto subject = row.before.view();
@@ -163,7 +174,7 @@ public:
         }
         crypto::SecureBytes output(MAX_NODE_NAME_BYTES + 1);
         if (output.size() != MAX_NODE_NAME_BYTES + 1) {
-            row.state = RenameState::Invalid;
+            row.state = Invalid;
             return;
         }
         size_t length = output.size();
@@ -175,18 +186,18 @@ public:
             reinterpret_cast<PCRE2_SPTR>(o.replacement.view().data()), o.replacement.size(),
             output.data(), &length);
         if (rc < 0 || length + extension.size() > MAX_NODE_NAME_BYTES) {
-            row.state = RenameState::Invalid;
+            row.state = Invalid;
             return;
         }
-        std::copy(extension.begin(), extension.end(), output.data() + length);
+        std::ranges::copy(extension, output.data() + length);
         row.after = std::string_view(reinterpret_cast<const char*>(output.data()),
                                      length + extension.size());
         if (!is_safe_node_name(row.after.view()))
-            row.state = RenameState::Invalid;
+            row.state = Invalid;
         else if (rc == 0)
-            row.state = RenameState::Unmatched;
+            row.state = Unmatched;
         else
-            row.state = row.before == row.after ? RenameState::Unchanged : RenameState::Changed;
+            row.state = row.before == row.after ? Unchanged : Changed;
     }
 };
 }  // namespace
@@ -247,8 +258,8 @@ VaultResult apply_rename(Vault& v, const RenamePreview& preview, OpProgress* pro
             it->second.node->name != row.before || !is_safe_node_name(row.after.view()))
             return VaultResult::InvalidArg;
     }
-    auto check = preview;
-    if (!collisions(tree, check) || cancelled(progress)) return VaultResult::InvalidArg;
+    if (auto check = preview; !collisions(tree, check) || cancelled(progress))
+        return VaultResult::InvalidArg;
     // Allocate rollback/new strings before mutation; swaps and cycles need no
     // temporary names because the complete final namespace commits once.
     std::vector<std::pair<IndexNode*, crypto::SecureString>> changes;
