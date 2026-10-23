@@ -305,3 +305,9 @@ teardown clears the modal and its pending batch before vault lock/switch.
 Screen-owned blocking jobs receive input before global help/settings shortcuts;
 those overlays may otherwise read a worker-owned vault tree. Split view owns
 and locks its additional pane vault independently of the app's active/warm slots.
+
+Import saves: App polls `ImportQueue::poll_save()` before screen updates and refreshes
+on completion. While `saving()`, it renders an animated save modal, gates navigation,
+input, help, screen updates, and idle lock, and retains quit requests. Busy imports
+keep the event loop ticking. Shutdown joins both maintenance and import saves
+before destroying screens or vaults.

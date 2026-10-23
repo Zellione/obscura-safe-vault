@@ -224,11 +224,31 @@ cold-open recovery copy if the active slot is torn or damaged. See
 ## See also
 
 Index tree serialisation (`IndexNode`, tags, favorites, video metadata,
-saved searches, sort keys, tag descriptions) and the framed-chunk compression codec: `mem:core`
-(vault/ section — `index.*`, `chunk_codec.*`, `index_io.*`).
+saved searches, sort keys, tag descriptions) and the framed-chunk compression codec:
+`mem:module/vault` (`index.*`, `chunk_codec.*`, `index_io.*`).
 
-Directory SQL schema v2 (container format remains v3) persists microsecond
-durations, case-sensitive sibling names, u16-length tags and per-node tag
-spelling/order. Description/value rows retain spelling and order. Existing v1
-databases upgrade transactionally under the writer lease; object bytes and
-header are unchanged. See `docs/V3_VAULT_FORMAT.md`.
+Directory SQL schema **v3** (container format remains v3, object format 1)
+retains v2's microsecond durations, case-sensitive sibling names, u16-length tags
+and preserved per-node spelling/order. `node_tags.explicit_assignment` marks
+independent manual ownership; `tag_bundles` holds definitions, `bundle_tags`
+ordered ordinary-tag members, and `node_bundles` applied bundle identities/order.
+Own tags are the union of explicit and applied-bundle contributions; ancestor
+inheritance stays separate. Removing a bundle preserves manual and overlapping
+bundle contributions. Definitions/provenance/materialized tags commit together;
+materialization checks their agreement.
+
+V1/v2 upgrades mark all pre-existing direct assignments manual. The v1 table
+rebuild and v2 provenance upgrade are separate transactions under the writer
+lease: an interrupted second step can leave `user_version=2` with metadata
+version 3, and the next open retries it. Completion sets both to `SCHEMA_VERSION`
+(3); original object bytes and header are unchanged. Read-only older snapshots
+upgrade in a private in-memory SQLCipher copy. Older readers reject completed
+schema-v3 databases rather than silently losing provenance.
+
+Encrypted backup/restore preserves definitions, assignment flags, mappings and
+object ciphertext/identities. Cross-vault transfer re-encrypts media, preserves
+bundle/manual ownership, reuses compatible definitions and remaps conflicting
+bundle names/IDs. External inherited tags may be materialized on a copied
+selection; inheritance within a copied tree stays inherited. Bundle-bearing
+transfers require directory destinations. See `docs/V3_VAULT_FORMAT.md` for the
+schema, copy behavior and limits.

@@ -9,6 +9,7 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <set>
 
 #include "crypto/secure_mem.h"
 #include "gfx/renderer.h"
@@ -233,8 +234,9 @@ GalleryGrid::GalleryGrid(GridInitContext ctx, GridDialogs dialogs, GridVaultCtx 
       quick_switch_(vault_ctx.registry, vault_ctx.active_vault_path),
       transfer_(ctx.vault, vault_ctx.active_vault_path, vault_ctx.registry, dialogs.file, ctx.win,
                 vault_ctx.second_vault),
-      rename_(ctx.win), combine_(ctx.vault, vault_ctx.active_vault_path, vault_ctx.registry,
-                                 dialogs.file, ctx.win, vault_ctx.second_vault),
+      bulk_rename_(ctx.vault, ctx.win, queue), rename_(ctx.win),
+      combine_(ctx.vault, vault_ctx.active_vault_path, vault_ctx.registry, dialogs.file, ctx.win,
+               vault_ctx.second_vault),
       initial_(std::move(at)),
       view_(gallery_view_setting())  // Phase 93: shared machine-wide density
 {
@@ -261,6 +263,7 @@ void GalleryGrid::on_enter()
 
 void GalleryGrid::on_exit()
 {
+    bulk_rename_.close();
     tag_editor_.close();
     import_tags_.close();
     // The current path's selection is about to go stale (Phase 40 Part 2) —
@@ -529,6 +532,24 @@ void GalleryGrid::start_transfer()
     // moves the whole subtree; a lone image moves just that image.
     if (sel_.empty()) { start_transfer_focused(*this); return; }
     start_transfer_selection(*this);
+}
+
+void GalleryGrid::start_bulk_rename()
+{
+    if (queue_.busy()) {
+        status_ = "Wait for imports to finish.";
+        return;
+    }
+    std::vector<vault::RenameId> ids;
+    for (int i : sel_.indices())
+        if (i >= 0 && i < static_cast<int>(children_.size())) ids.push_back(children_[i]->node_id);
+    if (ids.empty()) {
+        status_ = "Select items with Space before Shift+R bulk rename.";
+        return;
+    }
+    quiesce_grid(*this);
+    bulk_rename_ids_ = ids;
+    bulk_rename_.open(std::move(ids));
 }
 
 void GalleryGrid::start_rename()
@@ -1040,7 +1061,12 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
             if (key.mod & SDL_KMOD_SHIFT) { g.start_combine(); return true; }
             g.start_transfer();
             return true;
-        case SDLK_R: g.start_rename(); return true;
+        case SDLK_R:
+            if (key.mod & SDL_KMOD_SHIFT)
+                g.start_bulk_rename();
+            else
+                g.start_rename();
+            return true;
         case SDLK_SPACE:
             if (key.mod & SDL_KMOD_SHIFT) { g.select_range_to_focus(); return true; }
             g.toggle_or_open();
@@ -1273,6 +1299,10 @@ bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
         return true;
     }
 
+    if (bulk_rename_.active()) {
+        (void)bulk_rename_.handle_event(e);
+        return true;
+    }
     if (rename_.active()) { (void)rename_.handle_event(vault_, e); return true; }
 
     if (failures_.active()) { (void)failures_.handle_event(e); return true; }
@@ -1702,8 +1732,8 @@ bool grid_modal_open(const GalleryGrid& g)
 {
     const bool operation =
         vault_busy(g) || g.transfer_.active() || g.combine_.active() || g.failures_.active();
-    const bool editor =
-        g.rename_.active() || g.tag_editor_.active() || g.import_tags_.active() || g.naming_.active;
+    const bool editor = g.bulk_rename_.active() || g.rename_.active() || g.tag_editor_.active() ||
+                        g.import_tags_.active() || g.naming_.active;
     const bool picker = g.search_.active() || g.quick_switch_.active() || g.volume_dialog_.active();
     const bool confirmation = g.consent_.active() || g.naming_.password.active ||
                               g.naming_.confirm_delete || g.naming_.confirm_compact;
@@ -1712,8 +1742,8 @@ bool grid_modal_open(const GalleryGrid& g)
 
 bool vault_busy(const GalleryGrid& g)
 {
-    return g.tag_editor_.busy() || g.naming_.file_op.active() || g.transfer_.job_active() ||
-           g.combine_.job_active();
+    return g.bulk_rename_.busy() || g.tag_editor_.busy() || g.naming_.file_op.active() ||
+           g.transfer_.job_active() || g.combine_.job_active();
 }
 
 void GalleryGrid::on_gallery_view_changed(GalleryView view)
@@ -2028,8 +2058,24 @@ void update_scroll_to_selection(GalleryGrid& g)
     g.follow_ = GalleryGrid::ScrollFollow::None;
 }
 
+void GalleryGrid::finish_bulk_rename()
+{
+    status_ = "Bulk rename saved.";
+    refresh();
+    const std::set<vault::RenameId> selected(bulk_rename_ids_.begin(), bulk_rename_ids_.end());
+    for (size_t i = 0; i < children_.size(); ++i)
+        if (selected.contains(children_[i]->node_id)) sel_.toggle(static_cast<int>(i));
+    bulk_rename_ids_.clear();
+}
+
 void GalleryGrid::update(double dt)
 {
+    if (bulk_rename_.busy()) {
+        bulk_rename_.update();
+        if (bulk_rename_.consume_completed()) finish_bulk_rename();
+        mark_dirty();
+        return;
+    }
     if (tag_editor_.busy()) {
         tag_editor_.update();
         mark_dirty();
@@ -2104,23 +2150,42 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
                                            : "Compact vault";
     return {
         {"Navigate", nav_entries},
-        {"Search & tags", {
-            {"/", "Search"}, {"Shift+/ (?)", "Advanced search"},
-            {"G", "Edit tags (2+ selected: bulk add/remove)"}, {"Shift+G", "Import a tag list"},
-            {"Shift+T", "Tags overview"},
-            {"B", "Favorite (acts on selection)"}, {"F", "Favorite images"}, {"Shift+F", "Favorite galleries"},
-        }},
-        {"Import & export", {
-            {"I", "Import files"}, {"Shift+I", "Import status"}, {"Z", "Import ZIP/CBZ"}, {"O", "Import folder"}, {"N", "New gallery"},
-            {"X", "Export selection"}, {"M", "Move/copy to — or pull from — another vault"}, {"Shift+M", "Combine gallery (move or copy)"}, {"R", "Rename hovered or keyboard-focused item"}, {"Del", "Delete (acts on selection)"},
-        }},
-        {"Vault tools", {
-            {"Shift+C", shift_c_action}, {"Ctrl+D", "Find duplicate files"},
-        }},
-        {"Session", {
-            {"Shift+S", "Cycle sort order"}, {"U", "Keep unlocked for session"},
-            {"D", "Toggle the detail panel"},
-        }},
+        {"Search & tags",
+         {
+             {"/", "Search"},
+             {"Shift+/ (?)", "Advanced search"},
+             {"G", "Edit tags (2+ selected: bulk add/remove)"},
+             {"Shift+G", "Import a tag list"},
+             {"Shift+T", "Tags overview"},
+             {"B", "Favorite (acts on selection)"},
+             {"F", "Favorite images"},
+             {"Shift+F", "Favorite galleries"},
+         }},
+        {"Import & export",
+         {
+             {"I", "Import files"},
+             {"Shift+I", "Import status"},
+             {"Z", "Import ZIP/CBZ"},
+             {"O", "Import folder"},
+             {"N", "New gallery"},
+             {"X", "Export selection"},
+             {"M", "Move/copy to — or pull from — another vault"},
+             {"Shift+M", "Combine gallery (move or copy)"},
+             {"R", "Rename hovered or keyboard-focused item"},
+             {"Shift+R", "Regex rename selection (preview first)"},
+             {"Del", "Delete (acts on selection)"},
+         }},
+        {"Vault tools",
+         {
+             {"Shift+C", shift_c_action},
+             {"Ctrl+D", "Find duplicate files"},
+         }},
+        {"Session",
+         {
+             {"Shift+S", "Cycle sort order"},
+             {"U", "Keep unlocked for session"},
+             {"D", "Toggle the detail panel"},
+         }},
         text_editing_help_group(),
     };
 }
@@ -2150,6 +2215,10 @@ void GalleryGrid::render(gfx::Renderer& r)
 {
     const auto W = layout_w(*this);
     const auto H = layout_h(*this);
+    if (bulk_rename_.busy()) {
+        bulk_rename_.render(r, font_, W, H);
+        return;
+    }
     if (tag_editor_.busy()) {
         tag_editor_.render(r, font_, W, H);
         return;
@@ -2266,6 +2335,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     tag_editor_.render(r, font_, W, H);
     import_tags_.render(r, font_, W, H);
     rename_.render(r, font_, W, H);
+    bulk_rename_.render(r, font_, W, H);
     combine_.render(r, font_, W, H);
     transfer_.render(r, font_, W, H);
     failures_.render(r, font_, W, H);

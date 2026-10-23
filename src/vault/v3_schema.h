@@ -4,7 +4,7 @@
 
 namespace vault::v3 {
 
-inline constexpr int SCHEMA_VERSION = 2;
+inline constexpr int SCHEMA_VERSION = 3;
 
 // Phase 105 executable schema contract. Phase 107 wraps it in typed repository
 // operations and may only change it through a versioned migration.
@@ -13,7 +13,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE vault_meta (
     singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-    schema_version INTEGER NOT NULL CHECK(schema_version = 2),
+    schema_version INTEGER NOT NULL CHECK(schema_version = 3),
     root_node_id BLOB NOT NULL CHECK(length(root_node_id) = 16),
     app_generation INTEGER NOT NULL DEFAULT 0 CHECK(app_generation >= 0),
     default_sort INTEGER NOT NULL DEFAULT 7 CHECK(default_sort BETWEEN 0 AND 7),
@@ -69,6 +69,7 @@ CREATE TABLE node_tags (
     tag_id INTEGER NOT NULL REFERENCES tags(tag_id) ON DELETE CASCADE,
     display_name TEXT,
     tag_order INTEGER NOT NULL DEFAULT 0,
+    explicit_assignment INTEGER NOT NULL DEFAULT 1 CHECK(explicit_assignment IN (0,1)),
     PRIMARY KEY(node_id, tag_id)
 );
 CREATE INDEX node_tags_by_tag ON node_tags(tag_id, node_id);
@@ -111,7 +112,24 @@ CREATE TABLE saved_searches (
     UNIQUE(display_name COLLATE NOCASE)
 );
 
-PRAGMA user_version = 2;
+CREATE TABLE tag_bundles (
+    bundle_id BLOB PRIMARY KEY CHECK(length(bundle_id)=16 AND bundle_id != zeroblob(16)),
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE CHECK(length(CAST(name AS BLOB)) BETWEEN 1 AND 255)
+);
+CREATE TABLE bundle_tags (
+    bundle_id BLOB NOT NULL REFERENCES tag_bundles(bundle_id) ON DELETE CASCADE,
+    tag TEXT NOT NULL CHECK(length(CAST(tag AS BLOB)) BETWEEN 1 AND 65535),
+    position INTEGER NOT NULL,
+    PRIMARY KEY(bundle_id, position),
+    UNIQUE(bundle_id, tag COLLATE NOCASE)
+);
+CREATE TABLE node_bundles (
+    node_id BLOB NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
+    bundle_id BLOB NOT NULL REFERENCES tag_bundles(bundle_id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    PRIMARY KEY(node_id, bundle_id)
+);
+PRAGMA user_version = 3;
 )sql";
 
 } // namespace vault::v3

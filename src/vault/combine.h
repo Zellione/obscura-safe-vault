@@ -39,8 +39,8 @@ struct CombineTally {
 // same-named child exists -> recurse into this same function on that pair
 // (tallies galleries_merged, plus whatever its own recursive tally reports).
 //
-// Tags: union — every one of src_gallery's own tags is added to dst_gallery
-// via add_tag (already case-insensitively deduped).
+// Tags: union of explicit assignments and independently applied bundles, committed
+// before moving children. Existing destination manual ownership is preserved.
 //
 // Source removal: src_gallery (and, recursively, any merged sub-gallery) is
 // deleted ONLY if it ends up with zero children after processing — a

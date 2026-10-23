@@ -363,3 +363,84 @@ TEST(v3_db_conversion_batch_rolls_back_nodes_objects_and_mapping_together)
     opened.database.reset();
     fs::remove_all(dir);
 }
+
+TEST(v3_bundle_metadata_roundtrip_backup_and_failed_snapshot)
+{
+    using enum vault::v3::DbStatus;
+    const auto dir = db_temp_dir();
+    auto db = vault::v3::Database::create(dir / "vault.db", DB_KEY, ROOT_ID);
+    REQUIRE(db.database);
+    vault::IndexNode root = vault::IndexNode::gallery("");
+    root.node_id = ROOT_ID;
+    root.tags = {crypto::SecureString("manual"), crypto::SecureString("bundled")};
+    root.explicit_tags = {crypto::SecureString("manual")};
+    root.tag_provenance = true;
+    root.tag_bundles = {CHILD_ID};
+    vault::VaultSettings settings;
+    vault::TagBundle bundle;
+    bundle.id = CHILD_ID;
+    bundle.name = "private bundle";
+    bundle.tags = {crypto::SecureString("bundled")};
+    settings.tag_bundles.push_back(bundle);
+    REQUIRE(db.database->sync_metadata(root, settings, {}) == Ok);
+    auto invalid = settings;
+    invalid.tag_bundles.push_back(bundle);
+    CHECK(db.database->sync_metadata(root, invalid, {}) != Ok);
+    REQUIRE(db.database->backup_to(dir / "backup.db", DB_KEY) == Ok);
+    db.database.reset();
+    for (const auto* file : {"vault.db", "backup.db"}) {
+        auto opened = vault::v3::Database::open(dir / file, DB_KEY, false);
+        REQUIRE(opened.database);
+        vault::IndexNode loaded;
+        loaded.node_id = ROOT_ID;
+        loaded.tags = opened.database->node_tags(ROOT_ID).value;
+        vault::VaultSettings metadata;
+        REQUIRE(opened.database->read_bundles(loaded, metadata) == Ok);
+        REQUIRE(metadata.tag_bundles.size() == 1);
+        CHECK(metadata.tag_bundles[0].name == "private bundle");
+        REQUIRE(loaded.explicit_tags.size() == 1);
+        CHECK(loaded.explicit_tags[0] == "manual");
+        CHECK(loaded.tag_bundles == root.tag_bundles);
+        CHECK_FALSE(contains_text(dir / file, "private bundle"));
+    }
+    fs::remove_all(dir);
+}
+
+TEST(v3_db_v2_bundle_migration_keeps_existing_assignments_explicit)
+{
+    const auto dir = db_temp_dir();
+    const auto path = dir / "vault.db";
+    std::ifstream schema_file(std::filesystem::path(OSV_VAULT_FIXTURE_DIR) / "v3_schema_v2.sql");
+    const std::string schema{std::istreambuf_iterator<char>{schema_file}, {}};
+    REQUIRE(!schema.empty());
+    sqlite3* raw = nullptr;
+    REQUIRE(sqlite3_open(path.c_str(), &raw) == SQLITE_OK);
+    auto key = vault::v3::sqlcipher_raw_keyspec(DB_KEY);
+    REQUIRE(sqlite3_key(raw, key.data(), static_cast<int>(key.size())) == SQLITE_OK);
+    REQUIRE(sqlite3_exec(raw, schema.c_str(), nullptr, nullptr, nullptr) == SQLITE_OK);
+    REQUIRE(
+        sqlite3_exec(
+            raw,
+            "INSERT INTO vault_meta(singleton,schema_version,root_node_id) "
+            "VALUES(1,2,X'01000000000000000000000000000001');"
+            "INSERT INTO nodes(node_id,node_type,display_name,sibling_order) "
+            "VALUES(X'01000000000000000000000000000001',0,'root',0);"
+            "INSERT INTO tags VALUES(1,'existing','existing');"
+            "INSERT INTO node_tags(node_id,tag_id) VALUES(X'01000000000000000000000000000001',1);",
+            nullptr, nullptr, nullptr) == SQLITE_OK);
+    REQUIRE(sqlite3_close(raw) == SQLITE_OK);
+    for (const bool writable : {false, true}) {
+        auto db = vault::v3::Database::open(path, DB_KEY, writable);
+        REQUIRE(db.database);
+        vault::IndexNode root;
+        root.node_id = ROOT_ID;
+        root.tags = db.database->node_tags(ROOT_ID).value;
+        vault::VaultSettings settings;
+        REQUIRE(db.database->read_bundles(root, settings) == vault::v3::DbStatus::Ok);
+        CHECK(root.tag_provenance);
+        REQUIRE(root.explicit_tags.size() == 1);
+        CHECK(root.explicit_tags[0] == "existing");
+        CHECK(root.tag_bundles.empty());
+    }
+    fs::remove_all(dir);
+}
