@@ -1397,7 +1397,7 @@ bool ImportQueue::post_record(StagedRecord record,
                               const std::shared_ptr<vault::OpProgress>& progress)
 {
     std::unique_lock lock(mu_);
-    main_cv_.wait(lock, [&] {
+    main_cv_.wait(lock, [this, &progress] {
         return records_.size() < 256 || worker_stop_ || (progress && progress->cancel.load());
     });
     if (worker_stop_ || (progress && progress->cancel.load())) return false;

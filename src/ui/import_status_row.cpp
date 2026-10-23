@@ -21,12 +21,13 @@ std::string format_task_status(const ImportTaskInfo& task)
     using enum ImportTaskState;
     switch (task.state) {
         case Running: {
+            using enum vault::OpPhase;
             const auto progress = format_task_progress(task.done, task.total, task.expanding);
             switch (task.phase) {
-                case vault::OpPhase::Discovering: return "Discovering files…";
-                case vault::OpPhase::Extracting: return "Extracting / reading: " + progress;
-                case vault::OpPhase::Processing: return "Processing / publishing: " + progress;
-                case vault::OpPhase::Working: return progress;
+                case Discovering: return "Discovering files…";
+                case Extracting: return "Extracting / reading: " + progress;
+                case Processing: return "Processing / publishing: " + progress;
+                case Working: return progress;
             }
             return progress;
         }

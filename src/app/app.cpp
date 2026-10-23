@@ -1151,6 +1151,22 @@ void App::open_settings_overlay(bool refresh_health)
     }
 }
 
+namespace {
+// Classification only: the queue's current state decides whether to prompt.
+bool is_import_lock_action(ui::NavKind kind)
+{
+    using enum ui::NavKind;
+    return kind == LockActive || kind == ToUnlock || kind == Quit;
+}
+
+bool navigation_keeps_screen(ui::NavKind kind)
+{
+    using enum ui::NavKind;
+    return kind == None || kind == ToggleKeepUnlocked || kind == ToSettings ||
+           kind == ToVaultMaintenance || kind == LockSecond || kind == Quit;
+}
+} // namespace
+
 bool App::apply_nav()
 {
     if (maintenance_ui_.running || import_ui_.queue.saving()) return false;
@@ -1167,19 +1183,14 @@ bool App::apply_nav()
 
     // Phase 50: park lock-ish actions that occur while imports are pending.
     // These actions will be replayed after the user confirms the import abort.
-    if (const bool lockish = nav.kind == LockActive || nav.kind == ToUnlock || nav.kind == Quit;
-        lockish &&
-        import_ui_.queue.busy() && !import_ui_.lock_confirm.open) {
+    if (is_import_lock_action(nav.kind) && import_ui_.queue.busy() &&
+        !import_ui_.lock_confirm.open) {
         import_ui_.lock_confirm = {true, nav};
         return false;   // screen stays; event will be re-queued by dispatch_event
     }
 
-    // Every transition below except ToggleKeepUnlocked/ToSettings/LockSecond/Quit/None destroys the
-    // current screen.
-    if (const bool keeps_screen = nav.kind == None || nav.kind == ToggleKeepUnlocked ||
-                                  nav.kind == ToSettings || nav.kind == ToVaultMaintenance ||
-                                  nav.kind == LockSecond || nav.kind == Quit;
-        !keeps_screen) {
+    // Capture and exit the current screen only for screen-changing transitions.
+    if (!navigation_keeps_screen(nav.kind)) {
         capture_session_state();
         screen_->on_exit();
     }
