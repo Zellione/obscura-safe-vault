@@ -1461,9 +1461,8 @@ void ImportQueue::maybe_end_batch()
 {
     {
         std::lock_guard lock(mu_);
-        const bool work_pending = !records_.empty() ||
-            std::ranges::any_of(tasks_, [](const auto& task) { return !task.finished(); });
-        if (work_pending) {
+        if (!records_.empty() ||
+            std::ranges::any_of(tasks_, [](const auto& task) { return !task.finished(); })) {
             batch_ended_ = false;
             return;
         }
