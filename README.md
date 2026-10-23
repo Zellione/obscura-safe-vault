@@ -67,6 +67,20 @@ name selected: **Enter** saves, **Esc** cancels. Renaming changes metadata witho
 rewriting media; unsafe names and sibling collisions are rejected. Legacy vaults
 are read-only.
 
+For bulk rename, select items with **Space** or **Ctrl+A**, then **Shift+R**.
+Enter a PCRE2 regex and replacement (**Tab** switches fields); **Enter** previews,
+and a second **Enter** applies the valid preview. For example, `^(.*)-([0-9]+)$`
+with `$2-$1` changes `trip-12.jpg` to `12-trip.jpg`. `$1` and `${name}` reference
+captures; `$$` inserts a dollar sign. **PgUp/PgDn** browse results and **F7** shows
+full names. Conflicts or unsafe names block the entire batch.
+
+**F3** toggles preserving media extensions (default on), **F4** recursion into
+selected galleries (off), **F5** case sensitivity (on), and **F6** replacing all
+matches (off). Editing the pattern or options requires a new preview. Preparation
+runs in the background; **Esc** cancels before the final save. Regex execution is
+bounded, so an overly costly pattern is rejected. Renames, including swaps, commit
+as one metadata transaction without rewriting encrypted media.
+
 For selection tagging, select files with **Space** or **Ctrl+A**, then press **G**.
 Loading tags and adding/removing a tag run in the background with a progress
 modal. Imports must finish before the editor opens, and new import work waits

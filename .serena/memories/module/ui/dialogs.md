@@ -180,3 +180,8 @@ VaultUnlockPicker has a pane mode: O browses v3 folders, L legacy files;
 password/keyfile handling is shared with transfer dialogs. `take_vault()` moves
 ownership out of the transient picker or warm slot, avoiding a borrowed warm
 handle whose timeout could invalidate an open pane. Pane lifetime controls locking.
+
+`bulk_rename.*`: Shift+R modal, import-exclusive through close; owned jthread with
+promise/future result transport, joined before tree ownership returns. Preview
+and apply are worker tasks; changing fields/options invalidates confirmation.
+GalleryGrid gates tree rendering/update while busy and restores selection by ID.

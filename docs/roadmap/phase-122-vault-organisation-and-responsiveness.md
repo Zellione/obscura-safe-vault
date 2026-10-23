@@ -5,13 +5,16 @@ Status: implementation in cascading PRs. A and H's storage documentation are in
 review with all CI gates green and zero SonarCloud issues. Local Debug and Release
 each passed 2,497 tests. The remaining H validation is not marked complete.
 B is in [PR #262](https://github.com/Zellione/obscura-safe-vault/pull/262), based on A.
-Local Debug and unrestricted ASAN/UBSan/LSan each pass 2,502 tests. CI is green; ten Sonar findings are being addressed. D is in [PR #263](https://github.com/Zellione/obscura-safe-vault/pull/263), stacked
+Local Debug and unrestricted ASAN/UBSan/LSan each pass 2,502 tests. Initial CI passed; the ten Sonar findings are fixed and rescanning. D is in [PR #263](https://github.com/Zellione/obscura-safe-vault/pull/263), stacked
 on B. G is [PR #264](https://github.com/Zellione/obscura-safe-vault/pull/264) with deterministic VP8 color/fallback regression coverage and
 README remediation guidance; the reported NVIDIA hardware failure remains
 unreproduced. See [G evidence](phase-122g-implementation.md).
 
-F follows G with bounded import drains, producer backpressure, background v3
+F is [PR #265](https://github.com/Zellione/obscura-safe-vault/pull/265) with bounded import drains, producer backpressure, background v3
 saves, and phase progress. See [measurements and limits](phase-122f-implementation.md).
+
+C follows F with bounded PCRE2 preview/apply, atomic swaps, and Shift+R UI.
+See [implementation and limits](phase-122c-implementation.md).
 
 ### B implementation findings
 

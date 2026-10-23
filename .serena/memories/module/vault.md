@@ -649,3 +649,9 @@ object IDs, verification counters, and DFS source ordinals. Both deep verificati
 passes share corruption-finding handling. Metadata comparison identifies the specific
 field; video write failures are distinguished from source-reader failure. Node IDs
 are generated once by resume mapping, not by metadata cloning.
+
+`rename_batch.*`: bounded PCRE2 preview/apply by stable node IDs. Preview retains
+secure before/after names and validates the final sibling namespace. Apply rejects
+stale IDs/parents/names, prepares rollback before mutation, and commits once.
+`Database::sync_metadata` uses transaction-local BLOB ID placeholders for names
+before upserts, permitting swaps/cycles without changing sibling uniqueness.
