@@ -12,8 +12,8 @@ mark the entire benchmark matrix in the Phase 122 plan complete.
 - Bound the producer-to-main-thread record queue to 256 records. Backpressure
   releases the queue mutex while waiting. Drain, cancellation, and shutdown wake
   producers, including gallery-only records from large directory trees.
-- Run import-triggered v3 `CommitLane::enqueue_snapshot()` on a dedicated async
-  task. The existing synchronous v3 commit interface remains unchanged for other
+- Run import-triggered v3 `CommitLane::enqueue_snapshot()` on an explicitly owned
+  `jthread`. The existing synchronous v3 commit interface remains unchanged for other
   callers. No SQL durability, object authentication, or secure allocator settings
   were weakened. The v3 session mutex already serializes `stage_object()` against
   `commit_metadata()`; the producer can continue decoding outside that mutex.
@@ -76,11 +76,16 @@ locked-memory warning in both versions. No memory-limit workaround was applied.
 
 ## Validation and integration notes
 
-Integrated stack: full Debug suite passes **2,514 tests**. Full sanitizer and CI
-gates are pending. The App integration retains both maintenance and import-save
-ownership guards and shutdown joins.
+Integrated stack before the worker-lifecycle follow-up: full Debug and unrestricted
+ASAN/UBSan/LSan suites pass **2,514 tests**. CI and follow-up integration gates are
+pending. App retains both maintenance and import-save ownership guards and joins.
 
-- Focused Debug runner: **42 tests pass**, covering import queue integration,
+A single ext4/NVMe run of the same 128-PNG/5,000-existing-gallery benchmark during
+sanitizer compilation measured folder 10.671 s / max drain 3.954 ms, ZIP 10.447 s /
+2.311 ms, and solid 7z 8.625 s / 2.997 ms. This is an after-only measurement under
+load, not a cold/warm or before/after disk comparison.
+
+- Focused Debug runner: **44 tests pass**, covering import queue integration,
   progress formatting, small-batch cold reopen without a shutdown save, bounded
   drains, cancellation waking a backpressured producer, and existing ZIP/folder/
   archive/exception/metadata-review cases. Benchmark: three successful runs per
@@ -118,3 +123,25 @@ integrated application are not measured here. Existing functional tests remain
 necessary; the small PNG benchmark is not evidence for those workloads. Archive
 opening and extraction currently share a coarse "Extracting / reading" phase;
 there is no fabricated extraction-byte percentage or SQL percentage.
+
+## Follow-up — concurrent enqueue and save-worker ownership
+
+Every `batch_ended_` access now holds the import queue mutex. The pending-work
+check and latch transition are one critical section, so enqueue cannot re-arm
+an idle batch and then have that write overwritten by the frame pump. Thread
+launch and metadata I/O remain outside the queue mutex. Enqueue is supported
+from another thread during a bound session; callers must stop enqueueing before
+session teardown. Tree attachment and save polling remain UI-thread operations.
+
+The save worker uses explicit `jthread` ownership and atomic completion instead
+of `std::async`. Successful and failed workers are joined before ownership is
+returned. Thread-construction allocation/system failures latch `lane_failed()`
+and log static diagnostics without transferring tree ownership. Known allocation,
+container-size, and system failures inside the worker are handled specifically;
+there is no catch-all suppression or future destructor with implicit blocking.
+
+Focused validation: 44 Debug tests, including injected launch failures and
+concurrent enqueue/drain cold reopen without shutdown flushing. The concurrent
+case also passes five consecutive standalone runs. This is a stress regression,
+not a claim that a ThreadSanitizer run has been performed; integrated sanitizer
+and full-suite gates remain with the parent.

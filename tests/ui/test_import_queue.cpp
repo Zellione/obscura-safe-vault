@@ -11,6 +11,8 @@
 #include <chrono>
 #include <fstream>
 #include <stdexcept>
+#include <new>
+#include <system_error>
 #include <thread>
 
 namespace fs = std::filesystem;
@@ -1340,6 +1342,92 @@ TEST(import_queue_small_batches_are_durable_without_shutdown_flush)
     REQUIRE(ziptest::open_vault(dir / "vault.osv", reopened));
     REQUIRE(reopened.resolve_node("first/image.jpg"));
     REQUIRE(reopened.resolve_node("second/image.jpg"));
+    reopened.lock();
+    ziptest::cleanup_dir(dir);
+}
+
+namespace ui {
+struct ImportQueueTestAccess {
+    static void fail_save_launch(ImportQueue& queue, bool allocation)
+    {
+        queue.test_save_launch_hook_ = [allocation] {
+            if (allocation) throw std::bad_alloc{};
+            throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
+        };
+        queue.request_save();
+        queue.test_save_launch_hook_ = {};
+    }
+};
+}
+
+TEST(import_queue_save_launch_failure_is_reported_without_transferring_ownership)
+{
+    const auto dir = ziptest::fresh_dir("import_save_launch_failure");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create_directory((dir / "vault.osv").string(),
+        std::vector<uint8_t>{'p','w'}, {}, ziptest::kTestKdf, v) == vault::VaultResult::Ok);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
+    ui::ImportQueue queue;
+    for (const bool allocation : {false, true}) {
+        queue.begin_session(v, lane);
+        ui::ImportQueueTestAccess::fail_save_launch(queue, allocation);
+        CHECK(queue.lane_failed());
+        CHECK(!queue.saving());
+        CHECK(!queue.poll_save());
+        CHECK_EQ(queue.drain(0.01), 0);
+        queue.end_session();
+    }
+    queue.begin_session(v, lane);
+    CHECK(!queue.lane_failed());
+    queue.end_session();
+    lane.stop();
+    v.lock();
+    ziptest::cleanup_dir(dir);
+}
+
+TEST(import_queue_concurrent_enqueue_and_idle_transitions_preserve_final_save)
+{
+    const auto dir = ziptest::fresh_dir("import_concurrent_enqueue");
+    const auto input = dir / "image.jpg";
+    const auto bytes = ziptest::fake_jpeg(29);
+    std::ofstream(input, std::ios::binary).write(reinterpret_cast<const char*>(bytes.data()),
+                                               static_cast<std::streamsize>(bytes.size()));
+    vault::Vault v;
+    REQUIRE(vault::Vault::create_directory((dir / "vault.osv").string(),
+        std::vector<uint8_t>{'p','w'}, {}, ziptest::kTestKdf, v) == vault::VaultResult::Ok);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
+    ui::ImportQueue queue;
+    queue.begin_session(v, lane);
+    std::atomic<bool> producer_done{false};
+    constexpr int count = 64;
+    std::jthread producer([&] {
+        for (int i = 0; i < count; ++i) {
+            (void)queue.enqueue_files({input}, "batch-" + std::to_string(i));
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        producer_done.store(true);
+    });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    do {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        (void)queue.drain(0.001);
+        std::this_thread::yield();
+    } while (!producer_done.load() || queue.busy());
+    producer.join();
+    REQUIRE(drain_until_idle(queue));
+    // No shutdown flush can conceal a lost busy-to-idle latch transition.
+    test_only_drop_without_flush(queue);
+    lane.stop();
+    v.lock();
+    queue.end_session();
+    vault::Vault reopened;
+    REQUIRE(ziptest::open_vault(dir / "vault.osv", reopened));
+    for (int i = 0; i < count; ++i)
+        REQUIRE(reopened.resolve_node("batch-" + std::to_string(i) + "/image.jpg"));
     reopened.lock();
     ziptest::cleanup_dir(dir);
 }

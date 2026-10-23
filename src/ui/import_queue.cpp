@@ -28,6 +28,9 @@
 #include <cassert>
 #include <chrono>
 #include <fstream>
+#include <new>
+#include <stdexcept>
+#include <system_error>
 #include <queue>
 #include <thread>
 
@@ -1411,46 +1414,63 @@ void ImportQueue::request_save()
     }
     // Unlike legacy serialization this transfers tree ownership until poll_save.
     // v3's session mutex serializes object publication with metadata sync.
-    save_ = std::async(std::launch::async, [this] {
-        const platform::PerfScope perf("import.save", 0.0);
-        return lane_->enqueue_snapshot();
-    });
+    save_.done.store(false);
+    save_.succeeded = false;
+    try {
+        if (test_save_launch_hook_) test_save_launch_hook_();
+        save_.worker = std::jthread([this] {
+            const platform::PerfScope perf("import.save", 0.0);
+            try {
+                save_.succeeded = lane_->enqueue_snapshot();
+            } catch (const std::bad_alloc&) {
+                platform::log_error("Import", "metadata save ran out of memory");
+            } catch (const std::length_error&) {
+                platform::log_error("Import", "metadata save exceeded a container size limit");
+            } catch (const std::system_error&) {
+                platform::log_error("Import", "metadata save encountered a system error");
+            }
+            save_.done.store(true);
+        });
+    } catch (const std::bad_alloc&) {
+        save_failed_ = true;
+        platform::log_error("Import", "not enough memory to start metadata save worker");
+    } catch (const std::system_error&) {
+        save_failed_ = true;
+        platform::log_error("Import", "could not start metadata save worker");
+    }
 }
 
 bool ImportQueue::poll_save()
 {
-    if (!saving() || save_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
-        return false;
+    if (!saving() || !save_.done.load()) return false;
     wait_for_save();
     return true;
 }
 
 void ImportQueue::wait_for_save()
 {
-    if (!save_.valid()) return;
-    try {
-        save_failed_ = !save_.get();
-    } catch (...) {
-        save_failed_ = true;
-        platform::log_error("Import", "metadata save worker failed");
-    }
+    if (!saving()) return;
+    save_.worker.join();
+    save_failed_ = !save_.succeeded;
 }
 
 void ImportQueue::maybe_end_batch()
 {
-    bool work_pending;
     {
         std::lock_guard lock(mu_);
-        work_pending = !records_.empty() ||
+        const bool work_pending = !records_.empty() ||
             std::ranges::any_of(tasks_, [](const auto& task) { return !task.finished(); });
+        if (work_pending) {
+            batch_ended_ = false;
+            return;
+        }
+        if (batch_ended_) return;
+        // Claim this idle transition atomically with respect to enqueue. A new
+        // task can re-arm the latch as soon as the mutex is released, without
+        // its write being overwritten by this already-observed idle state.
+        batch_ended_ = true;
     }
-    if (work_pending) {
-        batch_ended_ = false;
-        return;
-    }
-    if (batch_ended_) return;
-    batch_ended_ = true;
-    // No blocking flush in the frame pump, and no queue mutex across disk I/O.
+    // No blocking flush or thread launch while holding the queue mutex.
     // A policy save started above already covers this final attachment batch.
     if (!saving()) request_save();
     policy_.reset();

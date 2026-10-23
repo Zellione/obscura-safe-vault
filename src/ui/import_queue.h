@@ -15,7 +15,6 @@
 #include <deque>
 #include <filesystem>
 #include <functional>
-#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -66,7 +65,7 @@ public:
     void abort_and_flush();
     void end_session();                   // abort_and_flush + drop binding
 
-    // ---- enqueue (main thread; prompts already resolved) ----
+    // ---- enqueue (any thread during a bound session; prompts already resolved) ----
     uint64_t enqueue_files(std::vector<std::filesystem::path> files,
                            std::string dest_gallery);
     uint64_t enqueue_archive(std::filesystem::path archive, std::string dest_gallery,
@@ -111,7 +110,7 @@ public:
     // While true, the save worker owns the tree. The host must not read/update
     // screens, dispatch vault actions, or lock/destroy the vault. poll_save()
     // reacquires ownership; end_session() also joins before touching the tree.
-    [[nodiscard]] bool saving() const noexcept { return save_.valid(); }
+    [[nodiscard]] bool saving() const noexcept { return save_.worker.joinable(); }
     bool poll_save();
     void wait_for_save();
     // Completed tasks expose their metadata separately; media is already imported.
@@ -136,6 +135,7 @@ public:
     friend void test_only_set_task_hook(ImportQueue& q, std::function<void()> hook);
 
 private:
+    friend struct ImportQueueTestAccess;
     // Nested types: defined in-header for MSVC's std::deque to require complete element types at member declaration
     struct StagedRecord {
         std::string gallery_path;
@@ -250,12 +250,19 @@ private:
 
     // Batch commit policy
     BatchCommitPolicy policy_;
-    std::future<bool> save_;
+    struct SaveState {
+        std::atomic<bool> done{false};
+        bool succeeded = false; // Main thread reads only after joining worker.
+        std::jthread worker;
+    };
+    SaveState save_;
+    // Main-thread-only test seam for thread-construction resource failures.
+    std::function<void()> test_save_launch_hook_;
     bool save_failed_ = false;
 
     // One final snapshot per busy-to-idle transition. Enqueue re-arms this
     // even if a tiny task completes before the next drain; completed history
-    // rows do not count as pending work.
+    // rows do not count as pending work. Every access is guarded by mu_.
     bool batch_ended_ = false;
 
     // Decode pool for images
