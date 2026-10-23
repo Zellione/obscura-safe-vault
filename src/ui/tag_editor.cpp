@@ -76,21 +76,7 @@ void TagEditor::launch(std::function<void()> work)
     work_.done.store(false);
     work_.failure = WorkFailure::None;
     try {
-        work_.thread = std::jthread([this, work = std::move(work)] {
-            // Known operations allocate containers/strings or acquire system
-            // synchronization resources. Keep failure reporting allocation-free
-            // on this thread; the UI reads the outcome only after joining.
-            try {
-                work();
-            } catch (const std::bad_alloc&) {
-                work_.failure = WorkFailure::Memory;
-            } catch (const std::length_error&) {
-                work_.failure = WorkFailure::Size;
-            } catch (const std::system_error&) {
-                work_.failure = WorkFailure::System;
-            }
-            work_.done.store(true);
-        });
+        work_.thread = std::jthread(&TagEditor::run_work, this, std::move(work));
     } catch (const std::bad_alloc&) {
         loading_ = false;
         error_ = "Not enough memory to start tag operation.";
@@ -100,16 +86,34 @@ void TagEditor::launch(std::function<void()> work)
     }
 }
 
+void TagEditor::run_work(const std::function<void()>& work)
+{
+    using enum WorkFailure;
+    // Keep failure reporting allocation-free on this thread. The UI reads the
+    // outcome only after joining; construction failures are handled by launch().
+    try {
+        work();
+    } catch (const std::bad_alloc&) {
+        work_.failure = Memory;
+    } catch (const std::length_error&) {
+        work_.failure = Size;
+    } catch (const std::system_error&) {
+        work_.failure = System;
+    }
+    work_.done.store(true);
+}
+
 std::string_view TagEditor::finish_work()
 {
+    using enum WorkFailure;
     if (!work_.thread.joinable()) return {};
     work_.thread.join();
     std::string_view failure;
     switch (work_.failure) {
-        case WorkFailure::None: return {};
-        case WorkFailure::Memory: failure = "Tag operation ran out of memory."; break;
-        case WorkFailure::Size: failure = "Tag operation exceeded a container size limit."; break;
-        case WorkFailure::System: failure = "Tag operation encountered a system error."; break;
+        case None: return {};
+        case Memory: failure = "Tag operation ran out of memory."; break;
+        case Size: failure = "Tag operation exceeded a container size limit."; break;
+        case System: failure = "Tag operation encountered a system error."; break;
     }
     // Also report failures collected by close(): its UI state is about to be
     // cleared, but teardown must not silently swallow a failed operation.

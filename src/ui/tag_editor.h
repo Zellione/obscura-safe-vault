@@ -63,6 +63,7 @@ private:
     friend struct TagEditorTestAccess;
     std::string_view finish_work();
     void launch(std::function<void()> work);
+    void run_work(const std::function<void()>& work);
     void finish_add();
     void refresh_tags();              // reload the node's current tags from the vault
     void refresh_vocabulary();        // reload the vault-wide tag vocabulary (Phase 29)
