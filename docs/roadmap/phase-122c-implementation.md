@@ -132,8 +132,8 @@ Integration tasks for the parent:
 - Review the small shared `GalleryGrid` and `v3_db.cpp` changes when stacking.
 - Add the Shift+R controls and regex examples to README; update phase status and
   UI/vault/dependency/build memories. They were deliberately left untouched here.
-- Include PCRE2's `LICENCE.md` in raw CI binary artifacts as well as packaged
-  releases (the packaging script already includes it).
+- PCRE2's `LICENCE.md` is included in the raw Debug CI artifact and packaged
+  releases; no additional license wiring is needed when stacking.
 - Run actual SDL pointer/F1/dual-pane/lock tests, and record 1k/10k/50k event-loop
   responsiveness measurements. Headless lifecycle tests and worker ownership
   guards do not establish real-render timing or manual layout acceptance.

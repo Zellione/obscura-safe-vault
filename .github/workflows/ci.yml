@@ -136,6 +136,7 @@ jobs:
             vendor/7zip-shim/
             vendor/monocypher/src/
             vendor/monocypher/LICENCE.md
+            vendor/pcre2/LICENCE.md
             scripts/build_7zip.sh
             docs/ARCHIVE_DECODER.md
           retention-days: 7
