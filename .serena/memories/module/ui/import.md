@@ -140,10 +140,12 @@ Import infrastructure: archive handling, plan building, vault population, import
   Ordering: decode parallel, append+attach strictly in sequence via a resequencer (lookahead cap 8 items/256MiB).
   Methods: `enqueue` (any thread, refuse if stopped), `abort_and_flush` (idempotent), `begin_session` (clears stale state/flags),
   `set_exclusive` (inhibit until released). Worker stops gracefully on Vault::lock().
-  **Phase 65:** `maybe_end_batch()` is latched by `batch_ended_` — end-of-batch `enqueue_snapshot()` + `flush()` 
-  fires once per busy→idle transition, re-arming when work arrives (reset in `begin_session()`). Previously 
-  (Phase 50–64): the snapshot+flush ran unconditionally every idle frame, appending a full index blob and growing 
-  the vault at ~795 bytes/second with no user input, unbounded.
+  `drain()` attaches at most 32 records and checks a 4 ms budget between records.
+  The producer queue caps at 256 records; cancellation/shutdown wake blocked producers.
+  `maybe_end_batch()` saves once per busy-to-idle transition, ignoring finished history;
+  enqueue re-arms the latch and a new empty session does not save. V3 saves run in
+  `save_`, transferring tree ownership until `poll_save()`/`wait_for_save()` joins.
+  No queue mutex is held across snapshot/disk I/O. Legacy snapshots retain their lane.
   **Phase 51:** `enqueue_folder(vault, folder_path, dest_gallery_path, progress)` enqueues an ImportTaskKind::Folder,
   mirroring `enqueue_files`. Multiple folder picks create multiple tasks (one per folder).
   **Phase 68 (crash resilience):** `run_worker_task` wraps every task's processing in a
@@ -188,7 +190,8 @@ Import infrastructure: archive handling, plan building, vault population, import
 - `process_folder_task(Vault, task, sink, progress)` — mirror of `process_archive_task`, executes an
   ImportTaskKind::Folder: `scan_folder(task.source)` -> archive-style ZipEntry list -> `build_zip_plan` -> stage each
   file (decrypt-to-memory, no temp file) -> attach gallery tree. Bytes read into mlock'd SecureBytes.
-  Main-thread-only invariant: tree untouched by worker (attach/commit only on queue drain).
+  Producers never attach to the tree. Main-thread drain attaches; the exclusive v3
+  save task owns metadata until joined. App gates all screen tree access during saves.
 
 ## Import tag review
 

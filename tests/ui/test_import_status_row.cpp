@@ -97,3 +97,17 @@ TEST(route_and_status_bands_do_not_intersect)
     CHECK(route_bottom <= status_top);
     CHECK(status_top + FONT_PX <= ui::import_row_height(FONT_PX, PAD));
 }
+
+TEST(import_status_row_discovery_and_processing_are_explicit)
+{
+    ui::ImportTaskInfo task;
+    task.state = ui::ImportTaskState::Running;
+    task.phase = vault::OpPhase::Discovering;
+    CHECK_EQ(ui::format_task_status(task), "Discovering files…");
+    task.phase = vault::OpPhase::Extracting;
+    CHECK_EQ(ui::format_task_status(task), "Extracting / reading: 0");
+    task.phase = vault::OpPhase::Processing;
+    task.done = 2;
+    task.total = 5;
+    CHECK_EQ(ui::format_task_status(task), "Processing / publishing: 2/5");
+}

@@ -677,6 +677,8 @@ struct App::OverlayDispatch {
     {
         ui::close_settings(app.overlays_.settings, app.window_);
         app.import_ui_.queue.set_exclusive(true);
+        app.maintenance_ui_.progress.reset();
+        app.maintenance_ui_.return_section = ui::SettingsSection::VaultOps;
         app.maintenance_ui_.title = std::move(title);
         app.maintenance_ui_.running = true;
         app.maintenance_ui_.future = std::async(  // NOSONAR cpp:S8460 -- explicit owned task
@@ -856,6 +858,41 @@ struct App::OverlayDispatch {
         return true;
     }
 
+    static bool commit_category_rename(App& app)
+    {
+        auto& settings = app.overlays_.settings;
+        if (!settings.category_rename) return false;
+        auto rename = std::move(*settings.category_rename);
+        settings.category_rename.reset();
+        auto* active = app.vault_state_.active.get();
+        if (!active) return true;
+        if (app.import_ui_.queue.busy()) {
+            settings.draft = vault::vault_settings(*active);
+            settings.error = "Wait for imports to finish before renaming a category";
+            return true;
+        }
+        auto progress = std::make_shared<vault::OpProgress>();
+        start_maintenance(
+            app, "Renaming tag category", [active, rename = std::move(rename), progress] {
+                const auto result = vault::rename_tag_category(
+                    *active, rename.old_name.view(), rename.new_name.view(), progress.get());
+                using enum vault::VaultResult;
+                if (result == Ok)
+                    return MaintenanceUi::Result{true, "Category renamed throughout the vault"};
+                if (result == AlreadyExists)
+                    return MaintenanceUi::Result{false,
+                                                 "Target category or tag namespace already exists"};
+                if (result == BadFormat)
+                    return MaintenanceUi::Result{
+                        false, "A saved search is malformed; category was not renamed"};
+                return MaintenanceUi::Result{false,
+                                             "Could not rename category; no changes applied"};
+            });
+        app.maintenance_ui_.progress = std::move(progress);
+        app.maintenance_ui_.return_section = ui::SettingsSection::TagColours;
+        return true;
+    }
+
     // Phase 104: extracted from settings() — the post-event sync block
     // that fires whenever the settings panel accepted an event. Keeps the
     // outer settings() under the 25-line cognitive-complexity cap and
@@ -884,6 +921,8 @@ struct App::OverlayDispatch {
         // live in apply_value_delta; this keeps the runtime in sync even if
         // that write failed).
         ui::set_clipboard_gate(app.overlays_.settings.clipboard);
+        // Category renames also update assignments and searches, never just the draft.
+        if (commit && commit_category_rename(app)) return;
         // Commit vault settings if the commit flag was set
         if (commit && app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
             vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) !=
@@ -1001,6 +1040,12 @@ bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
 void App::dispatch_event(const SDL_Event& e)
 {
     if (is_user_input(e)) idle_.reset();
+    if (import_ui_.queue.saving()) {
+        // Preserve quit requests until durability completes and ownership returns.
+        if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
+            import_ui_.replay_nav = ui::Nav{ui::NavKind::Quit, {}, 0};
+        return;
+    }
     // Phase 56: right-click is a universal "back". Translate it here, once, so
     // every screen and modal reuses its own Esc handling instead of growing a
     // parallel cancel path. The release is dropped — a surface that never saw
@@ -1081,7 +1126,7 @@ void App::capture_session_state()
     }
 }
 
-void App::open_settings_overlay()
+void App::open_settings_overlay(bool refresh_health)
 {
     overlays_.settings.vault_unlocked = vault_state_.active && vault_state_.active->is_unlocked();
     overlays_.settings.draft = overlays_.settings.vault_unlocked ? vault::vault_settings(*vault_state_.active)
@@ -1094,7 +1139,8 @@ void App::open_settings_overlay()
     overlays_.settings.enable_hardware =
         media::enable_hardware_decode() && !media::force_software_decode();  // Phase 102
     ui::open_settings(overlays_.settings, ui::SettingsSection::Appearance);
-    if (vault_state_.active && vault::vault_uses_directory_storage(*vault_state_.active)) {
+    if (refresh_health && vault_state_.active &&
+        vault::vault_uses_directory_storage(*vault_state_.active)) {
         const auto report = vault::verify_directory_vault(*vault_state_.active,
                                                            vault::v3::VerifyDepth::Quick);
         const auto db = vault::directory_vault_database_bytes(*vault_state_.active);
@@ -1105,8 +1151,25 @@ void App::open_settings_overlay()
     }
 }
 
+namespace {
+// Classification only: the queue's current state decides whether to prompt.
+bool is_import_lock_action(ui::NavKind kind)
+{
+    using enum ui::NavKind;
+    return kind == LockActive || kind == ToUnlock || kind == Quit;
+}
+
+bool navigation_keeps_screen(ui::NavKind kind)
+{
+    using enum ui::NavKind;
+    return kind == None || kind == ToggleKeepUnlocked || kind == ToSettings ||
+           kind == ToVaultMaintenance || kind == LockSecond || kind == Quit;
+}
+} // namespace
+
 bool App::apply_nav()
 {
+    if (maintenance_ui_.running || import_ui_.queue.saving()) return false;
     if (!screen_) return false;
     using enum ui::NavKind;
     // Phase 50: check for a replayed nav (from lock_confirm confirm) first
@@ -1120,19 +1183,14 @@ bool App::apply_nav()
 
     // Phase 50: park lock-ish actions that occur while imports are pending.
     // These actions will be replayed after the user confirms the import abort.
-    if (const bool lockish = nav.kind == LockActive || nav.kind == ToUnlock || nav.kind == Quit;
-        lockish &&
-        import_ui_.queue.busy() && !import_ui_.lock_confirm.open) {
+    if (is_import_lock_action(nav.kind) && import_ui_.queue.busy() &&
+        !import_ui_.lock_confirm.open) {
         import_ui_.lock_confirm = {true, nav};
         return false;   // screen stays; event will be re-queued by dispatch_event
     }
 
-    // Every transition below except ToggleKeepUnlocked/ToSettings/LockSecond/Quit/None destroys the
-    // current screen.
-    if (const bool keeps_screen = nav.kind == None || nav.kind == ToggleKeepUnlocked ||
-                                  nav.kind == ToSettings || nav.kind == ToVaultMaintenance ||
-                                  nav.kind == LockSecond || nav.kind == Quit;
-        !keeps_screen) {
+    // Capture and exit the current screen only for screen-changing transitions.
+    if (!navigation_keeps_screen(nav.kind)) {
         capture_session_state();
         screen_->on_exit();
     }
@@ -1231,6 +1289,7 @@ bool App::apply_nav()
 
 bool App::maybe_auto_lock(double dt)
 {
+    if (import_ui_.queue.saving()) return false;
     // should_auto_lock also covers "a screen with a background import owns the
     // vault's file handle on a worker thread" (blocks_idle_lock), the session's
     // "keep unlocked" toggle (Phase 33), a busy import queue (Phase 50), and a
@@ -1274,6 +1333,11 @@ bool App::maybe_auto_lock(double dt)
 void App::update(double dt)  // NOSONAR cpp:S3776 -- ordered lifecycle coordinator
 {
     const platform::PerfScope perf("app.update", 10.0);
+    if (import_ui_.queue.poll_save() && screen_) {
+        screen_->on_vault_changed();
+        screen_->mark_dirty();
+    }
+    if (import_ui_.queue.saving()) return;
     // Phase 87: while a MigrationJob is active it owns the vault EXCLUSIVELY and
     // mutates the index tree (compact() frees the very tree the grid was listing).
     // The owning screen must not read the vault until take_outcome() returns
@@ -1314,12 +1378,22 @@ void App::update(double dt)  // NOSONAR cpp:S3776 -- ordered lifecycle coordinat
 
     if (maintenance_ui_.running &&
         maintenance_ui_.future.wait_for(std::chrono::seconds{0}) == std::future_status::ready) {
-        const auto result = maintenance_ui_.future.get();
+        MaintenanceUi::Result result;
+        try {
+            result = maintenance_ui_.future.get();
+        } catch (const std::bad_alloc&) {
+            result = {false, "Not enough memory for the vault operation"};
+        } catch (const std::future_error&) {
+            result = {false, "Vault worker result unavailable"};
+        } catch (const std::system_error&) {
+            result = {false, "Vault worker system error"};
+        }
         maintenance_ui_.running = false;
         import_ui_.queue.set_exclusive(false);
-        open_settings_overlay();
-        ui::open_settings(overlays_.settings, ui::SettingsSection::VaultOps);
+        open_settings_overlay(maintenance_ui_.return_section != ui::SettingsSection::TagColours);
+        ui::open_settings(overlays_.settings, maintenance_ui_.return_section);
         overlays_.settings.error = result.message;
+        if (screen_) screen_->on_vault_changed();
         if (screen_) screen_->mark_dirty();
     }
 
@@ -1370,12 +1444,14 @@ void App::update(double dt)  // NOSONAR cpp:S3776 -- ordered lifecycle coordinat
     }
 
     // Phase 50: drain the import queue and refresh screens when records are applied
-    if (vault_state_.active && !(screen_ && screen_->blocks_idle_lock()) &&
-        import_ui_.queue.drain(dt) > 0 && screen_) {
+    if (vault_state_.active && !maintenance_ui_.running &&
+        !(screen_ && screen_->blocks_idle_lock()) &&
+        import_ui_.queue.drain(dt) > 0 && screen_ && !import_ui_.queue.saving()) {
         screen_->on_vault_changed();
         screen_->mark_dirty();
     }
-    if (vault_state_.active && !import_tags_.active() && !maintenance_ui_.running &&
+    if (vault_state_.active && !import_ui_.queue.saving() &&
+        !import_tags_.active() && !maintenance_ui_.running &&
         !(migration_ui_.job && migration_ui_.job->active()) &&
         !(screen_ && screen_->blocks_idle_lock()) && !overlays_.settings.open &&
         !migration_ui_.offer_open && !migration_ui_.result_open && !import_ui_.lock_confirm.open) {
@@ -1394,7 +1470,17 @@ void App::render_frame()  // NOSONAR cpp:S3776 -- ordered overlay composition
     const platform::PerfScope perf("frame", 20.0);
     const uint64_t render_start = SDL_GetTicksNS();
     window_.begin_frame(gfx::theme::BG.r, gfx::theme::BG.g, gfx::theme::BG.b);
-    if (screen_) {
+    if (import_ui_.queue.saving()) {
+        gfx::Renderer r(window_.sdl_renderer());
+        const auto activity = std::string("Encrypting and syncing vault metadata") +
+                              std::string(static_cast<size_t>((SDL_GetTicks() / 400) % 4), '.');
+        ui::draw_op_progress(r, font_, static_cast<float>(window_.width()),
+                             static_cast<float>(window_.height()),
+                             {.title = "Saving imported files…",
+                              .count_line = activity,
+                              .hint = "Please wait for the durable save",
+                              .done = 0, .total = 0});
+    } else if (screen_) {
         gfx::Renderer r(window_.sdl_renderer());
         // Phase 87: while a MigrationJob owns the vault exclusively, the owning
         // screen must not read the index tree (migration_job.h contract) — the
@@ -1431,10 +1517,19 @@ void App::render_frame()  // NOSONAR cpp:S3776 -- ordered overlay composition
             draw_migration_result(r, font_, w, h, migration_ui_.result);
         }
         if (maintenance_ui_.running) {
-            ui::draw_op_progress(r, font_, w, h,
-                                 {.title = maintenance_ui_.title,
-                                  .count_line = "Encrypted vault operation in progress",
-                                  .done = 0, .total = 0});
+            const auto progress = maintenance_ui_.progress;
+            const int done = progress ? progress->done.load() : 0;
+            const int total = progress ? progress->total.load() : 0;
+            ui::draw_op_progress(
+                r, font_, w, h,
+                {.title = maintenance_ui_.title,
+                 .count_line =
+                     progress && total > 0
+                         ? std::format("{} / {} tag references; preparing or saving", done, total)
+                         : "Encrypted vault operation in progress",
+                 .hint = "Please wait; changes are saved atomically",
+                 .done = done,
+                 .total = total});
         }
 
         // Phase 50: render lock_confirm modal after migration/settings so it stays on top
@@ -1489,9 +1584,10 @@ void App::render_frame()  // NOSONAR cpp:S3776 -- ordered overlay composition
                 py + 56, TEXT_DIM);
             centered("[Y] Copy        [Esc/N] Cancel", py + ph - 50, TEXT_DIM);
         }
-        ui::draw_help_popup(r, font_, static_cast<float>(window_.width()),
-                            static_cast<float>(window_.height()),
-                            screen_->help_groups(), overlays_.help);
+        if (!maintenance_ui_.running && !screen_->blocks_idle_lock())
+            ui::draw_help_popup(r, font_, static_cast<float>(window_.width()),
+                                static_cast<float>(window_.height()), screen_->help_groups(),
+                                overlays_.help);
     }
     window_.end_frame();
 
@@ -1507,7 +1603,8 @@ void App::run()
     uint64_t prev  = SDL_GetTicksNS();
 
     while (running_) {
-        const bool animating     = screen_ && screen_->animating();
+        const bool animating = maintenance_ui_.running || import_ui_.queue.busy() ||
+                               (screen_ && screen_->animating());
         const bool should_redraw = pump_events(animating);
 
         const uint64_t now = SDL_GetTicksNS();
@@ -1543,6 +1640,9 @@ void App::shutdown()
     // teardown (blocking, acceptable at shutdown; cancel commits applied work
     // and leaves the watermark unstamped, so the upgrade is re-offered).
     if (migration_ui_.job) migration_ui_.job->abort_and_join();
+    if (maintenance_ui_.future.valid()) maintenance_ui_.future.wait();
+    maintenance_ui_.running = false;
+    import_ui_.queue.wait_for_save();
     if (screen_) { screen_->on_exit(); screen_.reset(); }
     import_tags_.close();
     pending_import_tags_.reset();

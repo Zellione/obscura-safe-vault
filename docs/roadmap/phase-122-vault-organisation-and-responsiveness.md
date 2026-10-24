@@ -3,8 +3,29 @@
 Status: implementation in cascading PRs. A and H's storage documentation are in
 [PR #261](https://github.com/Zellione/obscura-safe-vault/pull/261), ready for owner
 review with all CI gates green and zero SonarCloud issues. Local Debug and Release
-each passed 2,497 tests. The remaining H validation is not marked complete.
-B is being validated on `phase-122b-responsive-tagging`, based on the A branch.
+each passed 2,497 tests. H now adds object-preservation, failed-upgrade rollback/retry, and nested encrypted
+backup/restore regressions. See [validation evidence](phase-122h-validation.md).
+B is in [PR #262](https://github.com/Zellione/obscura-safe-vault/pull/262), based on A.
+Local Debug and unrestricted ASAN/UBSan/LSan each pass 2,502 tests. Initial CI passed; the ten Sonar findings are fixed and rescanning. D is in [PR #263](https://github.com/Zellione/obscura-safe-vault/pull/263), stacked
+on B; its Sonar rescan reports zero findings. G is [PR #264](https://github.com/Zellione/obscura-safe-vault/pull/264) with deterministic VP8 color/fallback regression coverage and
+README remediation guidance; the reported NVIDIA hardware failure remains
+unreproduced. G is ready with all CI green and zero Sonar findings. See [G evidence](phase-122g-implementation.md).
+
+F is [PR #265](https://github.com/Zellione/obscura-safe-vault/pull/265) with bounded import drains, producer backpressure, background v3
+saves, and phase progress. See [measurements and limits](phase-122f-implementation.md).
+
+C is [PR #266](https://github.com/Zellione/obscura-safe-vault/pull/266), following F
+with bounded PCRE2 preview/apply, atomic swaps, and Shift+R UI. Full integrated
+Debug and unrestricted ASAN/UBSan/LSan each pass 2,527 tests. H is [PR #267](https://github.com/Zellione/obscura-safe-vault/pull/267), following C,
+with 2,529 Debug and unrestricted sanitizer tests passing. E follows H, including
+its upgrade tests in the final schema validation.
+See [implementation and limits](phase-122c-implementation.md).
+
+E integrates encrypted bundle definitions and explicit assignment provenance,
+including transfer/combine preservation and schema 1/2→3 migration. A new test
+reproduced category rename missing unused bundle namespaces and provenance;
+the integration now visits these references. The bundle creation action uses F8
+because app-wide F2 opens Settings. See [E details](phase-122e-implementation.md).
 
 ### B implementation findings
 
@@ -21,8 +42,10 @@ claim incremental SQL updates or a constant-time save.
 Initial synthetic Debug measurements (flat gallery nodes to isolate metadata,
 not representative media-import throughput): 1k nodes: open call 0.12 ms,
 background add/save 78 ms; 10k nodes: open call 0.93 ms, background add/save
-1.90 s. The first 50k run exceeded the benchmark's initial 10-second completion
-wait; a longer measurement is pending. `OSV_TAG_SELECTION_BENCH` runs 1k/10k/50k
+1.90 s. At 50k nodes, open returned in 1.69 ms, add returned in 0.04 ms,
+background add/save completed in 3.95 s and removal in 3.50 s. A prior run under
+concurrent compilation exceeded the initial 10-second completion wait; these
+figures are indicative measurements, not storage throughput guarantees. `OSV_TAG_SELECTION_BENCH` runs 1k/10k/50k
 scales and separately reports UI call duration and background completion.
 
 ## Goal and current evidence
@@ -121,6 +144,16 @@ Unicode names, collisions, swaps, rollback, and reopen. Preview exactly matches
 the committed result; object identities and ciphertext remain unchanged.
 
 ## 122D — Rename a category everywhere
+
+Implemented for validation: transactional prefix rewrite covers category names,
+root/gallery/media tags, descriptions' keys, field-value keys, and typed saved
+query clauses. Case-only renames work. Any existing target namespace or malformed
+saved query rejects the whole operation; prose remains unchanged. F2 Tag Colours
+launches a background operation with progress, gates pending navigation/import
+attachment, joins before vault teardown, and refreshes settings without repeating
+full object verification for this metadata-only change. Bundle references are an
+integration requirement for E, not yet delivered in D. Local Debug and unrestricted ASAN/UBSan/LSan: 2,506 tests each, zero failures.
+
 
 - Add a transactional vault operation behind category editing. Match the actual
   category prefix boundary, not arbitrary substrings (e.g. `person:Alice` changes

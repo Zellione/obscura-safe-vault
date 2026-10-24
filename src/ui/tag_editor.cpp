@@ -2,6 +2,8 @@
 #include <new>
 #include <stdexcept>
 #include <system_error>
+#include <map>
+#include <set>
 #include "platform/error_log.h"
 #include "ui/import_queue.h"
 #include "ui/progress_modal.h"
@@ -34,6 +36,14 @@
 namespace ui {
 
 namespace {
+std::string tag_source_key(std::string_view tag)
+{
+    std::string result(tag);
+    for (char& ch : result)
+        if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch + ('a' - 'A'));
+    return result;
+}
+
 constexpr float MODAL_W = 500.0f;
 
 // Phase 91: a node's secure tag list as transient plain strings for the tag
@@ -149,6 +159,9 @@ void TagEditor::open(std::string node_path)
 void TagEditor::open_multi(std::vector<std::string> node_paths)
 {
     close();
+    bundle_mode_ = false;
+    bundle_form_ = false;
+    bundle_confirm_ = false;
     active_ = true;
     if (queue_.busy()) {
         error_ = "Wait for imports to finish before editing tags.";
@@ -184,6 +197,14 @@ void TagEditor::close()
     active_ = false;
     SDL_StopTextInput(win_.sdl_window());
     node_paths_.clear();
+    tag_sources_.clear();
+    bundle_name_.clear();
+    bundle_members_.clear();
+    bundle_original_name_.clear();
+    bundle_preview_.clear();
+    bundle_mode_ = false;
+    bundle_form_ = false;
+    bundle_confirm_ = false;
     tally_.clear();
     inherited_.clear();
     from_contents_.clear();
@@ -285,12 +306,22 @@ void TagEditor::load_per_node_tags()
     std::vector<std::vector<std::string>> per_node_tags;
     per_node_tags.reserve(node_paths_.size());
     int resolved = 0;
+    std::map<std::string, size_t, std::less<>> manual_counts;
+    std::map<std::string, std::set<std::string, std::less<>>, std::less<>> bundle_sources;
+    const auto& bundles = vault::vault_settings(vault_).tag_bundles;
 
     for (const auto* node : vault::resolve_node_selection(vault_, node_paths_)) {
-        if (node) {
-            per_node_tags.push_back(tag_strings(node->tags));
-            ++resolved;
+        if (!node) continue;
+        per_node_tags.push_back(tag_strings(node->tags));
+        for (const auto& tag : node->tag_provenance ? node->explicit_tags : node->tags)
+            ++manual_counts[tag_source_key(tag.view())];
+        for (const auto& id : node->tag_bundles) {
+            const auto bundle = std::ranges::find(bundles, id, &vault::TagBundle::id);
+            if (bundle == bundles.end()) continue;
+            for (const auto& tag : bundle->tags)
+                bundle_sources[tag_source_key(tag.view())].emplace(bundle->name.view());
         }
+        ++resolved;
     }
 
     if (resolved == 0) {
@@ -298,6 +329,14 @@ void TagEditor::load_per_node_tags()
         return;
     }
     tally_ = compute_tag_tally(per_node_tags);
+    tag_sources_.clear();
+    for (const auto& row : tally_) {
+        const auto tag = tag_source_key(row.tag);
+        std::string sources = std::format("Manual: {} selection items", manual_counts[tag]);
+        for (const auto& bundle : bundle_sources[tag])
+            sources += "; bundle: " + bundle;
+        tag_sources_.push_back(std::move(sources));
+    }
 }
 
 void TagEditor::refresh_tags()
@@ -328,6 +367,16 @@ void TagEditor::select_tag(std::string_view tag)
     selected_ = std::max(0, static_cast<int>(tally_.size()) - 1);
 }
 
+bool TagEditor::handle_fields_event(const SDL_Event& e)
+{
+    const bool consumed = fields_form_.handle_event(e);
+    if (!fields_form_.active()) {
+        SDL_StartTextInput(win_.sdl_window());
+        if (fields_form_.consume_saved()) refresh_vocabulary();
+    }
+    return consumed;
+}
+
 bool TagEditor::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
@@ -342,17 +391,14 @@ bool TagEditor::handle_event(const SDL_Event& e)
         return true;
     }
 
-    // Form handling (Phase 73): the fields_form modal takes precedence over the tag editor
-    // input. When it becomes inactive after consuming an event, restart text input for the
-    // tag editor (the form calls StopTextInput on close, we restart it here).
-    if (fields_form_.active()) {
-        const bool consumed = fields_form_.handle_event(e);
-        if (!fields_form_.active()) {
-            SDL_StartTextInput(win_.sdl_window());   // back to the tag input
-            if (fields_form_.consume_saved()) refresh_vocabulary();
-        }
-        return consumed;
+    if (bundle_mode_) return handle_bundle_event(e);
+    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F3) {
+        bundle_mode_ = true;
+        bundle_selected_ = 0;
+        return true;
     }
+
+    if (fields_form_.active()) return handle_fields_event(e);
 
     // Precedence rule (Phase 54): the tag field consumes editing keys first.
     // field_owns_event keeps the empty-buffer behaviour intact — with nothing
@@ -436,6 +482,11 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
                                   : "Saving and refreshing...",
              .done = done,
              .total = total});
+        return;
+    }
+
+    if (bundle_mode_) {
+        render_bundles(r, font, W, H);
         return;
     }
 
@@ -534,7 +585,10 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     // Error message: one LINE pitch above the hint
     const float error_y = my + MODAL_H - 2.0f * LINE - PAD;
     if (!error_.empty()) {
-        r.draw_text(font, mx + PAD, error_y, error_, DANGER);
+        r.draw_text(font, mx + PAD, error_y, fit_text(font, error_, MODAL_W - 2 * PAD), DANGER);
+    } else if (selected_ >= 0 && selected_ < static_cast<int>(tag_sources_.size())) {
+        r.draw_text(font, mx + PAD, error_y,
+                    fit_text(font, tag_sources_[selected_], MODAL_W - 2 * PAD), TEXT_DIM);
     }
 
     // Footer hint: one LINE pitch above the modal bottom
@@ -543,7 +597,7 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     // the app's font this hint is wider than the modal, so drawing it raw put
     // "[Esc] Close" outside the right border.
     r.draw_text(font, mx + PAD, hint_y,
-                fit_text(font, "[Enter] Add  [Up/Down] Scroll  [Del] Remove  [Esc] Close",
+                fit_text(font, "[Enter] Add [Del] Remove manual [F3] Bundles [Esc] Close",
                          MODAL_W - 2 * PAD),
                 TEXT_FAINT);
 
@@ -568,7 +622,7 @@ void TagEditor::draw_tag_rows(gfx::Renderer& r, gfx::FontAtlas& font, float mx, 
     const auto& cats = vault::vault_settings(vault_).categories;
 
     // Header shows the visible range / count so hidden tags are discoverable.
-    std::string header = "Current tags";
+    std::string header = "Effective tags (manual or bundle)";
     if (total > max_visible) {
         header += std::format(" ({}-{} of {})", first + 1, last, total);
     } else if (total > 0) {
