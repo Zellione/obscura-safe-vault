@@ -219,6 +219,7 @@ public:
     {
         return unlocked_;
     }
+    friend struct BundleAccess;
     friend bool vault_is_read_only(const Vault& v) noexcept;
     friend bool vault_uses_directory_storage(const Vault& v) noexcept;
     friend v3::VerificationReport verify_directory_vault(const Vault&, v3::VerifyDepth) noexcept;
@@ -332,6 +333,7 @@ public:
                                         std::string_view destination_name);
 
     friend VaultResult rename_tag(Vault& v, std::string_view old_tag, std::string_view new_tag);
+    friend VaultResult rename_tag_category(Vault&, std::string_view, std::string_view, OpProgress*);
 
     // Replace a node's tag list (gallery OR image). Tags are normalised: each trimmed
     // of surrounding whitespace, empties dropped, de-duplicated case-insensitively
@@ -395,6 +397,8 @@ public:
                                      std::string_view tag);
     friend VaultResult remove_tag_batch(Vault& v, std::span<const std::string> node_paths,
                                         std::string_view tag);
+    friend VaultResult mutate_tags_batch(Vault&, std::span<const std::string>, std::string_view,
+                                         bool, OpProgress*);
 
     // Phase 65 migration: apply probed metadata WITHOUT committing, so a whole
     // migration pass costs one index write instead of one per node.
@@ -614,6 +618,18 @@ using vault::ChunkRef;
 [[nodiscard]] VaultResult set_favorites_batch(Vault& v, std::span<const std::string> node_paths,
                                               bool value);
 
+// Resolve each parent once and index its children without sorting. Returned
+// pointers borrow the tree; the caller must exclusively own it until finished.
+[[nodiscard]] std::vector<IndexNode*> resolve_node_selection(Vault& v,
+                                                             std::span<const std::string> paths);
+
+// Atomic selection edit: cancellation before commit restores all assignments.
+// A completed commit cannot be cancelled. Progress covers preparation, with
+// done == total indicating final save/refresh. Failure restores the live tree.
+[[nodiscard]] VaultResult mutate_tags_batch(Vault& v, std::span<const std::string> paths,
+                                            std::string_view tag, bool remove,
+                                            OpProgress* progress = nullptr);
+
 // Batch tag add/remove (Phase 73): add/remove `tag` to/from every resolving path.
 // Non-resolving paths are skipped, not errors. ONE commit_index() for the whole
 // batch — and none at all when no node actually changed.
@@ -749,6 +765,13 @@ void test_only_downgrade_to_legacy(Vault& v);
 // metadata-only tags. Case-only renames are allowed. Failure restores memory.
 [[nodiscard]] VaultResult rename_tag(Vault& v, std::string_view old_tag,
                                       std::string_view new_tag);
+
+// Rename a category and every structured tag reference in one transaction.
+// Reject occupied target namespaces and malformed dependent saved queries.
+// Free text is preserved; failures restore all live metadata.
+[[nodiscard]] VaultResult rename_tag_category(Vault& v, std::string_view old_name,
+                                              std::string_view new_name,
+                                              OpProgress* progress = nullptr);
 
 // Rename an image, video, or gallery's own `name` field in place — a pure
 // leaf-field edit. Descendants, tags, favorite flag, sort key, and cover all

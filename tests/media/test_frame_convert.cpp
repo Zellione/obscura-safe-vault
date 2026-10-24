@@ -321,4 +321,47 @@ TEST(copy_owned_frame_storage_is_locked_and_wiped)
     CHECK(crypto::detail::all_wipe_observations_zero_for_tests());
 }
 
+// Models the CPU NV12 layout returned by VAAPI download, without pretending
+// to exercise a real device. Odd chroma geometry and padding are deliberate.
+TEST(copy_owned_frame_nv12_odd_size_padded_rows_survive_source_release)
+{
+    FramePtr source{av_frame_alloc()};
+    REQUIRE(source);
+    source->format = AV_PIX_FMT_NV12;
+    source->width = 65;
+    source->height = 49;
+    REQUIRE(av_frame_get_buffer(source.get(), 64) == 0);
+    REQUIRE(source->linesize[0] > 65);
+    REQUIRE(source->linesize[1] > 66);
+    for (int plane = 0; plane < 2; ++plane) {
+        const int height = plane == 0 ? 49 : 25;
+        for (int y = 0; y < height; ++y) {
+            auto* row = source->data[plane] + y * source->linesize[plane];
+            std::memset(row, 0xCD, static_cast<size_t>(source->linesize[plane]));
+            if (plane == 0) std::memset(row, 81, 65);
+            else for (int x = 0; x < 66; x += 2) { row[x] = 90; row[x + 1] = 240; }
+        }
+    }
+    crypto::SecureBytes storage;
+    auto copied = media::copy_owned_frame(media::FrameConverter::zero_copy(source.get(), 1.0), storage);
+    REQUIRE(copied.has_value());
+    av_frame_unref(source.get());
+    CHECK(copied->pts_seconds == 1.0);
+    CHECK(copied->planes[2] == nullptr);
+    for (int y = 0; y < 49; ++y) {
+        const auto* row = copied->planes[0] + y * copied->linesizes[0];
+        CHECK(row[0] == 81);
+        CHECK(row[64] == 81);
+        CHECK(row[65] == 0xCD);
+    }
+    for (int y = 0; y < 25; ++y) {
+        const auto* row = copied->planes[1] + y * copied->linesizes[1];
+        CHECK(row[0] == 90);
+        CHECK(row[1] == 240);
+        CHECK(row[64] == 90);
+        CHECK(row[65] == 240);
+        CHECK(row[66] == 0xCD);
+    }
+}
+
 #endif // OSV_VENDORED_AV

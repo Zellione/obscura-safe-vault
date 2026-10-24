@@ -33,17 +33,97 @@ source. Success is shown only after deep verification, logical and plaintext
 comparison, and a cold credentialed reopen. Back up and manually test the new
 vault before deciding whether to remove the legacy file.
 
-The v3 directory contains only encrypted/authenticated material (`vault.db`,
-`vault.header`, and `objects/`). Explicit, consent-gated Export remains the sole
+V3 stores each original, thumbnail, and poster in a separate immutable encrypted
+file under `objects/<two-hex-digit-shard>/<random-object-id>.osvo`. A video is
+one object with independently authenticated frames for seeking. Galleries are
+database nodes, not files containing their children's media. `vault.db` encrypts
+display names, gallery relationships, tags, and object mappings. `vault.header`
+contains public format/KDF parameters and the authenticated wrapped master key.
+
+Opaque object IDs keep gallery structure off the filesystem. Physically mirroring
+galleries under encrypted folder names would reveal grouping and depth and would
+require coordinating filesystem moves with database transactions. The current
+layout already isolates media objects: metadata upgrades and local rename/move
+operations need not rewrite original media. It still depends on a healthy metadata
+database for names and relationships; separate files do not replace verified
+encrypted backups. Object counts, sizes, and modification times remain visible.
+
+Explicit, consent-gated Export remains the sole
 feature that writes decrypted media to disk. See
 [`docs/V3_VAULT_FORMAT.md`](docs/V3_VAULT_FORMAT.md) and
-[`docs/V3_BACKUP_AND_RECOVERY.md`](docs/V3_BACKUP_AND_RECOVERY.md).
+[`docs/V3_BACKUP_AND_RECOVERY.md`](docs/V3_BACKUP_AND_RECOVERY.md). Upgrade rollback/retry and encrypted
+backup restoration are covered by [storage regression tests](docs/roadmap/phase-122h-validation.md);
+independent media objects still require an intact database mapping and backups.
 
 To export gallery folders, select them with **Space** (or **Ctrl+A**), press **X**,
 confirm the plaintext warning with **Y**, and choose a destination. Selected
 folders include all nested folders and original images/videos, including empty
 folders. Existing names receive numbered suffixes; nothing is overwritten or
 merged. **Esc** cancels the running export and keeps completed output.
+
+## Rename inside a vault
+
+Hover a gallery name/tile (or an image/video) and press **R**. You can also focus
+an item with the keyboard and press **R**. The rename field starts with the current
+name selected: **Enter** saves, **Esc** cancels. Renaming changes metadata without
+rewriting media; unsafe names and sibling collisions are rejected. Legacy vaults
+are read-only.
+
+For bulk rename, select items with **Space** or **Ctrl+A**, then **Shift+R**.
+Enter a PCRE2 regex and replacement (**Tab** switches fields); **Enter** previews,
+and a second **Enter** applies the valid preview. For example, `^(.*)-([0-9]+)$`
+with `$2-$1` changes `trip-12.jpg` to `12-trip.jpg`. `$1` and `${name}` reference
+captures; `$$` inserts a dollar sign. **PgUp/PgDn** browse results and **F7** shows
+full names. Conflicts or unsafe names block the entire batch.
+
+**F3** toggles preserving media extensions (default on), **F4** recursion into
+selected galleries (off), **F5** case sensitivity (on), and **F6** replacing all
+matches (off). Editing the pattern or options requires a new preview. Preparation
+runs in the background; **Esc** cancels before the final save. Regex execution is
+bounded, so an overly costly pattern is rejected. Renames, including swaps, commit
+as one metadata transaction without rewriting encrypted media.
+
+For selection tagging, select files with **Space** or **Ctrl+A**, then press **G**.
+Loading tags and adding/removing a tag run in the background with a progress
+modal. Imports must finish before the editor opens, and new import work waits
+until it closes. During an edit, **Esc** requests cancellation before the final
+save; once saving starts, wait for completion. Cancelling before save leaves the
+selection unchanged. Closing the application waits for the worker before locking
+the vault. Very large selections can still spend time saving metadata, but the
+progress modal continues to repaint.
+
+## Meta tags (tag bundles)
+
+Open the tag editor with **G**, then press **F3** for meta tags. Select a bundle
+with **Up/Down**; **Enter** applies it to the selection and **Delete** removes its
+application. Tags added manually, supplied by another bundle, or inherited from
+a parent remain when a bundle is removed. Adding an already-bundled tag manually
+also preserves it independently. The ordinary tag list shows manual ownership
+and supplying bundles; deleting there removes only the manual assignment.
+
+**F8** creates a bundle, **F4** edits one, and **F6** previews deleting its
+definition. **Tab** switches the name/member fields. Separate member tags with
+semicolons; use a backslash to escape a literal semicolon or backslash. **F5**
+previews affected applications and tag changes; **Enter** confirms, **Esc** cancels.
+Editing a definition updates all its applications. Bundles contain ordinary tags.
+Member tags have surrounding whitespace trimmed; empty members and case-insensitive
+duplicates are removed, preserving the first spelling, just like ordinary tags.
+Global **F2** continues to open Settings.
+
+Bundle definitions and ownership are stored in encrypted metadata schema 3.
+Existing tags become manual assignments during upgrade; media objects are not
+rewritten. Older app versions reject the newer metadata schema. Cross-vault copy
+preserves ownership and gives conflicting bundle definitions distinct names.
+
+## Import progress
+
+Folder and archive imports show discovery, extraction/reading, and processing
+stages in **Shift+I**. Queued results are applied in bounded batches so the UI can
+repaint between batches. Metadata saves run in the background with an animated
+progress modal; navigation waits until the durable save completes. Saving has no
+reliable percentage and cannot be cancelled once started. Large files and archive
+decoding can still take time; the progress display does not imply parallel archive
+extraction. Closing the application waits for pending durability work.
 
 ## Copy between vaults
 
@@ -109,7 +189,7 @@ build/bin/Release/osv
 
 #### Hardware decode on Linux (optional)
 
-FFmpeg is configured with `--enable-vaapi` and `--enable-hwaccel=h264_vaapi,hevc_vaapi,vp8_vaapi,vp9_vaapi,av1_vaapi,mpeg2_vaapi,mpeg4_vaapi,vc1_vaapi,wmv3_vaapi,h263_vaapi`. The hw decode is **opportunistic** — Phase 41's software `VideoDecodeWorker` is the automatic silent fallback whenever hardware is unavailable (no GPU decode block, missing/outdated driver, codec/profile the GPU can't handle), so every clip plays either way. To enable it:
+FFmpeg is configured with `--enable-vaapi` and `--enable-hwaccel=h264_vaapi,hevc_vaapi,vp8_vaapi,vp9_vaapi,av1_vaapi,mpeg2_vaapi,mpeg4_vaapi,vc1_vaapi,wmv3_vaapi,h263_vaapi`. The hw decode is **opportunistic** — Phase 41's software `VideoDecodeWorker` is the automatic silent fallback whenever hardware is unavailable (no GPU decode block, missing/outdated driver, codec/profile the GPU can't handle), so unsupported hardware can fall back to software. To enable it:
 
 1. Install `libva` + a vendor driver (`libva-mesa-driver` for AMD/Radeon, `intel-media-driver` for Intel iGPU/Arc).
 2. Make sure your user is in the `render` group for `/dev/dri/renderD128` access; log out/in after the change.
@@ -126,6 +206,44 @@ or **Software**. `Ctrl+Shift+H` toggles the same setting. Changes are saved and
 apply to the next clip opened; hardware failures still fall back to software.
 F1 reports the selected software mode or hardware probe status. Existing saved
 hardware-disabled or force-software preferences remain software-only until changed.
+
+#### Green or corrupt VP8/WebM playback on NVIDIA
+
+Select **F2 → Playback → Video decoding → Software**, then close and reopen
+the affected clip. The setting changes the next decoder, not the one already
+playing. `Ctrl+Shift+H` toggles the same choice; check the toast says **Software
+(next clip)**. This bypass needs no export or conversion of decrypted media.
+Software VP8 color, seek, reopen, and poster checks pass on the project's
+synthetic fixture. If software fixes your clip, leave it selected; if it does
+not, report that result too. The reported NVIDIA hardware failure has not been
+reproduced here, so a driver-specific fix is not claimed.
+
+Obscura uses VAAPI. On NVIDIA, the VAAPI-to-NVDEC bridge is separate from the
+`nvidia-open` kernel driver. For a native Arch installation, inspect it with:
+
+```sh
+pacman -Q nvidia-open nvidia-utils libva-nvidia-driver libva-utils
+vainfo
+```
+
+Use your installed kernel-package variant, such as `nvidia-open-dkms`, where
+appropriate. Arch packages the bridge as
+[`libva-nvidia-driver`](https://archlinux.org/packages/extra/x86_64/libva-nvidia-driver/)
+and the diagnostic utilities as
+[`libva-utils`](https://archlinux.org/packages/extra/x86_64/libva-utils/).
+If you want to retry hardware playback, update/install them with a full system
+upgrade (`sudo pacman -Syu libva-nvidia-driver libva-utils`), reboot if required
+by the driver/kernel update, restart Obscura, and reopen the clip in Hardware
+mode. On multiple GPUs, confirm which device `vainfo` tests. Container runtimes
+may use different drivers from the host.
+
+The [bridge's upstream documentation](https://github.com/elFarto/nvidia-vaapi-driver)
+lists VP8 support but cautions about application compatibility. Its
+[v0.0.15 release](https://github.com/elFarto/nvidia-vaapi-driver/releases/tag/v0.0.15)
+contains a VP8 slice-header fix; updating is not a verified fix for this report.
+If hardware still fails, keep Software selected and report GPU model,
+kernel/NVIDIA/bridge versions, app build, and the `[HwAccel]` startup diagnostic.
+See the [investigation and reproducible synthetic fixture](docs/roadmap/phase-122g-implementation.md).
 
 #### Locked-memory limit (`RLIMIT_MEMLOCK`)
 
@@ -298,6 +416,14 @@ scripts/       setup.sh · gen.sh · build.sh · test.sh · build_codecs.sh ·
 In the tag overview (`Shift+T`), select a tag and press `R` to rename it throughout
 the vault. Assignments, descriptions, field values, and saved-search tag conditions
 follow the rename. Enter saves; Esc cancels. Existing target names are rejected.
+
+To rename a category, open **F2 → Tag Colours**, focus the category, and press
+**R**. The rename updates that category's tag prefixes throughout the vault,
+including assignments, descriptions' tag keys, template field values, and saved
+search tag conditions. Free-text descriptions and search names stay unchanged.
+Case-only changes are supported. An occupied destination category/tag namespace
+or a malformed saved search blocks the entire rename. Imports must finish first;
+a progress modal remains visible during preparation and the atomic save.
 Changing the category prefix requires compatible template fields.
 
 The tag overview (`Shift+T`) imports a JSON tag dictionary with `Ctrl+I`: a file of

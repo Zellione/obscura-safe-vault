@@ -138,6 +138,8 @@ class Database {  // NOSONAR cpp:S1448 -- typed repositories intentionally share
 public:
     struct OpenResult;
 
+    [[nodiscard]] DbStatus read_bundles(IndexNode& root, VaultSettings& settings) const noexcept;
+
     Database() = default;
     ~Database();
     Database(Database&& other) noexcept;
@@ -219,6 +221,8 @@ public:
     [[nodiscard]] DbStatus finish_conversion() noexcept;
 
 private:
+    [[nodiscard]] DbStatus write_bundles(const IndexNode& root,
+                                         const VaultSettings& settings) noexcept;
     friend bool database_healthy(const Database&) noexcept;
     friend bool database_deep_healthy(const Database&) noexcept;
     friend DbStatus maintain_database(Database&) noexcept;

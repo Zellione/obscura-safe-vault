@@ -18,7 +18,7 @@ provides domain-separated keyed-BLAKE2b database/per-object key derivation into
 `SecureBuffer` plus canonical 66-byte object-frame AD; `v3_detect.*` classifies
 legacy files versus v3 directories while rejecting symlink/odd shapes (advisory
 only—the Phase 106 descriptor-relative open is authoritative); `v3_schema.h`
-freezes schema v2 DDL; and `v3_transaction_model.h` models publish-before-
+defines schema v3 DDL; and `v3_transaction_model.h` models publish-before-
 reference crash states. `v3_sqlcipher_key.*` converts a derived 32-byte key to
 SQLCipher's required 67-byte raw keyspec inside a wipe-on-release
 `SecureBuffer`, avoiding SQL interpolation and SQLCipher's password KDF. The
@@ -39,7 +39,7 @@ Phase 107 adds `v3_db.*`, the production-linked, move-only
 SQLCipher boundary: it applies the raw derived key without SQL interpolation,
 enables cipher memory security, rollback journal + FULL synchronous durability,
 foreign keys, defensive/untrusted-schema modes and bounded SQLite limits before
-accepting the connection. Create installs schema v2 plus the root/meta
+accepting the connection. Create installs schema v3 plus the root/meta
 rows transactionally; open verifies the key immediately, rejects unsupported
 versions, and runs an integrity check. SQLite handles and rows stay private and
 failures map to `DbStatus`. Prepared repositories cover nodes/search, immutable
@@ -48,9 +48,9 @@ saved searches and settings; decrypted results use secure string/blob owners. Li
 connection queries live as free helpers (`database_healthy`, `database_root_node_id`, and the
 test-only `set_database_user_version_for_test`) so `Database` stays below Sonar's 35-method cap.
 `backup_to` uses SQLCipher online backup into exclusive encrypted staging,
-verifies it, fsyncs, publishes no-replace, and directory-syncs. Schema v1 is
-both the supported minimum and maximum; future versions fail closed, and the
-first later migration must be transactional before raising `SCHEMA_VERSION`.
+verifies it, fsyncs, publishes no-replace, and directory-syncs. Schema versions 1 and 2 upgrade transactionally to 3; versions above 3 fail
+closed. Read-only older snapshots upgrade a private in-memory copy, preserving
+the source backup. Container format remains v3.
 
 Phase 108 adds `v3_object_store.*`, which writes immutable,
 independently-keyed `.osvo` files through `v3_fs` staging and durable no-replace
@@ -264,6 +264,19 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   I/O and metadata header reads flow through the dedicated, contention-free `thumb_fp_`.
 
 ### staging.* (Phase 50 + Phase 67 transfer + Phase 69 batching) — worker-to-tree hand-off
+
+`resolve_node_selection` resolves each parent once and indexes direct children,
+returning borrowed pointers in input order (missing paths are null). The caller
+must own the tree. `mutate_tags_batch` implements add/remove selection edits with
+OpProgress, one commit, and secure rollback snapshots: cancellation before save
+and commit failure restore live assignments. The tag editor runs it exclusively
+off-thread; it does not change the v3 format or replace full metadata persistence.
+
+`rename_tag_category` prepares prefix replacements for direct tags, description
+and field-value keys, category spelling, and typed saved-search tags. It rejects
+occupied target namespaces and malformed saved queries before mutation. Secure
+replacement strings plus a rollback guard keep the single commit atomic in live
+memory as well as on disk; case-only renames preserve unrelated prose.
 - `stage_image(Vault, data, ...)` / `stage_video(Vault, data, precomputed_meta, ...)` — any thread, stream encrypted chunks to disk with fflush (no fsync), return a ready IndexNode with chunk spans. Plaintext stays mlock'd; nodes are ready but **not attached**. **Phase 67:** `stage_video` gains a 5th `precomputed_meta` param (a `StagedVideoInfo{dimensions, duration, codec, poster_offset, poster_len}`) so cross-vault transfers avoid re-probing videos already decoded at the source. Null metadata falls back to `MediaProbe::probe_bytes` on attach (backward compat). `StagedVideoInfo` is computed at source by `MediaProbe::extract_staged_video_info`.
 - `attach_image_prestaged` / `attach_video_prestaged` — **free friends, Phase 69.** Main-thread only: pre-check (safe name, gallery exists, no sibling collision) → stage → attach, **no fsync, no commit** — bulk transfer loops attach many files and batch durability. **Phase 75:** all four `attach_*`/`add_*_prestaged` take a trailing `const NodeExtras* extras = nullptr` (`vault::NodeExtras{std::vector<std::string> tags; bool favorite;}`, staging.h) applied to the node BEFORE tree insertion (tags capped at INDEX_MAX_TAGS by truncation) — transferred tags/favorites ride the same batched commit, never a separate one. On a crash before the next commit the attached nodes vanish; their chunks are orphaned dead ciphertext reclaimed by compact (same contract as a cancelled import).
 - `commit_staged(Vault&)` — **free friend, Phase 69.** One chunk-store fsync + one crash-safe `commit_index()` for everything attached since the last commit.
@@ -636,3 +649,22 @@ object IDs, verification counters, and DFS source ordinals. Both deep verificati
 passes share corruption-finding handling. Metadata comparison identifies the specific
 field; video write failures are distinguished from source-reader failure. Node IDs
 are generated once by resume mapping, not by metadata cloning.
+
+`rename_batch.*`: bounded PCRE2 preview/apply by stable node IDs. Preview retains
+secure before/after names and validates the final sibling namespace. Apply rejects
+stale IDs/parents/names, prepares rollback before mutation, and commits once.
+`Database::sync_metadata` uses transaction-local BLOB ID placeholders for names
+before upserts, permitting swaps/cycles without changing sibling uniqueness.
+
+`tag_normalization.h` shares whitespace trimming and case-insensitive deduplication
+between ordinary tag edits, bundle persistence and the bundle editor preview.
+
+`tag_bundles.*`: VaultSettings definitions keyed by stable 128-bit IDs; IndexNode
+explicit_tags + tag_bundles + tag_provenance yield local effective tags. Definition
+edit/delete and selection apply/remove commit atomically with rollback. Direct tag
+mutations operate on explicit ownership; category/tag rename visits effective,
+explicit, and bundle-member references. transfer/combine preserve independent
+ownership, materialize boundary inheritance, and never prune source branches after
+failed destination preparation/commit. See vault_format for schema 3 persistence.
+`visit_bundle_tag_references` and its recursive `visit_explicit_tag_references`
+helper are header templates, preserving the caller's visitor type.

@@ -32,6 +32,8 @@ cp scripts/build_7zip.sh "$STAGE/$PKG/decoder-source/scripts/"
 cp docs/ARCHIVE_DECODER.md "$STAGE/$PKG/decoder-source/README.md"
 cp -r assets "$STAGE/$PKG/"
 cp LICENSE README.md "$STAGE/$PKG/"
+mkdir -p "$STAGE/$PKG/licenses"
+cp vendor/pcre2/LICENCE.md "$STAGE/$PKG/licenses/PCRE2-LICENCE.md"
 
 cat > "$STAGE/$PKG/install.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -43,6 +45,7 @@ mkdir -p "$PREFIX/bin" "$PREFIX/share/osv"
 install -m 755 "$HERE/osv" "$PREFIX/bin/osv"
 install -m 755 "$HERE/libosv7zip.so" "$PREFIX/bin/libosv7zip.so"
 cp -r "$HERE/decoder-source" "$PREFIX/share/osv/"
+cp -r "$HERE/licenses" "$PREFIX/share/osv/"
 cp -r "$HERE/assets" "$PREFIX/share/osv/"
 # The binary resolves assets next to itself as a fallback; symlink them in.
 ln -sfn "$PREFIX/share/osv/assets" "$PREFIX/bin/assets"

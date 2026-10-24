@@ -1,5 +1,8 @@
 # Tech Stack
 
+CI pull-request bases include `main` and `phase-122*` for the owner-requested
+cascading Phase 122 delivery. Push CI remains limited to `main`.
+
 ## Language / standard
 - C++23 — use `std::span`, designated initialisers, `[[nodiscard]]`, `constexpr` freely.
 
@@ -202,3 +205,9 @@ When the build script changes (e.g., new decoder list, new demuxer, new hwaccel 
 the cache automatically misses and a full FFmpeg rebuild is triggered on the Linux leg — no
 manual version bump needed. Phase 101 bumped the cache key from `-v4-` to `-v6-` because the
 hashed build-script set shrank (`build_codecs.bat` + `build_ffmpeg_windows.sh` are gone).
+
+PCRE2 10.49 (`6f9d7c1373262c541324a16a358785b33ef116cf`) is a vendored
+submodule. Premake builds the static 8-bit UTF-8 interpreter using pcre2-shim
+headers/tables; JIT disabled. Regex allocation callbacks lock/wipe and enforce
+8 MiB budget, with pattern/depth/match/callout limits. BSD-3-Clause license is
+included in packaged releases and raw CI artifacts. See docs/VENDORED_DEPS.md.

@@ -13,6 +13,7 @@
 #include "ui/anim_model.h"
 #include "ui/anim_playback.h"
 #include "ui/batch_delete.h"
+#include "ui/bulk_rename.h"
 #include "ui/combine_dialog.h"
 #include "ui/consent_dialog.h"
 #include "ui/cover_cache.h"
@@ -105,6 +106,7 @@ struct GridLocation {
 class GalleryGrid : public Screen {
     friend struct TransferOwnershipTestPeer;  // deterministic worker/UI ownership regression
     friend struct ArchiveSelectionTestPeer;  // bulk archive dialog/queue regression
+    friend struct GalleryRenameTestPeer;
 public:
     // Dialog pair for import/export file/folder selection.
     struct GridDialogs {
@@ -169,6 +171,8 @@ private:
 void toggle_select();          // toggle the current item in the export selection
     void start_export();           // open the consent modal for the current selection
     void start_transfer();         // open the move-to-another-vault dialog
+    void start_bulk_rename();
+    void finish_bulk_rename();
     void start_rename();           // R: rename the focused tile
     void start_combine();          // Shift+M: combine nav_.path() into another gallery
     void jump_to_gallery(const std::string& path);   // absolute nav: ascend to root, then descend
@@ -275,6 +279,8 @@ void toggle_select();          // toggle the current item in the export selectio
     TransferDialog          transfer_;       // the active path before transfer_ moves it
     bool                    transfer_had_exclusive_ = false;  // Phase 50: track exclusive
     FailureListDialog       failures_;       // Phase 67: per-item transfer failures
+    std::vector<vault::RenameId> bulk_rename_ids_;
+    BulkRename bulk_rename_;
     RenameDialog            rename_;         // Phase 44 Part 2
     CombineDialog           combine_;        // Phase 44 Part 4
     bool                    combine_had_exclusive_ = false;   // Phase 50: track exclusive

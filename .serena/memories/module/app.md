@@ -179,6 +179,11 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   underneath. The teardown lives in a guard clause ABOVE the switch, not in any case.
 - Phase 113 adds the sibling `NavKind::ToVaultMaintenance`: directory-vault **Shift+C** opens F2
   directly on the Vault section instead of offering legacy single-file compaction. App's bundled
+  `MaintenanceUi` also owns category renames: typed references are updated on a
+  worker, progress counters render without screen/tree access, pending navigation
+  and import attachment wait, and shutdown joins before vault teardown. It remembers
+  the settings return section and avoids repeating object verification after a
+  metadata-only rename. Worker exceptions become a visible operation failure.
   `MaintenanceUi` runs deep verify, rechecked GC/staging cleanup, SQLCipher maintenance, and
   encrypted backup on one `std::async` worker. While it runs, the import queue is exclusive, the
   screen does not update/render, input and quit are swallowed, and the maintenance flag feeds the
@@ -300,3 +305,9 @@ teardown clears the modal and its pending batch before vault lock/switch.
 Screen-owned blocking jobs receive input before global help/settings shortcuts;
 those overlays may otherwise read a worker-owned vault tree. Split view owns
 and locks its additional pane vault independently of the app's active/warm slots.
+
+Import saves: App polls `ImportQueue::poll_save()` before screen updates and refreshes
+on completion. While `saving()`, it renders an animated save modal, gates navigation,
+input, help, screen updates, and idle lock, and retains quit requests. Busy imports
+keep the event loop ticking. Shutdown joins both maintenance and import saves
+before destroying screens or vaults.
