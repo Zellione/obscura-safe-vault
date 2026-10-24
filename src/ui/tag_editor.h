@@ -2,20 +2,25 @@
 
 #include <SDL3/SDL.h>
 
+#include <functional>
+#include <atomic>
+#include <thread>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "ui/tag_chip.h"     // ui::ChipWrap
-#include "ui/tag_tally.h"    // ui::TagTallyEntry, compute_tag_tally
+#include "ui/tag_chip.h"  // ui::ChipWrap
 #include "ui/tag_fields_form.h"
+#include "ui/tag_tally.h"  // ui::TagTallyEntry, compute_tag_tally
 #include "ui/text_input_model.h"
 #include "ui/widgets.h"
+#include "vault/op_progress.h"
 
 namespace gfx { class Renderer; class FontAtlas; class Window; }
 namespace vault { class Vault; }
 
 namespace ui {
+class ImportQueue;
 
 // A modal tag editor panel for editing tags on a gallery or image (Phase 12).
 // Shows the node's current tags, lets the user add a new tag (type + Enter),
@@ -29,7 +34,10 @@ namespace ui {
 //   4. close() or let it auto-close on Esc
 class TagEditor {
 public:
-    TagEditor(vault::Vault& vault, gfx::Window& win) : vault_(vault), win_(win) {}
+    TagEditor(vault::Vault& vault, gfx::Window& win, ImportQueue& queue)
+        : vault_(vault), win_(win), queue_(queue)
+    {}
+    ~TagEditor();
 
     void open(std::string node_path);  // activate for a single node
     // Activate for 2+ nodes at once (Phase 45 Part 2): shows the union of
@@ -39,6 +47,12 @@ public:
     void open_multi(std::vector<std::string> node_paths);
     void close();                       // deactivate and clear
     [[nodiscard]] bool active() const noexcept { return active_; }
+    [[nodiscard]] bool busy() const noexcept
+    {
+        return work_.thread.joinable();
+    }
+    // Poll only on the UI thread. A busy editor exclusively owns the vault tree.
+    void update();
 
     // Handle text input and keyboard events. Returns true if consumed.
     [[nodiscard]] bool handle_event(const SDL_Event& e);
@@ -46,6 +60,31 @@ public:
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
 
 private:
+    friend struct TagEditorTestAccess;
+    std::string_view finish_work();
+    void launch(std::function<void()> work);
+    template <typename Work> void run_work(const Work& work);
+    bool handle_bundle_event(const SDL_Event& event);
+    bool handle_bundle_form_event(const SDL_Event& e);
+    void render_bundles(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
+    void open_bundle_form(bool create);
+    void run_bundle_action(bool remove);
+    void preview_bundle_change();
+    void confirm_bundle_change();
+    bool handle_fields_event(const SDL_Event& e);
+    std::string bundle_original_name_;
+    std::string bundle_preview_;
+    bool bundle_mode_ = false;
+    bool bundle_form_ = false;
+    bool bundle_confirm_ = false;
+    bool bundle_delete_ = false;
+    int bundle_selected_ = 0;
+    int bundle_field_ = 0;
+    TextInputModel bundle_name_;
+    TextInputModel bundle_members_;
+    TextFieldChrome bundle_name_chrome_;
+    TextFieldChrome bundle_members_chrome_;
+    void finish_add();
     void refresh_tags();              // reload the node's current tags from the vault
     void refresh_vocabulary();        // reload the vault-wide tag vocabulary (Phase 29)
     void refresh_suggestions();       // recompute the autosuggest dropdown for the buffer
@@ -69,9 +108,24 @@ private:
 
     vault::Vault&        vault_;
     gfx::Window&         win_;
+    ImportQueue& queue_;
+    enum class WorkFailure { None, Memory, Size, System };
+    struct WorkState {
+        std::atomic<bool> done{false};
+        WorkFailure failure = WorkFailure::None; // Read only after join.
+        std::jthread thread;
+    };
+    WorkState work_;
+
+    vault::OpProgress progress_;
+    bool owns_exclusive_ = false;
+    bool loading_ = false;
+    std::string pending_tag_;
+    std::string pending_category_;
     TagFieldsForm        fields_form_{vault_, win_};
     bool                       active_ = false;
     std::vector<std::string>   node_paths_;    // one or many (Phase 45 Part 2)
+    std::vector<std::string> tag_sources_;
     std::vector<TagTallyEntry> tally_;         // union of node_paths_' tags + counts
     std::vector<std::string>   inherited_;     // read-only ancestor-gallery tags
                                                 // (single-node mode only — see refresh_tags)

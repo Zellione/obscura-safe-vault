@@ -1,4 +1,8 @@
 #include "vault.h"
+#include "vault/tag_bundles.h"
+#include "vault/tag_normalization.h"
+
+#include <unordered_map>
 
 #include <algorithm>
 #include <array>
@@ -135,20 +139,6 @@ using vault_ops::for_each_media;
 using vault_ops::resolve_gallery;
 using vault_ops::split_path;
 
-// Trim ASCII whitespace from start and end of a string_view.
-std::string_view trim_ws(std::string_view s)
-{
-    size_t start = 0;
-    while (start < s.size() &&
-           (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r'))
-        ++start;
-    size_t end = s.size();
-    while (end > start &&
-           (s[end - 1] == ' ' || s[end - 1] == '\t' || s[end - 1] == '\n' || s[end - 1] == '\r'))
-        --end;
-    return s.substr(start, end - start);
-}
-
 // Case-insensitive substring check.
 bool ci_contains(std::string_view haystack, std::string_view needle)
 {
@@ -166,36 +156,6 @@ bool ci_contains(std::string_view haystack, std::string_view needle)
         if (match) return true;
     }
     return false;
-}
-
-// Normalise a single tag: trim whitespace, return empty_view if empty after trim.
-std::string_view normalise_tag(std::string_view tag)
-{
-    return trim_ws(tag);
-}
-
-// Normalise and deduplicate a list of tags (case-insensitively, keeping first
-// occurrence's casing). Empties and whitespace-only tags are dropped.
-std::vector<std::string> normalise_tags(const std::vector<std::string>& input)
-{
-    std::vector<std::string> out;
-    for (const auto& tag : input) {
-        auto trimmed = normalise_tag(tag);
-        if (trimmed.empty()) continue;
-
-        // Check for case-insensitive duplicate.
-        bool found = false;
-        for (const auto& existing : out) {
-            if (tag_ci_equal(existing, trimmed)) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            out.emplace_back(trimmed);
-        }
-    }
-    return out;
 }
 
 // Build effective_tags: union of node's own tags and inherited tags, case-insensitively
@@ -1958,51 +1918,125 @@ VaultResult set_favorites_batch(Vault& v, std::span<const std::string> node_path
     return changed ? v.commit_index() : Ok;
 }
 
-VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths, std::string_view tag)
-{
-    using enum VaultResult;
-    if (!v.unlocked_) return Locked;
-    if (v.legacy_read_only_) return InvalidArg;
-    const auto trimmed = normalise_tag(tag);
-    if (trimmed.empty()) return InvalidArg;
+namespace {
+using SelectionChildren = std::unordered_map<std::string_view, IndexNode*>;
 
-    bool changed = false;
-    for (const std::string& path : node_paths) {
-        if (IndexNode* node = v.resolve_node(path); node) {
-            const bool dup =
-                std::ranges::any_of(node->tags, [&trimmed](const crypto::SecureString& e) {
-                    return tag_ci_equal(e.view(), trimmed);
-                });
-            if (!dup) {
-                node->tags.emplace_back(trimmed);
-                changed = true;
-            }
+void index_selection_children(SelectionChildren& children, IndexNode* parent)
+{
+    if (!parent || !parent->is_gallery()) return;
+    children.reserve(parent->children.size());
+    for (auto& child : parent->children)
+        children.try_emplace(child.name.view(), &child);
+}
+} // namespace
+
+std::vector<IndexNode*> resolve_node_selection(Vault& v, std::span<const std::string> paths)
+{
+    std::unordered_map<std::string_view, SelectionChildren> parents;
+    std::vector<IndexNode*> result;
+    result.reserve(paths.size());
+    for (const auto& path : paths) {
+        if (path.empty()) {
+            result.push_back(v.resolve_node(""));
+            continue;
         }
-        // missing: skipped, not an error
+        const std::string_view view{path};
+        const auto slash = view.find_last_of('/');
+        const auto parent = slash == std::string_view::npos ? std::string_view{} : view.substr(0, slash);
+        const auto leaf = slash == std::string_view::npos ? view : view.substr(slash + 1);
+        auto [it, inserted] = parents.try_emplace(parent);
+        if (inserted) index_selection_children(it->second, v.resolve_node(parent));
+        const auto child = it->second.find(leaf);
+        result.push_back(child == it->second.end() ? nullptr : child->second);
     }
-    // One crash-safe index swap for the whole batch; none for a no-op batch.
-    return changed ? v.commit_index() : Ok;
+    return result;
 }
 
-VaultResult remove_tag_batch(Vault& v, std::span<const std::string> node_paths,
-                             std::string_view tag)
+namespace {
+struct TagBatchChanges {
+    TagBatchChanges() = default;
+    TagBatchChanges(const TagBatchChanges&) = delete;
+    TagBatchChanges& operator=(const TagBatchChanges&) = delete;
+    TagBatchChanges(TagBatchChanges&&) = delete;
+    TagBatchChanges& operator=(TagBatchChanges&&) = delete;
+    struct Prior {
+        IndexNode* node;
+        std::vector<crypto::SecureString> tags;
+        std::vector<crypto::SecureString> explicit_tags;
+        bool initialized;
+    };
+    std::vector<Prior> originals;
+    bool committed = false;
+    ~TagBatchChanges()
+    {
+        if (!committed)
+            for (auto it = originals.rbegin(); it != originals.rend(); ++it) {
+                it->node->tags.swap(it->tags);
+                it->node->explicit_tags.swap(it->explicit_tags);
+                it->node->tag_provenance = it->initialized;
+            }
+    }
+    VaultResult apply(IndexNode* node, std::string_view tag, bool remove,
+                      const VaultSettings& settings)
+    {
+        using enum VaultResult;
+        if (!node) return Ok;
+        const auto matches = [tag](const crypto::SecureString& item) {
+            return tag_ci_equal(item.view(), tag);
+        };
+        if (const auto& manual = node->tag_provenance && !node->tag_bundles.empty()
+                                     ? node->explicit_tags
+                                     : node->tags;
+            std::ranges::any_of(manual, matches) != remove)
+            return Ok;
+        originals.emplace_back(node, node->tags, node->explicit_tags, node->tag_provenance);
+        initialize_tag_provenance(*node);
+        if (remove)
+            std::erase_if(node->explicit_tags, matches);
+        else
+            node->explicit_tags.emplace_back(tag);
+        return rebuild_bundle_tags(*node, settings) ? Ok : InvalidArg;
+    }
+};
+
+}  // namespace
+
+VaultResult mutate_tags_batch(Vault& v, std::span<const std::string> paths, std::string_view tag,
+                              bool remove, OpProgress* progress)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
     if (v.legacy_read_only_) return InvalidArg;
     const auto trimmed = normalise_tag(tag);
-    if (trimmed.empty()) return Ok;  // idempotent, like remove_tag
-
-    bool changed = false;
-    for (const std::string& path : node_paths) {
-        IndexNode* node = v.resolve_node(path);
-        if (!node) continue;
-        const auto removed = std::erase_if(node->tags, [&trimmed](const crypto::SecureString& e) {
-            return tag_ci_equal(e.view(), trimmed);
-        });
-        changed = changed || removed > 0;
+    if (trimmed.empty()) return remove ? Ok : InvalidArg;
+    if (trimmed.size() > 65535 || trimmed.contains('\0')) return InvalidArg;
+    if (progress) {
+        progress->total.store(static_cast<int>(paths.size()));
+        progress->done.store(0);
+        if (progress->cancel.load()) return Ok;
     }
-    return changed ? v.commit_index() : Ok;
+    TagBatchChanges changes;
+    for (auto* node : resolve_node_selection(v, paths)) {
+        if (progress && progress->cancel.load()) return Ok;
+        if (const auto result = changes.apply(node, trimmed, remove, vault_settings(v));
+            result != Ok)
+            return result;
+        if (progress) progress->done.fetch_add(1);
+    }
+    if (progress && progress->cancel.load()) return Ok;
+    const auto status = changes.originals.empty() ? Ok : v.commit_index();
+    changes.committed = status == Ok;
+    return status;
+}
+
+VaultResult add_tag_batch(Vault& v, std::span<const std::string> paths, std::string_view tag)
+{
+    return mutate_tags_batch(v, paths, tag, false);
+}
+
+VaultResult remove_tag_batch(Vault& v, std::span<const std::string> paths, std::string_view tag)
+{
+    return mutate_tags_batch(v, paths, tag, true);
 }
 
 std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const
@@ -2149,6 +2183,7 @@ TagRenamePlan plan_tag_rename(IndexNode& root, VaultSettings& settings,
         }
     };
     inspect_node_tags(root, inspect);
+    visit_bundle_tag_references(root, settings, inspect);
     for (auto& description : settings.tag_descriptions) inspect(description.tag);
     for (auto& field : settings.tag_field_values) inspect(field.tag);
     return plan;
@@ -2219,6 +2254,147 @@ VaultResult rename_tag(Vault& v, std::string_view old_tag, std::string_view new_
     return result;
 }
 
+namespace {
+
+struct CategoryRenamePlan {
+    std::string_view old_name;
+    std::string_view new_name;
+    VaultResult status = VaultResult::Ok;
+    std::vector<std::pair<crypto::SecureString*, crypto::SecureString>> changes;
+
+    std::optional<crypto::SecureString> replacement(std::string_view tag)
+    {
+        const auto prefix = tag_category_prefix(tag);
+        if (tag_ci_equal(prefix, old_name)) {
+            if (new_name.size() + tag.size() - old_name.size() > 65535) {
+                status = VaultResult::InvalidArg;
+                return std::nullopt;
+            }
+            crypto::SecureString result;
+            const auto suffix = tag.substr(old_name.size());
+            if (!result.resize(new_name.size() + suffix.size())) {
+                status = VaultResult::IoError;
+                return std::nullopt;
+            }
+            std::memcpy(result.data(), new_name.data(), new_name.size());
+            std::memcpy(result.data() + new_name.size(), suffix.data(), suffix.size());
+            return result;
+        }
+        if (tag_ci_equal(prefix, new_name)) status = VaultResult::AlreadyExists;
+        return std::nullopt;
+    }
+
+    void inspect(crypto::SecureString& tag)
+    {
+        if (auto next = replacement(tag.view())) changes.emplace_back(&tag, std::move(*next));
+    }
+
+    bool rewrite(std::string& tag)
+    {
+        if (auto next = replacement(tag)) {
+            tag.assign(next->view());
+            return true;
+        }
+        return false;
+    }
+};
+
+VaultResult prepare_category_queries(CategoryRenamePlan& plan, std::vector<SavedSearch>& searches)
+{
+    using enum VaultResult;
+    for (auto& search : searches) {
+        ui::AdvancedQuery query;
+        if (!ui::deserialize_query(search.query.as_span(), query)) return BadFormat;
+        bool changed = false;
+        for (auto& item : query.include)
+            changed = plan.rewrite(item.tag) || changed;
+        for (auto& tag : query.exclude)
+            changed = plan.rewrite(tag) || changed;
+        for (auto& group : query.groups)
+            for (auto& tag : group.tags)
+                changed = plan.rewrite(tag) || changed;
+        if (plan.status != Ok) return plan.status;
+        if (!changed) continue;
+        const auto blob = ui::serialize_query(query);
+        if (!search.query.assign(blob)) return IoError;
+    }
+    return Ok;
+}
+
+struct AppliedCategoryRename {
+    CategoryRenamePlan& plan;
+    std::vector<SavedSearch>& stored;
+    std::vector<SavedSearch>& prepared;
+    bool committed = false;
+    AppliedCategoryRename(CategoryRenamePlan& p, std::vector<SavedSearch>& s,
+                          std::vector<SavedSearch>& next)
+        : plan(p), stored(s), prepared(next)
+    {
+        for (auto& [target, value] : plan.changes)
+            target->swap(value);
+        stored.swap(prepared);
+    }
+    AppliedCategoryRename(const AppliedCategoryRename&) = delete;
+    AppliedCategoryRename& operator=(const AppliedCategoryRename&) = delete;
+    AppliedCategoryRename(AppliedCategoryRename&&) = delete;
+    AppliedCategoryRename& operator=(AppliedCategoryRename&&) = delete;
+    ~AppliedCategoryRename()
+    {
+        if (committed) return;
+        for (auto& [target, value] : plan.changes)
+            target->swap(value);
+        stored.swap(prepared);
+    }
+};
+
+}  // namespace
+
+VaultResult rename_tag_category(Vault& v, std::string_view old_name, std::string_view new_name,
+                                OpProgress* progress)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    if (v.legacy_read_only_) return InvalidArg;
+    old_name = normalise_tag(old_name);
+    new_name = normalise_tag(new_name);
+    if (old_name.empty() || new_name.empty() || new_name.size() > INDEX_MAX_CATEGORY_BYTES ||
+        new_name.contains(':') || new_name.contains('\0'))
+        return InvalidArg;
+    auto category = std::ranges::find_if(v.settings_.categories, [old_name](const auto& item) {
+        return tag_ci_equal(item.name.view(), old_name);
+    });
+    if (category == v.settings_.categories.end()) return NotFound;
+    if (category->name == new_name) return Ok;
+    for (const auto& item : v.settings_.categories)
+        if (&item != std::to_address(category) && tag_ci_equal(item.name.view(), new_name)) return AlreadyExists;
+
+    CategoryRenamePlan plan{old_name, new_name, Ok, {}};
+    std::vector<crypto::SecureString*> refs;
+    inspect_node_tags(v.root_, [&refs](auto& tag) { refs.push_back(&tag); });
+    visit_bundle_tag_references(v.root_, v.settings_,
+                                [&refs](auto& tag) { refs.push_back(&tag); });
+    for (auto& item : v.settings_.tag_descriptions)
+        refs.push_back(&item.tag);
+    for (auto& item : v.settings_.tag_field_values)
+        refs.push_back(&item.tag);
+    if (progress) {
+        progress->total.store(static_cast<int>(refs.size()));
+        progress->done.store(0);
+    }
+    for (auto* ref : refs) {
+        plan.inspect(*ref);
+        if (progress) progress->done.fetch_add(1);
+    }
+    if (plan.status != Ok) return plan.status;
+    plan.changes.emplace_back(&category->name, crypto::SecureString(new_name));
+    auto searches = v.saved_searches_;
+    if (const auto result = prepare_category_queries(plan, searches); result != Ok) return result;
+    AppliedCategoryRename applied{plan, v.saved_searches_, searches};
+    const auto result = v.commit_index();
+    applied.committed = result == Ok;
+    return result;
+}
+
 VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::string>& tags)
 {
     using enum VaultResult;
@@ -2229,24 +2405,21 @@ VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::s
     if (!node) return NotFound;
 
     auto normalised = normalise_tags(tags);
+    if (const auto &manual =
+            node->tag_provenance && !node->tag_bundles.empty() ? node->explicit_tags : node->tags;
+        std::ranges::equal(manual, normalised, [](const auto& a, const auto& b) { return a == b; }))
+        return Ok;
 
-    // Only commit if the tags changed (compare case-insensitively against the
-    // stored secure tags, then replace in place).
-    bool same = normalised.size() == node->tags.size();
-    if (same) {
-        for (size_t i = 0; i < node->tags.size(); ++i) {
-            if (node->tags[i] != normalised[i]) {
-                same = false;
-                break;
-            }
-        }
-    }
-    if (same) return Ok;
-
-    node->tags.clear();
+    TagBatchChanges rollback;
+    rollback.originals.emplace_back(node, node->tags, node->explicit_tags, node->tag_provenance);
+    node->tag_provenance = true;
+    node->explicit_tags.clear();
     for (const auto& t : normalised)
-        node->tags.emplace_back(t);
-    return commit_index();
+        node->explicit_tags.emplace_back(t);
+    if (!rebuild_bundle_tags(*node, settings_)) return InvalidArg;
+    const auto status = commit_index();
+    rollback.committed = status == Ok;
+    return status;
 }
 
 VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
@@ -2261,30 +2434,26 @@ VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
     IndexNode* node = resolve_node(node_path);
     if (!node) return NotFound;
 
-    // Check for case-insensitive duplicate.
-    for (const auto& existing : node->tags) {
-        if (tag_ci_equal(existing.view(), trimmed)) return Ok;
-    }
-
-    // Not found, add it.
-    node->tags.emplace_back(trimmed);
-    return commit_index();
+    const std::vector paths{std::string(node_path)};
+    return mutate_tags_batch(*this, paths, trimmed, false);
 }
 
 namespace {
 
 // Depth-first tag prune over the index tree; counts into `stats`.
 void prune_node_tags(IndexNode& node, const std::function<bool(std::string_view)>& keep,
-                     PruneTagsStats& stats)
+                     PruneTagsStats& stats, const VaultSettings& settings)
 {
+    initialize_tag_provenance(node);
     if (const auto removed = std::erase_if(
-            node.tags, [&keep](const crypto::SecureString& t) { return !keep(t.view()); });
+            node.explicit_tags, [&keep](const crypto::SecureString& t) { return !keep(t.view()); });
         removed > 0) {
         stats.tags_removed += removed;
         ++stats.nodes_touched;
     }
+    (void)rebuild_bundle_tags(node, settings);
     for (IndexNode& c : node.children)
-        prune_node_tags(c, keep, stats);
+        prune_node_tags(c, keep, stats, settings);
 }
 
 }  // namespace
@@ -2299,7 +2468,7 @@ VaultResult Vault::prune_tags(const std::function<bool(std::string_view)>& keep,
     if (!keep) return InvalidArg;
 
     PruneTagsStats local;
-    prune_node_tags(root_, keep, local);
+    prune_node_tags(root_, keep, local, settings_);
     if (stats) *stats = local;
 
     if (local.tags_removed == 0) return Ok;  // nothing changed — no commit
@@ -2318,15 +2487,8 @@ VaultResult Vault::remove_tag(std::string_view node_path, std::string_view tag)
     IndexNode* node = resolve_node(node_path);
     if (!node) return NotFound;
 
-    // Find and remove the tag case-insensitively.
-    for (auto it = node->tags.begin(); it != node->tags.end(); ++it) {
-        if (tag_ci_equal(it->view(), trimmed)) {
-            node->tags.erase(it);
-            return commit_index();
-        }
-    }
-
-    return Ok;  // Idempotent: tag not found.
+    const std::vector paths{std::string(node_path)};
+    return mutate_tags_batch(*this, paths, trimmed, true);
 }
 
 std::vector<SearchHit> Vault::search(std::string_view query, SearchScope scope) const

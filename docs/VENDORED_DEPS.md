@@ -9,6 +9,7 @@ This document tracks the pinned versions of all vendored third-party libraries a
 | **SDL3** | 3.4.10 | Windowing, rendering, input, file dialogs | No |
 | **monocypher** | 4.0.2 (0d85f98) | AEAD cipher (XChaCha20-Poly1305), KDF (Argon2id), cryptographic utilities | No |
 | **stb** | master | Header-only image decode (JPEG/PNG/GIF/BMP), text rendering | **Yes** |
+| **PCRE2** | 10.49 (`6f9d7c1373262c541324a16a358785b33ef116cf`) | Bounded UTF-8 regex rename; static 8-bit interpreter, no JIT; BSD-3-Clause | **Yes** |
 | **miniz** | e78dfd2 (master) | ZIP archive decompression | **Yes** |
 | **libwebp** | 1.4.0 | WebP image decoding (decode-only) | **Yes** |
 | **libde265** | 1.0.15 (v1.0.15, 17bb8d9f) | HEVC video codec (decode-only, internal to libheif) | **Yes** |
@@ -39,7 +40,7 @@ This minimizes attack surface: **untrusted input enters only through image/video
 
 The libraries marked "**Yes**" in the "Parses Untrusted Input" column are reviewed quarterly for known CVEs:
 
-**Affected libraries:** stb, miniz, libwebp, libde265, libaom, libheif, FFmpeg, nlohmann/json, zlib, xz/liblzma, libarchive, SQLCipher, OpenSSL
+**Affected libraries:** PCRE2, stb, miniz, libwebp, libde265, libaom, libheif, FFmpeg, nlohmann/json, zlib, xz/liblzma, libarchive, SQLCipher, OpenSSL
 
 **Review schedule:** Every 3 months (or upon public disclosure of a critical issue)
 
@@ -178,3 +179,18 @@ linked statically into `libheif.a` (verified by undefined-symbol scan).
 ## Related
 
 See [AGENTS.md § Dependency management](../AGENTS.md) for vendoring strategy and build instructions.
+
+### PCRE2 rename engine (Phase 122C)
+
+PCRE2 is built directly by Premake from its pinned submodule; generic upstream
+headers and the distributed character table are included through `vendor/pcre2-shim`.
+No system regex library or build-time download is used. UTF/UCP are enabled; JIT,
+POSIX wrappers, command-line tools and locale table generation are disabled.
+Compiled patterns and scratch allocations use a capped, locked/wiped allocator.
+See [122C limits and integration notes](roadmap/phase-122c-implementation.md).
+
+Security review on 2026-10-23 used the upstream [release notes](https://github.com/PCRE2Project/pcre2/releases)
+and [security advisories](https://github.com/PCRE2Project/pcre2/security). The pin
+includes the 10.48 fixes and 10.49 security fix (GHSA-r9hj-j2rw-4q3m); our build
+also disables the JIT path involved in that latest advisory. Keep PCRE2 in the
+quarterly review and package its upstream `LICENCE.md` with notices.

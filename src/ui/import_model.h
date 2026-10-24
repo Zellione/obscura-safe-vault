@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SDL3/SDL_keycode.h>
+#include "vault/op_progress.h"
 
 #include <cstdint>
 #include <string>
@@ -28,6 +29,8 @@ struct ImportTaskInfo {
     int             imported = 0;
     int             skipped = 0;
     std::string     error;                    // set for Failed
+
+    vault::OpPhase phase = vault::OpPhase::Working;
 
     bool operator==(const ImportTaskInfo&) const = default;
 };

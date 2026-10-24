@@ -577,6 +577,18 @@ the vault and are discarded on session teardown. Mapping preserves destination
 metadata; cleanup never changes explicit edits. Empty results are skipped.
 
 ## Tag rename (Phase 118)
+F2 Tag Colours R queues a vault-wide category rename, including structured tag
+references and saved-query conditions. Preparation/save runs under App maintenance
+worker ownership with progress; navigation and import attachment wait. A failed
+rename returns to the same settings section with unchanged metadata. Case-only
+renames work; target namespaces and malformed queries are rejected.
+
+Selection tag editing loads and applies tags asynchronously. While the worker
+owns the vault tree, GalleryGrid/ImageViewer draw only the progress modal and
+block global mutations/idle lock. Esc requests cancellation before final save;
+closing joins before vault teardown. Imports must be idle before opening the
+editor and remain held until it closes.
+
 Gallery/list pointer motion focuses the item under the pointer using the
 scroll-aware hit test. R renames that gallery/image/video; keyboard navigation
 overrides focus until the next pointer motion. Enter saves and Esc cancels.
@@ -622,3 +634,20 @@ all nested originals and empty galleries. This applies to grid, favorites/tag
 collections, and advanced search. Overlapping selections export once. Existing
 names are suffixed, never merged/overwritten. Progress counts files and folders
 as items; Esc keeps completed output and stops between entries.
+
+Import status rows expose discovery, extraction/reading, and processing phases.
+V3 metadata saves show an animated indeterminate modal; navigation waits for the
+durable save and no cancellation hint is offered during this non-cancellable step.
+
+Bulk rename: select tiles then Shift+R. Tab switches regex/replacement; Enter
+previews then applies. F3 preserves media extension (on), F4 recursion (off), F5
+case sensitivity (on), F6 all matches (off), F7 full-name detail. PgUp/PgDn scroll
+preview rows. Esc cancels preparation; durable commit cannot be cancelled.
+Invalid/colliding rows block the whole batch; option/text edits invalidate preview.
+
+Meta tags: G opens selection tags, F3 switches bundle view. Up/Down selects;
+Enter applies; Delete removes the application. F8 creates, F4 edits, F6 previews
+definition deletion. Tab switches name/members, semicolons separate members
+(backslash escaping), F5 previews affected applications and effective changes,
+Enter confirms, Esc backs out. Definition edits affect all applications. Existing
+manual tags and other bundle/ancestor contributions survive bundle removal.

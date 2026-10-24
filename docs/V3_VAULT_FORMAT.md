@@ -1,6 +1,6 @@
 # V3 directory vault format
 
-Status: production directory format. Container version 3; metadata schema version 2.
+Status: production directory format. Container version 3; metadata schema version 3.
 
 All integers are unsigned little-endian. All reserved bytes must be zero when written and rejected when a feature-bearing reader cannot safely ignore them. Every count, offset, and length is checked for overflow and against the limits below before allocation or I/O.
 
@@ -74,20 +74,80 @@ The pinned baseline is SQLCipher 4.19.0 with encrypted header, 4096-byte cipher 
 - `vault_meta`: exactly one row; schema version, logical root ID, application generation, settings and migration watermarks.
 - `nodes`: 16-byte primary ID, nullable parent, node type, display name, sibling order, favorite, timestamps, format/dimensions/duration/codec/original size. The root is the only row with no parent.
 - `objects`: 16-byte primary ID, owning node, role, encrypted/plain lengths, frame size/count, creation generation, and state. `(node_id, role)` is unique where the role is singular.
-- `tags` and `node_tags`: canonical case-insensitive identity plus preserved display spelling and many-to-many assignment.
+- `tags` and `node_tags`: canonical case-insensitive identity plus preserved per-node display spelling/order and many-to-many assignment. `node_tags.explicit_assignment` records independent manual ownership (see below).
+- `tag_bundles`: meta-tag definitions keyed by a nonzero 16-byte `bundle_id`, with a case-insensitively unique name of 1–255 UTF-8 bytes.
+- `bundle_tags`: ordered ordinary-tag members (`bundle_id`, `tag`, `position`); member text is 1–65535 bytes and case-insensitively unique within a bundle. Bundles contain ordinary tags, not nested bundles.
+- `node_bundles`: applied bundle IDs and their order (`node_id`, `bundle_id`, `position`); each node/bundle pair is unique. Foreign keys bind assignments and members to their owning nodes/definitions.
 - category, template-field, tag-field-value, saved-search, and settings tables corresponding to every current index-v13 field.
 
-All connections enable foreign keys. Deleting an original node cannot cascade silently over an inconsistent object set. Tree-cycle validation is application-enforced inside the same writer transaction. Text/blob/count limits are checked both at the wrapper and with schema constraints where practical. The normative initial DDL is `vault::v3::SCHEMA_SQL` in `src/vault/v3_schema.h`; Phase 107 must change it only through a versioned migration. Phase 105 tests its foreign keys, identity/role/root/tag constraints, schema version, and gallery/tag query plans.
+All connections enable foreign keys. Deleting an original node cannot cascade silently over an inconsistent object set. Tree-cycle validation is application-enforced inside the same writer transaction. Text/blob/count limits are checked both at the wrapper and with schema constraints where practical. The normative current DDL is `vault::v3::SCHEMA_SQL` in `src/vault/v3_schema.h`. Changes require a versioned migration. Phase 105 tests its foreign keys, identity/role/root/tag constraints, schema version, and gallery/tag query plans.
 
-Schema v2 upgrades v1 in one encrypted database transaction under the writer
-lease. It stores video durations in microseconds (v1 milliseconds are multiplied
-by 1000), allows case-distinct sibling names, and accepts tag display names up to
-65535 bytes. The 4096-tag limit applies per node, not to the entire vault.
-Node-tag assignments preserve display spelling and insertion order independently
-of canonical tag identity. Description and field-value rows preserve their
-original spelling and ordering too. Upgrades leave object files and the header
-unchanged. Older readers reject schema v2. Read-only v1 snapshots are upgraded
-in an in-memory SQLCipher copy for inspection/restore; the source stays unchanged.
+### Tag provenance (schema v3)
+
+`node_tags` stores a node's own materialized tags: the case-insensitive union of
+its explicit tags and all tags contributed by its applied bundles. Tags inherited
+from ancestor galleries remain separate from that node's own assignments.
+`explicit_assignment` is exactly `0` or `1`, defaults to `1`, and is `1` whenever
+a direct tag has independent manual ownership, even if a bundle also supplies it.
+There is no persisted reference counter: `node_bundles` and `bundle_tags` retain
+the contributing relationships.
+
+Removing a bundle removes only contributions no longer supplied by another
+applied bundle or an explicit assignment. Adding a tag explicitly while a bundle
+already supplies it establishes independent ownership; removing that explicit
+assignment leaves any bundle contribution active. Editing a definition updates
+its applied nodes. Definitions, assignments, materialized tags and generation
+are saved together in the metadata transaction. On materialization, the reader
+checks that the persisted own-tag set agrees with the reconstructed union,
+then retains the stored display spelling and order.
+
+### Metadata upgrades and reader compatibility
+
+Schema v2 introduced microsecond video durations (v1 milliseconds are multiplied
+by 1000), case-distinct sibling names, tag names up to 65535 bytes, and preserved
+per-node tag spelling/order. Description and field-value rows also retain their
+original spelling and ordering. Schema v3 adds the provenance column and three
+bundle tables. Upgrading existing v1/v2 assignments marks **every existing direct
+tag explicit/manual**, with no bundle definitions or applications inferred from
+those tags. Thus later bundle removal cannot erase pre-upgrade assignments.
+
+Writable upgrades require the writer lease and leave object files and
+`vault.header` unchanged. Each migration step is an encrypted database
+transaction. A v1 database first undergoes the table-rebuild step, committing
+`PRAGMA user_version=2` with the current `vault_meta.schema_version=3`, then
+undergoes the provenance step in a separate transaction. If the second step
+fails or is interrupted, its partial changes roll back and a subsequent open
+retries it from this intermediate state. Successful completion sets both
+version fields to `SCHEMA_VERSION` (currently 3). The whole v1-to-v3 chain is
+not a single transaction.
+
+Read-only v1/v2 inspection and restore upgrade a private in-memory SQLCipher
+copy; the source snapshot is unchanged. Readers whose supported metadata
+version is less than 3 reject a completed schema-v3 database as an unsupported
+version. The container version remains 3 and the object format remains 1;
+neither implies that an older application understands the newer metadata.
+Legacy single-file vaults do not acquire bundle provenance; their existing tags
+remain explicit when converted to directory storage.
+
+### Copies and encrypted backups
+
+Encrypted backup/restore copies the complete metadata database, including
+bundle definitions, applied bundle IDs and explicit-assignment flags, and copies
+referenced object ciphertext without changing its identities. Restore creates
+a new destination rather than overwriting an existing vault. Older snapshots
+can be restored using the in-memory metadata upgrade above without modifying
+the source backup.
+
+Cross-vault media/gallery transfer is different: media is authenticated and
+re-encrypted under destination object/node identities. Applied bundle
+definitions and ownership are transferred too. Compatible destination
+bundle definitions can be reused; conflicting names receive an imported-name
+suffix, and conflicting IDs are remapped instead of replacing a different
+destination definition. Independent destination/manual assignments survive a
+merge. Ancestor tags outside a copied selection are materialized as independent
+tags where needed; inheritance inside a copied gallery tree remains inheritance,
+so removing a copied parent bundle does not leave spurious explicit child tags.
+Bundle-bearing transfers require directory-vault destinations.
 
 Verification requires each media node to reference its correctly typed original
 with matching logical size. Thumbnails and posters are optional; any present
@@ -225,8 +285,12 @@ semantics do not apply to a directory vault.
 - Node-name component: current 255-byte safe-name limit.
 - Tree depth: at most 128 edges from the logical root.
 - Object frame plaintext: at most 1 MiB in format 1 unless a future feature flag specifies another bounded profile.
-- At most 4,096 tags and saved searches, 256 tag categories, 16 fields per
-  category, 16,384 assigned tag-field values, and 1,048,576 video frames.
+- At most 4,096 own tags per node and 4,096 saved searches; 256 tag categories,
+  16 fields per category, 16,384 assigned tag-field values, and 1,048,576 video frames.
+- Meta-tag limits are 4,096 definitions per vault, 4,096 members per definition,
+  and 4,096 applied bundles per node. Their materialized own-tag union must still
+  fit the per-node tag limit. These are application bounds (`INDEX_MAX_TAGS`),
+  not a vault-wide cap on distinct ordinary tags.
 - Category/field names are at most 64 UTF-8 bytes; field values 256 bytes; tag
   descriptions 512 bytes; saved-search query blobs 1 MiB. Phase 107 enforces
   these wrapper-level aggregate limits in addition to schema constraints.

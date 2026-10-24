@@ -24,7 +24,8 @@ on:
       - '.gitignore'
       - '.serena/**'
   pull_request:
-    branches: [main]
+    # Phase 122 is delivered as cascading PRs; validate each predecessor base.
+    branches: [main, 'phase-122*']
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
@@ -135,6 +136,7 @@ jobs:
             vendor/7zip-shim/
             vendor/monocypher/src/
             vendor/monocypher/LICENCE.md
+            vendor/pcre2/LICENCE.md
             scripts/build_7zip.sh
             docs/ARCHIVE_DECODER.md
           retention-days: 7
@@ -468,7 +470,9 @@ jobs:
   sonarqube:
     name: SonarQube analysis / Linux
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Cold dependency builds plus coverage and CFamily analysis exceeded 30m
+    # on PR #266 (211/212 units analyzed). Leave time to publish the result.
+    timeout-minutes: 45
     if: github.event_name != 'schedule'
 
     env:

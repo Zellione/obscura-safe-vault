@@ -5,6 +5,8 @@
 #include "ui/zip_import.h"
 #include "ui/zip_test_helpers.h"
 #include "vault/vault.h"
+#include "vault/staging.h"
+#include "ui/archive_test_helpers.h"
 #include "image/fixtures.h"
 #include "crypto/secure_mem.h"
 
@@ -254,4 +256,69 @@ TEST(import_bench_import_queue_vs_sync)
     if (std::getenv("OSV_BENCH_DIR")) {
         cleanup_dir(dir);
     }
+}
+
+// Opt-in production-v3 benchmark. Synthetic plaintext fixtures only. Reports
+// the worst frame-pump call separately from total durable import throughput.
+// OSV_BENCH_122F=1 [OSV_BENCH_DIR=/disk/path] osv_tests import_bench_v3
+TEST(import_bench_v3_folder_zip_solid)
+{
+    if (!std::getenv("OSV_BENCH_122F")) return;
+    const auto base = std::getenv("OSV_BENCH_DIR");
+    const auto dir = (base ? fs::path(base) : fs::temp_directory_path()) / "osv_122f_bench";
+    fs::create_directories(dir / "input");
+    constexpr int n = 128;
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> entries;
+    for (int i = 0; i < n; ++i) {
+        entries.emplace_back(std::to_string(i) + ".png", synthetic_png(i));
+        const auto& [name, bytes] = entries.back();
+        std::ofstream(dir / "input" / name, std::ios::binary).write(
+            reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+    const auto zip = ziptest::make_archive(entries, dir / "images.zip");
+#ifdef OSV_VENDORED_ARCHIVE
+    const auto solid = archivetest::make_archive(entries, "7zip", dir / "images.7z");
+#endif
+    for (int mode = 0; mode < 3; ++mode) {
+#ifndef OSV_VENDORED_ARCHIVE
+        if (mode == 2) continue;
+#endif
+        const auto path = dir / (std::to_string(mode) + ".osv");
+        fs::remove_all(path); // Own synthetic benchmark destination only.
+        vault::Vault v;
+        REQUIRE(vault::Vault::create_directory(path.string(), std::vector<uint8_t>{'p','w'},
+            {}, ziptest::kTestKdf, v) == vault::VaultResult::Ok);
+        // Existing destination metadata exposes full-snapshot SQL cost.
+        for (int i = 0; i < 5000; ++i)
+            REQUIRE(vault::ensure_gallery_path(v, "existing" + std::to_string(i)) == vault::VaultResult::Ok);
+        vault::CommitLane lane;
+        lane.start(v);
+        REQUIRE(lane.enqueue_snapshot());
+        v.set_commit_router(&lane);
+        ui::ImportQueue queue;
+        queue.begin_session(v, lane);
+        const auto start = std::chrono::steady_clock::now();
+        if (mode == 0) (void)queue.enqueue_folder(dir / "input", "", "imported");
+        if (mode == 1) (void)queue.enqueue_archive(zip, "", "imported", ui::ImportTaskKind::Zip);
+#ifdef OSV_VENDORED_ARCHIVE
+        if (mode == 2) (void)queue.enqueue_archive(solid, "", "imported", ui::ImportTaskKind::Archive);
+#endif
+        double max_drain_ms = 0;
+        do {
+            const auto frame = std::chrono::steady_clock::now();
+            (void)queue.drain(0.001);
+            max_drain_ms = std::max(max_drain_ms,
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-frame).count());
+            REQUIRE(std::chrono::steady_clock::now()-start < std::chrono::seconds(60));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } while (queue.busy());
+        queue.end_session();
+        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
+        CHECK_EQ(v.list("imported").size(), size_t(n));
+        std::println("[122F] mode={} files={} existing=5000 wall={:.3f}s files/s={:.1f} max_drain={:.3f}ms",
+            mode, n, seconds, n/seconds, max_drain_ms);
+        lane.stop();
+        v.lock();
+    }
+    cleanup_dir(dir);
 }

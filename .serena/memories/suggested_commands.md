@@ -121,9 +121,23 @@ source fixture construction. Temporary encrypted vaults are removed after each r
 
 ## Archive decoder (Phase 121)
 
+VP8 fixture: `python3 tests/media/fixtures/generate_vp8.py` regenerates the CC0
+synthetic odd-size color bars using a development FFmpeg/libvpx encoder. Shipped
+builds remain decode-only. `build/bin/Debug/osv_tests vp8_` runs color/seek/poster
+and worker/fallback checks; these do not establish NVIDIA driver correctness.
+
+Selection tag metadata benchmark: `OSV_TAG_SELECTION_BENCH=1000
+build/bin/Debug/osv_tests tag_editor_selection_benchmark` (also 10000 or 50000).
+Reports UI call latency separately from asynchronous completion; synthetic
+gallery nodes isolate metadata overhead rather than measuring media imports.
+
 - `scripts/build_7zip.sh [--asan|--tsan]`: build the extraction-only private shared
   decoder; refresh existing matching app/test copies as well as the prefix.
 - Normal build/test/setup scripts call it automatically. The library lives next
   to `osv`/`osv_tests`; keep it when copying a runnable binary.
 - `scripts/package.sh` bundles `libosv7zip.so`, license notices and complete
   decoder rebuild sources. `docs/ARCHIVE_DECODER.md` explains replacement.
+
+Bulk rename timing: `OSV_RENAME_SELECTION_BENCH=1 build/bin/Debug/osv_tests bulk_rename_selection_benchmark`
+measures 1k/10k/50k synthetic gallery preview/apply calls and background completion;
+it does not measure GUI rendering or grid refresh.

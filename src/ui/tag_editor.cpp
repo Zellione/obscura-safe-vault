@@ -1,6 +1,15 @@
 #include "ui/tag_editor.h"
+#include <new>
+#include <stdexcept>
+#include <system_error>
+#include <map>
+#include <set>
+#include "platform/error_log.h"
+#include "ui/import_queue.h"
+#include "ui/progress_modal.h"
 
 #include <algorithm>
+#include <cassert>
 #include <format>
 #include <string>
 #include <string_view>
@@ -27,6 +36,14 @@
 namespace ui {
 
 namespace {
+std::string tag_source_key(std::string_view tag)
+{
+    std::string result(tag);
+    for (char& ch : result)
+        if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch + ('a' - 'A'));
+    return result;
+}
+
 constexpr float MODAL_W = 500.0f;
 
 // Phase 91: a node's secure tag list as transient plain strings for the tag
@@ -55,6 +72,85 @@ std::string trim_surrounding(std::string_view s)
 }
 }
 
+TagEditor::~TagEditor()
+{
+    close();
+}
+
+void TagEditor::launch(std::function<void()> work)
+{
+    assert(!busy());
+    progress_.cancel.store(false);
+    progress_.done.store(0);
+    progress_.total.store(static_cast<int>(node_paths_.size()));
+    work_.done.store(false);
+    work_.failure = WorkFailure::None;
+    try {
+        work_.thread =
+            std::jthread(&TagEditor::run_work<std::function<void()>>, this, std::move(work));
+    } catch (const std::bad_alloc&) {
+        loading_ = false;
+        error_ = "Not enough memory to start tag operation.";
+    } catch (const std::system_error&) {
+        loading_ = false;
+        error_ = "Could not start tag operation worker.";
+    }
+}
+
+template <typename Work> void TagEditor::run_work(const Work& work)
+{
+    using enum WorkFailure;
+    // Keep failure reporting allocation-free on this thread. The UI reads the
+    // outcome only after joining; construction failures are handled by launch().
+    try {
+        work();
+    } catch (const std::bad_alloc&) {
+        work_.failure = Memory;
+    } catch (const std::length_error&) {
+        work_.failure = Size;
+    } catch (const std::system_error&) {
+        work_.failure = System;
+    }
+    work_.done.store(true);
+}
+
+std::string_view TagEditor::finish_work()
+{
+    using enum WorkFailure;
+    if (!work_.thread.joinable()) return {};
+    work_.thread.join();
+    std::string_view failure;
+    switch (work_.failure) {
+        case None: return {};
+        case Memory: failure = "Tag operation ran out of memory."; break;
+        case Size: failure = "Tag operation exceeded a container size limit."; break;
+        case System: failure = "Tag operation encountered a system error."; break;
+    }
+    // Also report failures collected by close(): its UI state is about to be
+    // cleared, but teardown must not silently swallow a failed operation.
+    platform::log_error("Tags", failure);
+    return failure;
+}
+
+void TagEditor::update()
+{
+    if (!busy() || !work_.done.load()) return;
+    if (const auto failure = finish_work(); !failure.empty()) error_ = failure;
+    loading_ = false;
+    if (!pending_category_.empty() && error_.empty()) finish_add();
+    pending_tag_.clear();
+    pending_category_.clear();
+}
+
+void TagEditor::finish_add()
+{
+    const auto tmpl = vault::category_template(vault::vault_settings(vault_), pending_category_);
+    std::vector<std::string> fields;
+    for (const auto& field : tmpl)
+        fields.emplace_back(field.view());
+    fields_form_.open(pending_tag_, pending_category_, std::move(fields), false);
+}
+
 void TagEditor::open(std::string node_path)
 {
     open_multi({std::move(node_path)});
@@ -62,23 +158,53 @@ void TagEditor::open(std::string node_path)
 
 void TagEditor::open_multi(std::vector<std::string> node_paths)
 {
-    active_     = true;
+    close();
+    bundle_mode_ = false;
+    bundle_form_ = false;
+    bundle_confirm_ = false;
+    active_ = true;
+    if (queue_.busy()) {
+        error_ = "Wait for imports to finish before editing tags.";
+        return;
+    }
+    queue_.set_exclusive(true);
+    owns_exclusive_ = true;
     node_paths_ = std::move(node_paths);
     selected_   = 0;
     new_tag_buf_.clear();
     suggestions_.clear();
     sugg_sel_ = -1;
     error_.clear();
-    refresh_tags();
-    refresh_vocabulary();
+    loading_ = true;
+    launch([this] {
+        refresh_tags();
+        refresh_vocabulary();
+    });
     SDL_StartTextInput(win_.sdl_window());
 }
 
 void TagEditor::close()
 {
+    if (!active_ && !busy()) return;
+    if (busy()) {
+        progress_.cancel.store(true);
+        (void)finish_work(); // Static failure text: teardown does not allocate an error string.
+    }
+    if (owns_exclusive_) queue_.set_exclusive(false);
+    owns_exclusive_ = false;
+    pending_tag_.clear();
+    pending_category_.clear();
     active_ = false;
     SDL_StopTextInput(win_.sdl_window());
     node_paths_.clear();
+    tag_sources_.clear();
+    bundle_name_.clear();
+    bundle_members_.clear();
+    bundle_original_name_.clear();
+    bundle_preview_.clear();
+    bundle_mode_ = false;
+    bundle_form_ = false;
+    bundle_confirm_ = false;
     tally_.clear();
     inherited_.clear();
     from_contents_.clear();
@@ -124,28 +250,21 @@ void TagEditor::add_chosen_tag()
     const std::string sheet_category =
         templated_new_tag_category(chosen, vocabulary_, s);
 
-    using enum vault::VaultResult;
-    if (vault::add_tag_batch(vault_, node_paths_, chosen) != Ok) {
-        error_ = "Failed to add tag.";
-        return;
-    }
+    pending_tag_ = chosen;
+    pending_category_ = sheet_category;
     new_tag_buf_.clear();
-    error_.clear();
-    refresh_tags();
-    refresh_vocabulary();
-    refresh_suggestions();   // buffer is empty → dropdown closes
-    select_tag(chosen);      // scroll the list to reveal it
-
-    // Open the template fields form if applicable (Phase 73)
-    if (!sheet_category.empty()) {
-        const auto tmpl = vault::category_template(s, sheet_category);
-        std::vector<std::string> fields;
-        fields.reserve(tmpl.size());
-        for (const auto& f : tmpl)
-            fields.emplace_back(f.view());
-        fields_form_.open(chosen, sheet_category, std::move(fields),
-                          /*with_description=*/false);
-    }
+    launch([this, chosen] {
+        if (vault::mutate_tags_batch(vault_, node_paths_, chosen, false, &progress_) !=
+            vault::VaultResult::Ok) {
+            error_ = "Failed to add tag.";
+            return;
+        }
+        refresh_tags();
+        refresh_vocabulary();
+        refresh_suggestions();
+        select_tag(chosen);
+        if (progress_.cancel.load()) pending_category_.clear();
+    });
 }
 
 void TagEditor::move_cursor(int dir)
@@ -187,22 +306,22 @@ void TagEditor::load_per_node_tags()
     std::vector<std::vector<std::string>> per_node_tags;
     per_node_tags.reserve(node_paths_.size());
     int resolved = 0;
+    std::map<std::string, size_t, std::less<>> manual_counts;
+    std::map<std::string, std::set<std::string, std::less<>>, std::less<>> bundle_sources;
+    const auto& bundles = vault::vault_settings(vault_).tag_bundles;
 
-    for (const std::string& path : node_paths_) {
-        const auto segs = split_path(path);
-        if (segs.empty()) continue;
-
-        std::string parent_path;
-        if (segs.size() > 1) { parent_path = join_path(std::span(segs.data(), segs.size() - 1)); }
-
-        const auto& children = vault_.list(parent_path);
-        for (const auto* child : children) {
-            if (child->name == segs.back()) {
-                per_node_tags.push_back(tag_strings(child->tags));
-                ++resolved;
-                break;
-            }
+    for (const auto* node : vault::resolve_node_selection(vault_, node_paths_)) {
+        if (!node) continue;
+        per_node_tags.push_back(tag_strings(node->tags));
+        for (const auto& tag : node->tag_provenance ? node->explicit_tags : node->tags)
+            ++manual_counts[tag_source_key(tag.view())];
+        for (const auto& id : node->tag_bundles) {
+            const auto bundle = std::ranges::find(bundles, id, &vault::TagBundle::id);
+            if (bundle == bundles.end()) continue;
+            for (const auto& tag : bundle->tags)
+                bundle_sources[tag_source_key(tag.view())].emplace(bundle->name.view());
         }
+        ++resolved;
     }
 
     if (resolved == 0) {
@@ -210,6 +329,14 @@ void TagEditor::load_per_node_tags()
         return;
     }
     tally_ = compute_tag_tally(per_node_tags);
+    tag_sources_.clear();
+    for (const auto& row : tally_) {
+        const auto tag = tag_source_key(row.tag);
+        std::string sources = std::format("Manual: {} selection items", manual_counts[tag]);
+        for (const auto& bundle : bundle_sources[tag])
+            sources += "; bundle: " + bundle;
+        tag_sources_.push_back(std::move(sources));
+    }
 }
 
 void TagEditor::refresh_tags()
@@ -240,21 +367,38 @@ void TagEditor::select_tag(std::string_view tag)
     selected_ = std::max(0, static_cast<int>(tally_.size()) - 1);
 }
 
+bool TagEditor::handle_fields_event(const SDL_Event& e)
+{
+    const bool consumed = fields_form_.handle_event(e);
+    if (!fields_form_.active()) {
+        SDL_StartTextInput(win_.sdl_window());
+        if (fields_form_.consume_saved()) refresh_vocabulary();
+    }
+    return consumed;
+}
+
 bool TagEditor::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
-
-    // Form handling (Phase 73): the fields_form modal takes precedence over the tag editor
-    // input. When it becomes inactive after consuming an event, restart text input for the
-    // tag editor (the form calls StopTextInput on close, we restart it here).
-    if (fields_form_.active()) {
-        const bool consumed = fields_form_.handle_event(e);
-        if (!fields_form_.active()) {
-            SDL_StartTextInput(win_.sdl_window());   // back to the tag input
-            if (fields_form_.consume_saved()) refresh_vocabulary();
-        }
-        return consumed;
+    if (busy()) {
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE &&
+            progress_.done.load() < progress_.total.load())
+            progress_.cancel.store(true);
+        return true;
     }
+    if (!owns_exclusive_) {
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) close();
+        return true;
+    }
+
+    if (bundle_mode_) return handle_bundle_event(e);
+    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F3) {
+        bundle_mode_ = true;
+        bundle_selected_ = 0;
+        return true;
+    }
+
+    if (fields_form_.active()) return handle_fields_event(e);
 
     // Precedence rule (Phase 54): the tag field consumes editing keys first.
     // field_owns_event keeps the empty-buffer behaviour intact — with nothing
@@ -311,20 +455,40 @@ void TagEditor::delete_selected_tag()
     if (selected_ < 0 || selected_ >= static_cast<int>(tally_.size())) return;
 
     const std::string tag_to_remove = tally_[selected_].tag;
-    if (vault::remove_tag_batch(vault_, node_paths_, tag_to_remove) == vault::VaultResult::Ok) {
+    launch([this, tag_to_remove] {
+        if (vault::mutate_tags_batch(vault_, node_paths_, tag_to_remove, true, &progress_) !=
+            vault::VaultResult::Ok) {
+            error_ = "Failed to remove tag.";
+            return;
+        }
         refresh_tags();
         refresh_vocabulary();
-        refresh_suggestions();   // the removed tag is suggestible again
+        refresh_suggestions();
         selected_ = std::min(selected_, static_cast<int>(tally_.size()) - 1);
-        error_.clear();
-    } else {
-        error_ = "Failed to remove tag.";
-    }
+    });
 }
 
 void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 {
     if (!active_) return;
+    if (busy()) {
+        const int done = progress_.done.load();
+        const int total = progress_.total.load();
+        draw_op_progress(
+            r, font, W, H,
+            {.title = loading_ ? "Loading selection tags" : "Updating selection tags",
+             .count_line = loading_ ? "Reading tags..." : std::format("{} / {} items", done, total),
+             .hint = done < total ? "Esc requests cancellation before save"
+                                  : "Saving and refreshing...",
+             .done = done,
+             .total = total});
+        return;
+    }
+
+    if (bundle_mode_) {
+        render_bundles(r, font, W, H);
+        return;
+    }
 
     using namespace gfx::theme;
     const float LINE      = line_pitch(font.pixel_height());
@@ -421,7 +585,10 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     // Error message: one LINE pitch above the hint
     const float error_y = my + MODAL_H - 2.0f * LINE - PAD;
     if (!error_.empty()) {
-        r.draw_text(font, mx + PAD, error_y, error_, DANGER);
+        r.draw_text(font, mx + PAD, error_y, fit_text(font, error_, MODAL_W - 2 * PAD), DANGER);
+    } else if (selected_ >= 0 && selected_ < static_cast<int>(tag_sources_.size())) {
+        r.draw_text(font, mx + PAD, error_y,
+                    fit_text(font, tag_sources_[selected_], MODAL_W - 2 * PAD), TEXT_DIM);
     }
 
     // Footer hint: one LINE pitch above the modal bottom
@@ -430,7 +597,7 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     // the app's font this hint is wider than the modal, so drawing it raw put
     // "[Esc] Close" outside the right border.
     r.draw_text(font, mx + PAD, hint_y,
-                fit_text(font, "[Enter] Add  [Up/Down] Scroll  [Del] Remove  [Esc] Close",
+                fit_text(font, "[Enter] Add [Del] Remove manual [F3] Bundles [Esc] Close",
                          MODAL_W - 2 * PAD),
                 TEXT_FAINT);
 
@@ -455,7 +622,7 @@ void TagEditor::draw_tag_rows(gfx::Renderer& r, gfx::FontAtlas& font, float mx, 
     const auto& cats = vault::vault_settings(vault_).categories;
 
     // Header shows the visible range / count so hidden tags are discoverable.
-    std::string header = "Current tags";
+    std::string header = "Effective tags (manual or bundle)";
     if (total > max_visible) {
         header += std::format(" ({}-{} of {})", first + 1, last, total);
     } else if (total > 0) {
