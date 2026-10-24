@@ -3,7 +3,8 @@
 Status: implementation in cascading PRs. A and H's storage documentation are in
 [PR #261](https://github.com/Zellione/obscura-safe-vault/pull/261). Its integrated
 head reported ten SonarCloud findings despite a passing quality gate. The cleanup
-extracts private import task execution, groups bundle and autocomplete state in
+extracts private import task execution with separate file-submit/drain steps,
+groups bundle and autocomplete state in
 the tag editor, and simplifies enum and node-existence checks. Local Debug, Release,
 and unrestricted ASAN/UBSan/LeakSanitizer each pass all 2,546 tests after the cleanup.
 The PR checks and SonarCloud report track the integrated head's final gate results.

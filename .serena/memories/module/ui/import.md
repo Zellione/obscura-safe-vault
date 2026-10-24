@@ -134,6 +134,8 @@ Import infrastructure: archive handling, plan building, vault population, import
 - `import_queue.*` — `ImportQueue`: lifecycle managed by App (owns one, destroyed on app shutdown).
   Its private `TaskProcessor` executes worker-local file/folder/archive/volume tasks;
   queue/session synchronization, record posting, and save ownership stay in `ImportQueue`.
+  File tasks keep their lookahead in `FileWindow`, with separate `submit_file` and
+  `drain_files` steps for decode submission and ordered staging.
   One worker jthread + decode pool (min(hw,4) threads). Per-file pipeline: read source → decode → encrypt → append chunks → stage IndexNode.
   A Files task routes each pick by content, exactly like the archive/folder importers: `image::detect_format`
   hit → `stage_image`, everything else → `stage_video` (its container probe rejects non-video junk → skipped).

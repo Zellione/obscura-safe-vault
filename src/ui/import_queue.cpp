@@ -313,6 +313,18 @@ public:
     void run(Task& task, const std::function<void()>& hook) const;
 
 private:
+    struct PendingFile {
+        size_t index = 0;
+        std::vector<uint8_t> data;
+        std::shared_ptr<DecodePool::DecodeJob> decode_job;
+    };
+    struct FileWindow {
+        std::deque<PendingFile> files;
+        size_t bytes = 0;
+        size_t next_to_stage = 0;
+    };
+    bool submit_file(size_t idx, const std::filesystem::path& file_path, FileWindow& window) const;
+    void drain_files(Task& task, FileWindow& window) const;
     void process_files_task(Task& task) const;
     void process_archive_task(Task& task) const;
     void process_volume_set_task(Task& task, StagingSink& sink, const ArchivePassword& pw) const;
@@ -1057,132 +1069,119 @@ void ImportQueue::worker_loop()
     }
 }
 
+bool ImportQueue::TaskProcessor::submit_file(size_t idx, const std::filesystem::path& file_path,
+                                             FileWindow& window) const
+{
+    if (!std::filesystem::is_regular_file(file_path)) return false;
+
+    auto data = std::make_shared<std::vector<uint8_t>>();
+    {
+        std::ifstream f(file_path, std::ios::binary | std::ios::ate);
+        const auto sz = f.tellg();
+        if (sz <= 0 || sz > 512 * 1024 * 1024)  // 512 MiB max per file
+            return false;
+        data->resize(static_cast<size_t>(sz));
+        f.seekg(0);
+        f.read(reinterpret_cast<char*>(data->data()), sz);
+    }
+
+    if (data->empty()) return false;
+
+    // Detect if this is likely an image (check magic bytes)
+    const bool is_image =
+        (data->size() >= 2 && ((*data)[0] == 0xFF && (*data)[1] == 0xD8)) ||  // JPEG
+        (data->size() >= 8 && (*data)[0] == 0x89 && (*data)[1] == 0x50 && (*data)[2] == 0x4E &&
+         (*data)[3] == 0x47) ||  // PNG
+        (data->size() >= 12 && (*data)[8] == 0x57 && (*data)[9] == 0x45 && (*data)[10] == 0x42 &&
+         (*data)[11] == 0x50);  // WebP
+
+    PendingFile pf{.index = idx, .data = *data, .decode_job = nullptr};
+
+    if (is_image) {
+        auto job = std::make_shared<DecodePool::DecodeJob>();
+        job->data = pf.data;  // Copy, don't move
+        queue_.decode_pool_->submit(job);
+        pf.decode_job = job;
+    }
+
+    window.files.push_back(std::move(pf));
+    window.bytes += pf.data.size();
+
+    return true;
+}
+
+void ImportQueue::TaskProcessor::drain_files(Task& task, FileWindow& window) const
+{
+    // Process all lookahead items that are ready to stage (in-order by index)
+    // Stop only when we encounter a gap or reach end
+    while (!window.files.empty()) {
+        // Process ONLY the front item if it's the next expected index
+        if (window.files.front().index != window.next_to_stage)
+            break;  // Wait for out-of-order items to arrive
+
+        auto pf = std::move(window.files.front());
+        window.files.pop_front();
+        window.bytes -= pf.data.size();
+
+        if (task.progress && task.progress->cancel.load()) return;
+
+        if (pf.index >= task.files.size()) return;
+
+        const auto& file_path = task.files[pf.index];
+
+        // Wait for decode if needed (CV-based, not spin-polling)
+        if (pf.decode_job) {
+            queue_.decode_pool_->wait_for_completion(pf.decode_job, 5000);  // 5 second timeout
+        }
+
+        // Stage the file
+        const std::string filename = platform::path_to_utf8(file_path.filename());
+        const vault::StagedThumb* thumb = nullptr;
+        if (pf.decode_job && queue_.decode_pool_->is_done(pf.decode_job)) {
+            thumb = &pf.decode_job->result;
+        }
+
+        // Same discrimination the archive/folder importers use: anything the
+        // image decoders can identify is an image, everything else goes to
+        // video (stage_video's container probe rejects non-video bytes).
+        const bool is_img = image::detect_format(pf.data) != image::ImageFormat::Unknown;
+        auto staged = is_img ? vault::stage_image(*queue_.v_, pf.data, filename, thumb)
+                             : vault::stage_video(*queue_.v_, pf.data, filename);
+        if (staged.status == vault::VaultResult::Ok) {
+            (void)queue_.post_record(
+                {task.dest_gallery, std::move(staged.node), task.id, false, {}}, task.progress);
+            if (task.progress) {
+                task.progress->done.store(static_cast<int>(pf.index) + 1);
+            }
+        }
+
+        window.next_to_stage++;
+    }
+}
+
 void ImportQueue::TaskProcessor::process_files_task(Task& task) const
 {
-    // Lookahead window for resequencing
-    struct PendingFile {
-        size_t index = 0;
-        std::vector<uint8_t> data;
-        std::shared_ptr<DecodePool::DecodeJob> decode_job;
-    };
-
-    std::deque<PendingFile> lookahead;
-    size_t lookahead_bytes = 0;
-    size_t file_index = 0;
-    size_t next_to_stage = 0;
-
-    const auto submit_or_inline = [&](size_t idx, const auto& file_path) {
-        if (!std::filesystem::is_regular_file(file_path))
-            return false;
-
-        auto data = std::make_shared<std::vector<uint8_t>>();
-        {
-            std::ifstream f(file_path, std::ios::binary | std::ios::ate);
-            const auto sz = f.tellg();
-            if (sz <= 0 || sz > 512 * 1024 * 1024)  // 512 MiB max per file
-                return false;
-            data->resize(static_cast<size_t>(sz));
-            f.seekg(0);
-            f.read(reinterpret_cast<char*>(data->data()), sz);
-        }
-
-        if (data->empty())
-            return false;
-
-        // Detect if this is likely an image (check magic bytes)
-        const bool is_image =
-            (data->size() >= 2 &&
-             ((*data)[0] == 0xFF && (*data)[1] == 0xD8)) ||  // JPEG
-            (data->size() >= 8 && (*data)[0] == 0x89 && (*data)[1] == 0x50 &&
-             (*data)[2] == 0x4E && (*data)[3] == 0x47) ||  // PNG
-            (data->size() >= 12 && (*data)[8] == 0x57 && (*data)[9] == 0x45 &&
-             (*data)[10] == 0x42 && (*data)[11] == 0x50);  // WebP
-
-        PendingFile pf{.index = idx, .data = *data, .decode_job = nullptr};
-
-        if (is_image) {
-            auto job = std::make_shared<DecodePool::DecodeJob>();
-            job->data = pf.data;  // Copy, don't move
-            queue_.decode_pool_->submit(job);
-            pf.decode_job = job;
-        }
-
-        lookahead.push_back(std::move(pf));
-        lookahead_bytes += pf.data.size();
-
-        return true;
-    };
-
-    const auto drain_lookahead = [&]() {
-        // Process all lookahead items that are ready to stage (in-order by index)
-        // Stop only when we encounter a gap or reach end
-        while (!lookahead.empty()) {
-            // Process ONLY the front item if it's the next expected index
-            if (lookahead.front().index != next_to_stage)
-                break;  // Wait for out-of-order items to arrive
-
-            auto pf = std::move(lookahead.front());
-            lookahead.pop_front();
-            lookahead_bytes -= pf.data.size();
-
-            if (task.progress && task.progress->cancel.load())
-                return;
-
-            if (pf.index >= task.files.size())
-                return;
-
-            const auto& file_path = task.files[pf.index];
-
-            // Wait for decode if needed (CV-based, not spin-polling)
-            if (pf.decode_job) {
-                queue_.decode_pool_->wait_for_completion(pf.decode_job, 5000);  // 5 second timeout
-            }
-
-            // Stage the file
-            const std::string filename = platform::path_to_utf8(file_path.filename());
-            const vault::StagedThumb* thumb = nullptr;
-            if (pf.decode_job && queue_.decode_pool_->is_done(pf.decode_job)) {
-                thumb = &pf.decode_job->result;
-            }
-
-            // Same discrimination the archive/folder importers use: anything the
-            // image decoders can identify is an image, everything else goes to
-            // video (stage_video's container probe rejects non-video bytes).
-            const bool is_img = image::detect_format(pf.data) != image::ImageFormat::Unknown;
-            auto staged = is_img ? vault::stage_image(*queue_.v_, pf.data, filename, thumb)
-                                 : vault::stage_video(*queue_.v_, pf.data, filename);
-            if (staged.status == vault::VaultResult::Ok) {
-                (void)queue_.post_record(
-                    {task.dest_gallery, std::move(staged.node), task.id, false, {}}, task.progress);
-                if (task.progress) {
-                    task.progress->done.store(static_cast<int>(pf.index) + 1);
-                }
-            }
-
-            next_to_stage++;
-        }
-    };
+    FileWindow window;
 
     // Load files into lookahead
-    for (file_index = 0; file_index < task.files.size() &&
-                        !(task.progress && task.progress->cancel.load());
+    for (size_t file_index = 0;
+         file_index < task.files.size() && !(task.progress && task.progress->cancel.load());
          ++file_index) {
         const auto& file_path = task.files[file_index];
 
-        while (lookahead.size() >= LOOKAHEAD_MAX_ITEMS ||
-               lookahead_bytes >= LOOKAHEAD_MAX_BYTES) {
-            const size_t size_before = lookahead.size();
-            const size_t bytes_before = lookahead_bytes;
-            drain_lookahead();
-            // Stop if drain_lookahead made no progress (prevents infinite loop when condition blocks draining)
-            if (lookahead.size() == size_before && lookahead_bytes == bytes_before) {
+        while (window.files.size() >= LOOKAHEAD_MAX_ITEMS || window.bytes >= LOOKAHEAD_MAX_BYTES) {
+            const size_t size_before = window.files.size();
+            const size_t bytes_before = window.bytes;
+            drain_files(task, window);
+            // Stop if draining made no progress (prevents looping on a blocked window).
+            if (window.files.size() == size_before && window.bytes == bytes_before) {
                 break;
             }
             if (task.progress && task.progress->cancel.load())
                 return;
         }
 
-        if (!submit_or_inline(file_index, file_path)) {
+        if (!submit_file(file_index, file_path, window)) {
             task.skipped++;
             if (task.progress) {
                 task.progress->done.store(static_cast<int>(file_index) + 1);
@@ -1191,8 +1190,8 @@ void ImportQueue::TaskProcessor::process_files_task(Task& task) const
     }
 
     // Drain remaining lookahead
-    while (!lookahead.empty() && !(task.progress && task.progress->cancel.load())) {
-        drain_lookahead();
+    while (!window.files.empty() && !(task.progress && task.progress->cancel.load())) {
+        drain_files(task, window);
     }
 }
 
