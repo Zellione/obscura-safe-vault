@@ -24,12 +24,6 @@
 
 namespace ui {
 
-// Defined in archive_import.h; only ever passed by const& from this header.
-struct ArchivePassword;
-
-struct ZipEntry;      // ui/zip_plan.h
-struct ZipPlacement;  // ui/zip_plan.h
-
 struct DatasetTagAssignment {
     std::string gallery;
     std::string tag;
@@ -185,19 +179,7 @@ private:
     // Worker thread function
     void worker_loop();
 
-    // Task processing
-    void process_files_task(Task& task);
-    void process_archive_task(Task& task);
-    // Phase 53: assemble + import a multi-volume set (worker thread).
-    void process_volume_set_task(Task& task, StagingSink& sink,
-                                 const ArchivePassword& pw) const;
-    void process_folder_task(Task& task);
-    // Read + stage one planned placement of a folder import. Extracted from
-    // process_folder_task so that loop stays under the cognitive-complexity cap;
-    // updates task.skipped and task.progress->done for `index`.
-    // const: works entirely through `sink` and `task`, touches no ImportQueue member.
-    void place_folder_file(StagingSink& sink, const ZipPlacement& placement,
-                           const ZipEntry& entry, Task& task, size_t index) const;
+    class TaskProcessor;
 
     // Internal state helpers
     void maybe_end_batch();
@@ -212,11 +194,6 @@ private:
                           std::filesystem::path& out_archive_path,
                           std::string& out_gallery_name, std::string& out_dest_gallery,
                           std::shared_ptr<vault::OpProgress>& out_progress);  // Called under lock
-    // Runs one task's processing on the worker thread inside the Phase 68
-    // task-boundary try/catch (an escaping exception fails the task instead of
-    // terminating the process). Extracted from worker_loop for S134 nesting.
-    void run_worker_task(Task& work_task, const std::function<void()>& hook);
-
     // Called under lock. `result` is the worker's finished local task copy:
     // a terminal state (Failed/Cancelled) plus its error and outcome counts
     // are written back to the queued row (Phase 68 — they used to be

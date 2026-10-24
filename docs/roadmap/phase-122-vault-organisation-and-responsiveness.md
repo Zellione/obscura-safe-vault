@@ -1,9 +1,13 @@
 # Phase 122 — Vault organisation, responsive bulk operations, and VP8 reliability
 
 Status: implementation in cascading PRs. A and H's storage documentation are in
-[PR #261](https://github.com/Zellione/obscura-safe-vault/pull/261), ready for owner
-review with all CI gates green and zero SonarCloud issues. Local Debug and Release
-each passed 2,497 tests. H now adds object-preservation, failed-upgrade rollback/retry, and nested encrypted
+[PR #261](https://github.com/Zellione/obscura-safe-vault/pull/261). Its integrated
+head reported ten SonarCloud findings despite a passing quality gate. The cleanup
+extracts private import task execution, groups bundle and autocomplete state in
+the tag editor, and simplifies enum and node-existence checks. Local Debug, Release,
+and unrestricted ASAN/UBSan/LeakSanitizer each pass all 2,546 tests after the cleanup.
+The PR checks and SonarCloud report track the integrated head's final gate results.
+Earlier local Debug and Release each passed 2,497 tests. H now adds object-preservation, failed-upgrade rollback/retry, and nested encrypted
 backup/restore regressions. See [validation evidence](phase-122h-validation.md).
 B is in [PR #262](https://github.com/Zellione/obscura-safe-vault/pull/262), based on A.
 Local Debug and unrestricted ASAN/UBSan/LSan each pass 2,502 tests. Initial CI passed; the ten Sonar findings are fixed and rescanning. D is in [PR #263](https://github.com/Zellione/obscura-safe-vault/pull/263), stacked

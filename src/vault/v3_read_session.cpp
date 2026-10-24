@@ -227,19 +227,20 @@ bool ReadSession::build_children(IndexNode& parent, const Id& parent_id, unsigne
 
 bool ReadSession::materialize() noexcept
 {
+    using enum DbStatus;
     const Id root_id = database_root_node_id(*database_);
     auto root_record = database_->find_node(root_id);
-    if (root_record.status != DbStatus::Ok || !root_record.value.has_value() ||
+    if (root_record.status != Ok || !root_record.value.has_value() ||
         root_record.value->type != NodeType::Gallery || root_record.value->parent_id.has_value())
         return false;
     root_ = node_from_record(*root_record.value);
     root_.name = "";
     auto root_tags = database_->node_tags(root_id);
-    if (root_tags.status != DbStatus::Ok) return false;
+    if (root_tags.status != Ok) return false;
     root_.tags = std::move(root_tags.value);
     if (size_t count = 1; !build_children(root_, root_id, 0, count)) return false;
     auto refs = database_->object_references();
-    if (refs.status != DbStatus::Ok) return false;
+    if (refs.status != Ok) return false;
     if (refs.value.size() > 3'000'000) return false;
     for (const auto& object : refs.value) {
         if (object.frame_count == 0 || object.frame_count > OBJECT_MAX_FRAMES ||
@@ -249,9 +250,9 @@ bool ReadSession::materialize() noexcept
     objects_ = std::move(refs.value);
     rebuild_object_index();
     if (!load_settings(*database_, settings_)) return false;
-    if (database_->read_bundles(root_, settings_) != DbStatus::Ok) return false;
+    if (database_->read_bundles(root_, settings_) != Ok) return false;
     auto searches = database_->saved_searches();
-    if (searches.status != DbStatus::Ok) return false;
+    if (searches.status != Ok) return false;
     for (auto& source : searches.value)
         saved_searches_.emplace_back(std::move(source.display_name), std::move(source.query));
     return true;

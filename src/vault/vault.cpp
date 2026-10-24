@@ -2431,8 +2431,7 @@ VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
     auto trimmed = normalise_tag(tag);
     if (trimmed.empty()) return InvalidArg;
 
-    IndexNode* node = resolve_node(node_path);
-    if (!node) return NotFound;
+    if (!resolve_node(node_path)) return NotFound;
 
     const std::vector paths{std::string(node_path)};
     return mutate_tags_batch(*this, paths, trimmed, false);
@@ -2484,8 +2483,7 @@ VaultResult Vault::remove_tag(std::string_view node_path, std::string_view tag)
     auto trimmed = normalise_tag(tag);
     if (trimmed.empty()) return Ok;  // Idempotent: removing nonexistent empty tag is Ok.
 
-    IndexNode* node = resolve_node(node_path);
-    if (!node) return NotFound;
+    if (!resolve_node(node_path)) return NotFound;
 
     const std::vector paths{std::string(node_path)};
     return mutate_tags_batch(*this, paths, trimmed, true);

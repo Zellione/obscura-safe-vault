@@ -132,6 +132,8 @@ Import infrastructure: archive handling, plan building, vault population, import
 
 ## Background import queue (Phase 50)
 - `import_queue.*` — `ImportQueue`: lifecycle managed by App (owns one, destroyed on app shutdown).
+  Its private `TaskProcessor` executes worker-local file/folder/archive/volume tasks;
+  queue/session synchronization, record posting, and save ownership stay in `ImportQueue`.
   One worker jthread + decode pool (min(hw,4) threads). Per-file pipeline: read source → decode → encrypt → append chunks → stage IndexNode.
   A Files task routes each pick by content, exactly like the archive/folder importers: `image::detect_format`
   hit → `stage_image`, everything else → `stage_video` (its container probe rejects non-video junk → skipped).
@@ -148,7 +150,7 @@ Import infrastructure: archive handling, plan building, vault population, import
   No queue mutex is held across snapshot/disk I/O. Legacy snapshots retain their lane.
   **Phase 51:** `enqueue_folder(vault, folder_path, dest_gallery_path, progress)` enqueues an ImportTaskKind::Folder,
   mirroring `enqueue_files`. Multiple folder picks create multiple tasks (one per folder).
-  **Phase 68 (crash resilience):** `run_worker_task` wraps every task's processing in a
+  **Phase 68 (crash resilience):** `TaskProcessor::run` wraps every task's processing in a
   task-boundary try/catch — an escaping exception marks THAT task Failed ("Internal import
   error: <what>") instead of std::terminate (the decode-pool job body is guarded the same way).
   The generic catches are deliberate (accepted S1181/S2738 deviation, commented at the site).

@@ -94,7 +94,9 @@ Modal dialogs: transfer/combine operations, file pickers, rename/tag editing, se
 - `rename_dialog.*` — `R` modal, renames the focused image/video/gallery via
   `vault::rename_node`. open(gallery_path,old_name)/close()/handle_event/render/
   consume_completed(status_out).
-- `tag_editor.*` — `G` add/remove-tags modal in GalleryGrid + ImageViewer. Current-tags list
+- `tag_editor.*` — `G` add/remove-tags modal in GalleryGrid + ImageViewer. It
+  groups bundle administration in `BundleState` and autocomplete vocabulary, matches,
+  input, and caret state in `SuggestionState`. The current-tags list
   loads asynchronously with selection edits/save/refresh under worker ownership.
   `update()` joins an explicitly owned `jthread` after atomic completion; resource
   failures are reported on the UI thread, including logged failures during close.

@@ -72,18 +72,21 @@ private:
     void preview_bundle_change();
     void confirm_bundle_change();
     bool handle_fields_event(const SDL_Event& e);
-    std::string bundle_original_name_;
-    std::string bundle_preview_;
-    bool bundle_mode_ = false;
-    bool bundle_form_ = false;
-    bool bundle_confirm_ = false;
-    bool bundle_delete_ = false;
-    int bundle_selected_ = 0;
-    int bundle_field_ = 0;
-    TextInputModel bundle_name_;
-    TextInputModel bundle_members_;
-    TextFieldChrome bundle_name_chrome_;
-    TextFieldChrome bundle_members_chrome_;
+    struct BundleState {
+        std::string original_name;
+        std::string preview;
+        bool mode = false;
+        bool form = false;
+        bool confirm = false;
+        bool deleting = false;
+        int selected = 0;
+        int field = 0;
+        TextInputModel name;
+        TextInputModel members;
+        TextFieldChrome name_chrome;
+        TextFieldChrome members_chrome;
+    };
+    BundleState bundle_;
     void finish_add();
     void refresh_tags();              // reload the node's current tags from the vault
     void refresh_vocabulary();        // reload the vault-wide tag vocabulary (Phase 29)
@@ -131,12 +134,15 @@ private:
                                                 // (single-node mode only — see refresh_tags)
     std::vector<std::string>   from_contents_; // read-only descendant-gallery tags
                                                 // (single-node mode only; galleries only)
-    std::vector<std::string> vocabulary_;    // vault-wide tags for autosuggest (Phase 29)
-    std::vector<std::string> suggestions_;   // ranked matches for the typed buffer
-    int                  sugg_sel_ = -1;     // -1 = editing buffer; ≥0 highlights a suggestion
-    int                  selected_ = 0;      // index of the selected tag to delete
-    TextInputModel       new_tag_buf_;       // input buffer for adding a new tag
-    TextFieldChrome      new_tag_chrome_;    // its caret/scroll view state
+    struct SuggestionState {
+        std::vector<std::string> vocabulary;  // Vault-wide tags for autosuggest.
+        std::vector<std::string> matches;     // Ranked matches for the typed buffer.
+        int selected = -1;                    // -1 edits the buffer; >=0 highlights a match.
+        TextInputModel input;
+        TextFieldChrome chrome;
+    };
+    SuggestionState suggestions_;
+    int selected_ = 0;                       // Selected tag to delete.
     std::string          error_;             // transient error message
 };
 

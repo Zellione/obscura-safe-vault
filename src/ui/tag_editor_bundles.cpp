@@ -90,18 +90,18 @@ BundlePreview preview_change(const vault::IndexNode& root, vault::VaultSettings 
 
 void TagEditor::open_bundle_form(bool create)
 {
-    bundle_form_ = true;
-    bundle_confirm_ = false;
-    bundle_delete_ = false;
-    bundle_field_ = 0;
-    bundle_original_name_.clear();
-    bundle_name_.clear();
-    bundle_members_.clear();
+    bundle_.form = true;
+    bundle_.confirm = false;
+    bundle_.deleting = false;
+    bundle_.field = 0;
+    bundle_.original_name.clear();
+    bundle_.name.clear();
+    bundle_.members.clear();
     const auto& bundles = vault::vault_settings(vault_).tag_bundles;
-    if (create || bundle_selected_ >= static_cast<int>(bundles.size())) return;
-    const auto& bundle = bundles[bundle_selected_];
-    bundle_original_name_ = bundle.name.view();
-    bundle_name_.set_text(bundle.name.view());
+    if (create || bundle_.selected >= static_cast<int>(bundles.size())) return;
+    const auto& bundle = bundles[bundle_.selected];
+    bundle_.original_name = bundle.name.view();
+    bundle_.name.set_text(bundle.name.view());
     std::string members;
     for (const auto& tag : bundle.tags) {
         if (!members.empty()) members += ';';
@@ -110,14 +110,14 @@ void TagEditor::open_bundle_form(bool create)
             members += ch;
         }
     }
-    bundle_members_.set_text(members);
+    bundle_.members.set_text(members);
 }
 
 void TagEditor::run_bundle_action(bool remove)
 {
     const auto& bundles = vault::vault_settings(vault_).tag_bundles;
-    if (bundle_selected_ >= static_cast<int>(bundles.size())) return;
-    const std::string name(bundles[bundle_selected_].name.view());
+    if (bundle_.selected >= static_cast<int>(bundles.size())) return;
+    const std::string name(bundles[bundle_.selected].name.view());
     launch([this, name, remove] {
         const auto result = vault::apply_tag_bundle(vault_, node_paths_, name, remove, &progress_);
         refresh_tags();
@@ -130,33 +130,33 @@ void TagEditor::preview_bundle_change()
 {
     error_.clear();
     const auto name =
-        bundle_original_name_.empty() ? std::string(bundle_name_.str()) : bundle_original_name_;
-    const auto members = parse_members(bundle_members_.str());
-    const bool deleting = bundle_delete_;
+        bundle_.original_name.empty() ? std::string(bundle_.name.str()) : bundle_.original_name;
+    const auto members = parse_members(bundle_.members.str());
+    const bool deleting = bundle_.deleting;
     launch([this, name, members, deleting] {
         const auto preview = preview_change(*vault_.resolve_node(""), vault::vault_settings(vault_),
                                             name, members, deleting);
         if (!preview.valid) error_ = "Bundle would exceed the per-node tag limit.";
-        bundle_preview_ = std::format("{}: {} applications, {} tags added, {} removed.",
+        bundle_.preview = std::format("{}: {} applications, {} tags added, {} removed.",
                                       deleting ? "Delete" : "Save", preview.affected, preview.added,
                                       preview.removed);
-        bundle_confirm_ = error_.empty();
+        bundle_.confirm = error_.empty();
     });
 }
 
 void TagEditor::confirm_bundle_change()
 {
-    const std::string name(bundle_name_.str());
-    const auto members = parse_members(bundle_members_.str());
-    const bool deleting = bundle_delete_;
-    const auto original = bundle_original_name_;
-    bundle_confirm_ = false;
-    bundle_form_ = false;
+    const std::string name(bundle_.name.str());
+    const auto members = parse_members(bundle_.members.str());
+    const bool deleting = bundle_.deleting;
+    const auto original = bundle_.original_name;
+    bundle_.confirm = false;
+    bundle_.form = false;
     launch([this, name, members, deleting, original] {
         progress_.done.store(progress_.total.load());
         const auto r = deleting ? vault::delete_tag_bundle(vault_, name)
                                 : vault::save_tag_bundle(vault_, name, members, original);
-        bundle_selected_ = 0;
+        bundle_.selected = 0;
         refresh_tags();
         refresh_vocabulary();
         if (r != vault::VaultResult::Ok) error_ = "Bundle save failed; no changes saved.";
@@ -166,14 +166,14 @@ void TagEditor::confirm_bundle_change()
 bool TagEditor::handle_bundle_form_event(const SDL_Event& e)
 {
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_TAB) {
-        bundle_field_ ^= 1;
+        bundle_.field ^= 1;
         return true;
     }
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F5) {
         preview_bundle_change();
         return true;
     }
-    auto& field = bundle_field_ == 0 ? bundle_name_ : bundle_members_;
+    auto& field = bundle_.field == 0 ? bundle_.name : bundle_.members;
     (void)handle_text_input_event(field, e);
     return true;
 }
@@ -181,32 +181,32 @@ bool TagEditor::handle_bundle_form_event(const SDL_Event& e)
 bool TagEditor::handle_bundle_event(const SDL_Event& e)
 {
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
-        if (bundle_confirm_)
-            bundle_confirm_ = false;
-        else if (bundle_form_)
-            bundle_form_ = false;
+        if (bundle_.confirm)
+            bundle_.confirm = false;
+        else if (bundle_.form)
+            bundle_.form = false;
         else
-            bundle_mode_ = false;
+            bundle_.mode = false;
         return true;
     }
-    if (bundle_confirm_) {
+    if (bundle_.confirm) {
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_RETURN) {
             confirm_bundle_change();
         }
         return true;
     }
-    if (bundle_form_) return handle_bundle_form_event(e);
+    if (bundle_.form) return handle_bundle_form_event(e);
     if (e.type != SDL_EVENT_KEY_DOWN) return true;
     const auto count = static_cast<int>(vault::vault_settings(vault_).tag_bundles.size());
     switch (e.key.key) {
     case SDLK_F3:
-        bundle_mode_ = false;
+        bundle_.mode = false;
         break;
     case SDLK_UP:
-        bundle_selected_ = std::max(0, bundle_selected_ - 1);
+        bundle_.selected = std::max(0, bundle_.selected - 1);
         break;
     case SDLK_DOWN:
-        bundle_selected_ = std::max(0, std::min(count - 1, bundle_selected_ + 1));
+        bundle_.selected = std::max(0, std::min(count - 1, bundle_.selected + 1));
         break;
     case SDLK_RETURN:
         run_bundle_action(false);
@@ -223,7 +223,7 @@ bool TagEditor::handle_bundle_event(const SDL_Event& e)
     case SDLK_F6:
         if (count) {
             open_bundle_form(false);
-            bundle_delete_ = true;
+            bundle_.deleting = true;
             preview_bundle_change();
         }
         break;
@@ -246,8 +246,8 @@ void TagEditor::render_bundles(gfx::Renderer& r, gfx::FontAtlas& font, float W, 
     const auto line = [&](float row, std::string_view text) {
         r.draw_text(font, x + 16, y + 16 + row * pitch, fit_text(font, text, width - 32), TEXT);
     };
-    line(0, bundle_form_ ? "Bundle administration" : "Meta-tag bundles");
-    if (bundle_form_) {
+    line(0, bundle_.form ? "Bundle administration" : "Meta-tag bundles");
+    if (bundle_.form) {
         line(1, "Bundle name");
         const auto field = [&](float row, const TextInputModel& model, TextFieldChrome& chrome,
                                bool focus) {
@@ -255,11 +255,11 @@ void TagEditor::render_bundles(gfx::Renderer& r, gfx::FontAtlas& font, float W, 
             r.draw_round_rect(box, RADIUS_SMALL, focus ? SURFACE_HI : SURFACE);
             draw_inline_edit_text(r, font, box.x + 4, box.y + 4, box.w - 8, model, chrome);
         };
-        field(2, bundle_name_, bundle_name_chrome_, bundle_field_ == 0);
+        field(2, bundle_.name, bundle_.name_chrome, bundle_.field == 0);
         line(4, "Members separated by ; (escape ; or \\ with \\). Ordinary tags only.");
-        field(5, bundle_members_, bundle_members_chrome_, bundle_field_ == 1);
-        if (bundle_confirm_) {
-            line(7, bundle_preview_);
+        field(5, bundle_.members, bundle_.members_chrome, bundle_.field == 1);
+        if (bundle_.confirm) {
+            line(7, bundle_.preview);
             line(8, "Manual assignments and contributions from other bundles survive.");
             line(10, "[Enter] Confirm atomically  [Esc] Cancel");
         } else
@@ -268,10 +268,10 @@ void TagEditor::render_bundles(gfx::Renderer& r, gfx::FontAtlas& font, float W, 
         line(1, "[F8] New  [F4] Edit  [F6] Delete definition  [Up/Down] Select");
         const auto& bundles = vault::vault_settings(vault_).tag_bundles;
         const int rows = std::max(1, static_cast<int>(height / pitch) - 6);
-        const int first = std::max(0, bundle_selected_ - rows + 1);
+        const int first = std::max(0, bundle_.selected - rows + 1);
         for (int i = first; i < static_cast<int>(bundles.size()) && i < first + rows; ++i) {
             line(static_cast<float>(3 + i - first),
-                 std::format("{} {} ({} tags)", i == bundle_selected_ ? ">" : " ",
+                 std::format("{} {} ({} tags)", i == bundle_.selected ? ">" : " ",
                              bundles[i].name.view(), bundles[i].tags.size()));
         }
         line(height / pitch - 3,

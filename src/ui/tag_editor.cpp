@@ -159,9 +159,9 @@ void TagEditor::open(std::string node_path)
 void TagEditor::open_multi(std::vector<std::string> node_paths)
 {
     close();
-    bundle_mode_ = false;
-    bundle_form_ = false;
-    bundle_confirm_ = false;
+    bundle_.mode = false;
+    bundle_.form = false;
+    bundle_.confirm = false;
     active_ = true;
     if (queue_.busy()) {
         error_ = "Wait for imports to finish before editing tags.";
@@ -171,9 +171,9 @@ void TagEditor::open_multi(std::vector<std::string> node_paths)
     owns_exclusive_ = true;
     node_paths_ = std::move(node_paths);
     selected_   = 0;
-    new_tag_buf_.clear();
-    suggestions_.clear();
-    sugg_sel_ = -1;
+    suggestions_.input.clear();
+    suggestions_.matches.clear();
+    suggestions_.selected = -1;
     error_.clear();
     loading_ = true;
     launch([this] {
@@ -198,20 +198,20 @@ void TagEditor::close()
     SDL_StopTextInput(win_.sdl_window());
     node_paths_.clear();
     tag_sources_.clear();
-    bundle_name_.clear();
-    bundle_members_.clear();
-    bundle_original_name_.clear();
-    bundle_preview_.clear();
-    bundle_mode_ = false;
-    bundle_form_ = false;
-    bundle_confirm_ = false;
+    bundle_.name.clear();
+    bundle_.members.clear();
+    bundle_.original_name.clear();
+    bundle_.preview.clear();
+    bundle_.mode = false;
+    bundle_.form = false;
+    bundle_.confirm = false;
     tally_.clear();
     inherited_.clear();
     from_contents_.clear();
-    vocabulary_.clear();
-    suggestions_.clear();
-    sugg_sel_ = -1;
-    new_tag_buf_.clear();
+    suggestions_.vocabulary.clear();
+    suggestions_.matches.clear();
+    suggestions_.selected = -1;
+    suggestions_.input.clear();
     error_.clear();
 }
 
@@ -220,7 +220,7 @@ void TagEditor::refresh_vocabulary()
     // Vault-wide distinct tags (galleries + images) feeding the autosuggest
     // dropdown (Phase 29). Re-fetched after every add/remove so a just-created
     // tag is immediately suggestible on the next node.
-    vocabulary_ = vault::VaultSearch(vault_).all_tags();
+    suggestions_.vocabulary = vault::VaultSearch(vault_).all_tags();
 }
 
 void TagEditor::refresh_suggestions()
@@ -229,8 +229,9 @@ void TagEditor::refresh_suggestions()
     for (const auto& entry : tally_) {
         current_tags.push_back(entry.tag);
     }
-    suggestions_ = editor_tag_suggestions(new_tag_buf_.str(), vocabulary_, current_tags);
-    sugg_sel_    = -1;   // typing always returns focus to the buffer
+    suggestions_.matches =
+        editor_tag_suggestions(suggestions_.input.str(), suggestions_.vocabulary, current_tags);
+    suggestions_.selected = -1;  // typing always returns focus to the buffer
 }
 
 void TagEditor::add_chosen_tag()
@@ -238,21 +239,21 @@ void TagEditor::add_chosen_tag()
     // The typed text wins unless a suggestion is explicitly highlighted
     // (Phase 29). Trim only SURROUNDING whitespace so multi-word tags
     // ("new york") survive; the vault owns normalisation/dedup.
-    const bool from_sugg =
-        sugg_sel_ >= 0 && sugg_sel_ < static_cast<int>(suggestions_.size());
-    const std::string chosen =
-        from_sugg ? suggestions_[sugg_sel_] : trim_surrounding(new_tag_buf_.str());
+    const bool from_sugg = suggestions_.selected >= 0 &&
+                           suggestions_.selected < static_cast<int>(suggestions_.matches.size());
+    const std::string chosen = from_sugg ? suggestions_.matches[suggestions_.selected]
+                                         : trim_surrounding(suggestions_.input.str());
     if (chosen.empty()) { return; }
 
     // Check if this is a brand-new tag of a templated category (Phase 73).
     // Materialize settings once for use in both the detection and template lookup.
     const auto& s = vault::vault_settings(vault_);
     const std::string sheet_category =
-        templated_new_tag_category(chosen, vocabulary_, s);
+        templated_new_tag_category(chosen, suggestions_.vocabulary, s);
 
     pending_tag_ = chosen;
     pending_category_ = sheet_category;
-    new_tag_buf_.clear();
+    suggestions_.input.clear();
     launch([this, chosen] {
         if (vault::mutate_tags_batch(vault_, node_paths_, chosen, false, &progress_) !=
             vault::VaultResult::Ok) {
@@ -271,8 +272,9 @@ void TagEditor::move_cursor(int dir)
 {
     // While the dropdown is showing, Up/Down drive the suggestion highlight
     // (-1 = back to the buffer); otherwise they scroll the node's own tag list.
-    if (!suggestions_.empty()) {
-        sugg_sel_ = move_tag_cursor(sugg_sel_, dir, static_cast<int>(suggestions_.size()));
+    if (!suggestions_.matches.empty()) {
+        suggestions_.selected = move_tag_cursor(suggestions_.selected, dir,
+                                                static_cast<int>(suggestions_.matches.size()));
         return;
     }
     const int next = selected_ + dir;
@@ -391,10 +393,10 @@ bool TagEditor::handle_event(const SDL_Event& e)
         return true;
     }
 
-    if (bundle_mode_) return handle_bundle_event(e);
+    if (bundle_.mode) return handle_bundle_event(e);
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F3) {
-        bundle_mode_ = true;
-        bundle_selected_ = 0;
+        bundle_.mode = true;
+        bundle_.selected = 0;
         return true;
     }
 
@@ -404,10 +406,13 @@ bool TagEditor::handle_event(const SDL_Event& e)
     // field_owns_event keeps the empty-buffer behaviour intact — with nothing
     // typed, Up/Down still walk the current-tags list and Del still removes the
     // selected tag rather than being swallowed as a character delete.
-    if (field_owns_event(new_tag_buf_, e)) {
-        const uint64_t rev = new_tag_buf_.revision();
-        if (handle_text_input_event(new_tag_buf_, e)) {
-            if (new_tag_buf_.revision() != rev) { refresh_suggestions(); error_.clear(); }
+    if (field_owns_event(suggestions_.input, e)) {
+        const uint64_t rev = suggestions_.input.revision();
+        if (handle_text_input_event(suggestions_.input, e)) {
+            if (suggestions_.input.revision() != rev) {
+                refresh_suggestions();
+                error_.clear();
+            }
             return true;
         }
     }
@@ -418,8 +423,8 @@ bool TagEditor::handle_event(const SDL_Event& e)
         case SDLK_ESCAPE:
             // First Esc deselects a highlighted suggestion (back to the typed
             // buffer); only an Esc with nothing highlighted closes the modal.
-            if (sugg_sel_ >= 0) {
-                sugg_sel_ = -1;
+            if (suggestions_.selected >= 0) {
+                suggestions_.selected = -1;
                 return true;
             }
             close();
@@ -485,7 +490,7 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
         return;
     }
 
-    if (bundle_mode_) {
+    if (bundle_.mode) {
         render_bundles(r, font, W, H);
         return;
     }
@@ -522,7 +527,7 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
                       /*filled*/ false);
     draw_inline_edit_text(r, font, input_box.x + 8,
                           font.text_top_for_center(input_box.y + input_box.h * 0.5f),
-                          input_box.w - 16, new_tag_buf_, new_tag_chrome_);
+                          input_box.w - 16, suggestions_.input, suggestions_.chrome);
 
     // Current tags list — scrolls to keep the selected (and newly-added) tag
     // visible. A node can hold far more tags than fit the fixed-height modal, so
@@ -746,20 +751,19 @@ void TagEditor::draw_suggestions_dropdown(gfx::Renderer& r, gfx::FontAtlas& font
     // Drawn last so it overlays the tag list like a combobox. Up/Down move
     // the highlight; Enter adds the highlighted suggestion (or, with none
     // highlighted, exactly the typed text).
-    if (suggestions_.empty()) return;
+    if (suggestions_.matches.empty()) return;
 
     using namespace gfx::theme;
 
     constexpr float SUGG_ROW = 30.0f;
-    const SDL_FRect drop{mx + PAD, input_y + INPUT_BOX_H + 4,
-                         MODAL_W - 2 * PAD,
-                         SUGG_ROW * static_cast<float>(suggestions_.size()) + 8};
+    const SDL_FRect drop{mx + PAD, input_y + INPUT_BOX_H + 4, MODAL_W - 2 * PAD,
+                         SUGG_ROW * static_cast<float>(suggestions_.matches.size()) + 8};
     r.draw_round_rect(drop, RADIUS_SMALL, SURFACE_HI);
     r.draw_round_rect(drop, RADIUS_SMALL, ACCENT, /*filled*/ false);
 
     const auto& cats = vault::vault_settings(vault_).categories;
-    for (int i = 0; i < static_cast<int>(suggestions_.size()); ++i) {
-        const bool  sel   = i == sugg_sel_;
+    for (int i = 0; i < static_cast<int>(suggestions_.matches.size()); ++i) {
+        const bool sel = i == suggestions_.selected;
         const auto row_y = drop.y + 4 + SUGG_ROW * static_cast<float>(i);
         const auto ty    = font.text_top_for_center(row_y + SUGG_ROW * 0.5f);
 
@@ -772,7 +776,8 @@ void TagEditor::draw_suggestions_dropdown(gfx::Renderer& r, gfx::FontAtlas& font
         const auto chip_x = drop.x + 10 + static_cast<float>(font.measure("> "));
         const auto max_w = drop.w - (chip_x - drop.x) - 10;
         const auto chip_row_y = row_y + (SUGG_ROW - CHIP_ROW_H) * 0.5f;
-        draw_tag_chips(r, font, chip_x, chip_row_y, max_w, std::span(&suggestions_[i], 1), cats);
+        draw_tag_chips(r, font, chip_x, chip_row_y, max_w, std::span(&suggestions_.matches[i], 1),
+                       cats);
     }
 }
 

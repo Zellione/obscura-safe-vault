@@ -139,14 +139,14 @@ struct TagEditorTestAccess {
     static bool has_error(const TagEditor& editor) { return !editor.error_.empty(); }
     static void preview_bundle(TagEditor& editor, std::string_view members)
     {
-        editor.bundle_mode_ = true;
+        editor.bundle_.mode = true;
         editor.open_bundle_form(false);
-        editor.bundle_members_.set_text(members);
+        editor.bundle_.members.set_text(members);
         editor.preview_bundle_change();
     }
     static std::string_view bundle_preview(const TagEditor& editor)
     {
-        return editor.bundle_preview_;
+        return editor.bundle_.preview;
     }
 };
 }

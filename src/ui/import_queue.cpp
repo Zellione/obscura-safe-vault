@@ -251,6 +251,7 @@ public:
                                                   std::span<const uint8_t> data,
                                                   std::string_view name) override
     {
+        using enum vault::VaultResult;
         const std::string gallery_path = dest_gallery_.empty()
                                              ? std::string(rel_gallery)
                                              : dest_gallery_ + "/" + std::string(rel_gallery);
@@ -259,19 +260,19 @@ public:
         const platform::PerfScope perf("import.process_image");
         // Stage the image (inline, no pool for archive imports)
         auto staged = vault::stage_image(v_, data, name, nullptr);
-        if (staged.status != vault::VaultResult::Ok)
-            return staged.status;
+        if (staged.status != Ok) return staged.status;
 
         const bool posted = queue_.post_record(
             {gallery_path, std::move(staged.node), task_id_, false, {}}, progress_);
         if (progress_) progress_->phase = vault::OpPhase::Extracting;
-        return posted ? vault::VaultResult::Ok : vault::VaultResult::IoError;
+        return posted ? Ok : IoError;
     }
 
     [[nodiscard]] vault::VaultResult place_video(std::string_view rel_gallery,
                                                   std::span<const uint8_t> data,
                                                   std::string_view name) override
     {
+        using enum vault::VaultResult;
         const std::string gallery_path = dest_gallery_.empty()
                                              ? std::string(rel_gallery)
                                              : dest_gallery_ + "/" + std::string(rel_gallery);
@@ -280,13 +281,12 @@ public:
         const platform::PerfScope perf("import.process_video");
         // Stage the video
         auto staged = vault::stage_video(v_, data, name);
-        if (staged.status != vault::VaultResult::Ok)
-            return staged.status;
+        if (staged.status != Ok) return staged.status;
 
         const bool posted = queue_.post_record(
             {gallery_path, std::move(staged.node), task_id_, false, {}}, progress_);
         if (progress_) progress_->phase = vault::OpPhase::Extracting;
-        return posted ? vault::VaultResult::Ok : vault::VaultResult::IoError;
+        return posted ? Ok : IoError;
     }
 
     [[nodiscard]] bool cancelled() const override
@@ -305,6 +305,23 @@ private:
 // ============================================================================
 // ImportQueue implementation
 // ============================================================================
+
+// Executes a worker-local task; the queue retains synchronization and record ownership.
+class ImportQueue::TaskProcessor {
+public:
+    explicit TaskProcessor(ImportQueue& queue) : queue_(queue) {}
+    void run(Task& task, const std::function<void()>& hook) const;
+
+private:
+    void process_files_task(Task& task) const;
+    void process_archive_task(Task& task) const;
+    void process_volume_set_task(Task& task, StagingSink& sink, const ArchivePassword& pw) const;
+    void process_folder_task(Task& task) const;
+    void place_folder_file(StagingSink& sink, const ZipPlacement& placement, const ZipEntry& entry,
+                           Task& task, size_t index) const;
+
+    ImportQueue& queue_;
+};
 
 ImportQueue::ImportQueue()
     : decode_pool_(std::make_unique<DecodePool>(decode_pool_size()))
@@ -926,18 +943,19 @@ void ImportQueue::mark_task_complete(uint64_t task_id, const Task& result,
 // is terminate). The generic catches are the entire point of this boundary;
 // specific exception types cannot be enumerated for third-party codec/archive
 // code (deliberate S1181/S2738 deviation).
-void ImportQueue::run_worker_task(Task& work_task, const std::function<void()>& hook)
+void ImportQueue::TaskProcessor::run(Task& work_task, const std::function<void()>& hook) const
 {
+    using enum vault::OpPhase;
     try {
         if (hook) hook();
         if (work_task.kind == ImportTaskKind::Files) {
-            work_task.progress->phase = vault::OpPhase::Processing;
+            work_task.progress->phase = Processing;
             process_files_task(work_task);
         } else if (work_task.kind == ImportTaskKind::Folder) {
-            work_task.progress->phase = vault::OpPhase::Discovering;
+            work_task.progress->phase = Discovering;
             process_folder_task(work_task);
         } else {
-            work_task.progress->phase = vault::OpPhase::Extracting;
+            work_task.progress->phase = Extracting;
             process_archive_task(work_task);
         }
     } catch (const std::exception& e) {
@@ -1021,7 +1039,7 @@ void ImportQueue::worker_loop()
             .progress = task_progress,
         };
 
-        run_worker_task(work_task, task_hook);
+        TaskProcessor{*this}.run(work_task, task_hook);
 
         // Update the original task with results (re-acquire lock)
         {
@@ -1039,7 +1057,7 @@ void ImportQueue::worker_loop()
     }
 }
 
-void ImportQueue::process_files_task(Task& task)
+void ImportQueue::TaskProcessor::process_files_task(Task& task) const
 {
     // Lookahead window for resequencing
     struct PendingFile {
@@ -1085,7 +1103,7 @@ void ImportQueue::process_files_task(Task& task)
         if (is_image) {
             auto job = std::make_shared<DecodePool::DecodeJob>();
             job->data = pf.data;  // Copy, don't move
-            decode_pool_->submit(job);
+            queue_.decode_pool_->submit(job);
             pf.decode_job = job;
         }
 
@@ -1117,13 +1135,13 @@ void ImportQueue::process_files_task(Task& task)
 
             // Wait for decode if needed (CV-based, not spin-polling)
             if (pf.decode_job) {
-                decode_pool_->wait_for_completion(pf.decode_job, 5000);  // 5 second timeout
+                queue_.decode_pool_->wait_for_completion(pf.decode_job, 5000);  // 5 second timeout
             }
 
             // Stage the file
             const std::string filename = platform::path_to_utf8(file_path.filename());
             const vault::StagedThumb* thumb = nullptr;
-            if (pf.decode_job && decode_pool_->is_done(pf.decode_job)) {
+            if (pf.decode_job && queue_.decode_pool_->is_done(pf.decode_job)) {
                 thumb = &pf.decode_job->result;
             }
 
@@ -1131,11 +1149,11 @@ void ImportQueue::process_files_task(Task& task)
             // image decoders can identify is an image, everything else goes to
             // video (stage_video's container probe rejects non-video bytes).
             const bool is_img = image::detect_format(pf.data) != image::ImageFormat::Unknown;
-            auto staged = is_img ? vault::stage_image(*v_, pf.data, filename, thumb)
-                                 : vault::stage_video(*v_, pf.data, filename);
+            auto staged = is_img ? vault::stage_image(*queue_.v_, pf.data, filename, thumb)
+                                 : vault::stage_video(*queue_.v_, pf.data, filename);
             if (staged.status == vault::VaultResult::Ok) {
-                (void)post_record({task.dest_gallery, std::move(staged.node),
-                                   task.id, false, {}}, task.progress);
+                (void)queue_.post_record(
+                    {task.dest_gallery, std::move(staged.node), task.id, false, {}}, task.progress);
                 if (task.progress) {
                     task.progress->done.store(static_cast<int>(pf.index) + 1);
                 }
@@ -1199,8 +1217,8 @@ namespace {
 // Assemble a detected multi-volume set and import it as ONE archive. Runs on
 // the worker thread: a split set can be many GB and Phase 50 exists so the
 // vault stays browsable during an import.
-void ImportQueue::process_volume_set_task(Task& task, StagingSink& sink,
-                                         const ArchivePassword& pw) const
+void ImportQueue::TaskProcessor::process_volume_set_task(Task& task, StagingSink& sink,
+                                                         const ArchivePassword& pw) const
 {
     using enum ImportTaskState;
 
@@ -1253,10 +1271,10 @@ void ImportQueue::process_volume_set_task(Task& task, StagingSink& sink,
     task.skipped  = outcome.skipped;
 }
 
-void ImportQueue::process_archive_task(Task& task)
+void ImportQueue::TaskProcessor::process_archive_task(Task& task) const
 {
     using enum ImportTaskState;
-    StagingSink sink(*v_, task.dest_gallery, task.id, *this, task.progress);
+    StagingSink sink(*queue_.v_, task.dest_gallery, task.id, queue_, task.progress);
 
     // Prepare password
     ui::ArchivePassword pw{.password_protected = false, .password = {}};
@@ -1310,10 +1328,10 @@ void ImportQueue::process_archive_task(Task& task)
     task.skipped = outcome.skipped;
 }
 
-void ImportQueue::process_folder_task(Task& task)
+void ImportQueue::TaskProcessor::process_folder_task(Task& task) const
 {
     using enum ImportTaskState;
-    StagingSink sink(*v_, task.dest_gallery, task.id, *this, task.progress);
+    StagingSink sink(*queue_.v_, task.dest_gallery, task.id, queue_, task.progress);
 
     // Scan the folder
     const auto entries = scan_folder(task.archive_path);
@@ -1356,8 +1374,9 @@ void ImportQueue::process_folder_task(Task& task)
     task.skipped += plan.skipped_unsupported;
 }
 
-void ImportQueue::place_folder_file(StagingSink& sink, const ZipPlacement& placement,
-                                    const ZipEntry& entry, Task& task, size_t index) const
+void ImportQueue::TaskProcessor::place_folder_file(StagingSink& sink, const ZipPlacement& placement,
+                                                   const ZipEntry& entry, Task& task,
+                                                   size_t index) const
 {
     const auto mark_done = [&] {
         if (task.progress) {
