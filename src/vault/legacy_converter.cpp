@@ -321,6 +321,9 @@ IndexNode clone_metadata(const IndexNode& source, const v3::Id* root_id = nullpt
     result.type = source.type;
     result.name = source.name;
     result.tags = source.tags;
+    result.tag_provenance = source.tag_provenance;
+    result.explicit_tags = source.explicit_tags;
+    result.tag_bundles = source.tag_bundles;
     result.favorite = source.favorite;
     result.sort_key = source.sort_key;
     result.meta = source.meta;
@@ -596,6 +599,7 @@ const char* settings_difference(const VaultSettings& source,
     if (source.default_sort != destination.default_sort) return "Vault default sort differs";
     if (source.tiles_show_tags != destination.tiles_show_tags)
         return "Vault tiles show tags differs";
+    if (source.tag_bundles != destination.tag_bundles) return "Vault tag bundles differ";
     if (source.categories != destination.categories) return "Vault categories differs";
     if (source.tag_descriptions != destination.tag_descriptions)
         return "Vault tag descriptions differs";

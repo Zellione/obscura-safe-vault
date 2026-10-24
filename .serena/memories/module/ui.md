@@ -28,7 +28,7 @@ Index into the UI module's sub-memories. Covers `src/ui/`: every Screen, image/v
 - Detail panel: right-edge `DetailPanelState` (open/scroll), Phase 48 aggregate view for 2+ selected items, Phase 49 tag chips.
 
 **Background Work:**
-- ImportQueue (Phase 50): one worker jthread + decode pool. Per-file pipeline: read → decode → encrypt → append → stage node. Phase 65 batching fix: snapshot+flush fires once per busy→idle, not every idle frame.
+- ImportQueue (Phase 50): one worker jthread + decode pool. Per-file pipeline: read → decode → encrypt → append → stage node. Bounded drain/backpressure; v3 metadata saves transfer tree ownership to a joined task once per batch, with App progress and screen-access gates.
 - FileOpJob: export / delete / move-copy on bg worker. Phase 76 TransferMode threaded through combine.
 - DupScanJob: main-thread snapshot → bg exact+perceptual hash over size-colliding files only, mlock'd SecureBytes wiped immediately.
 - MigrationJob (Phase 65): exclusive vault ownership, coordinator + worker pool, 256 MiB mlock budget.
